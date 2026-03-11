@@ -15,11 +15,13 @@ Extract `apiKey` and `projectUuid`.
 
 ## Hierarchy
 
-    Persona (WHO — the actor of intent)
-      └─ Outcome (WHAT — high-level business capability)
-           └─ Scenario (HOW — specific user/system flow)
+    Persona (WHO -- the actor of intent)
+      └─ Outcome (WHAT -- high-level business capability)
+           └─ Scenario (HOW -- specific user/system flow)
                 └─ Step (sequential stage within a scenario)
                      └─ Action (granular UI interaction or system op)
+
+---
 
 ## Execution Flow
 
@@ -30,57 +32,141 @@ code).
 
 ### 2. Load Existing Graph
 
-- Call `Get_all_personas` → get all existing personas
-- Call `Functional_Graph_Search` with key terms → find nearest
+- Call `Get_all_personas` -> get all existing personas
+- Call `Functional_Graph_Search` with key terms -> find nearest
   outcomes/scenarios
 
 ### 3. Resolve Personas (REUSE FIRST)
 
-Apply persona resolution rules from `func-prompt-rules.md`:
+Apply persona resolution in strict priority order:
 
-- **1st priority:** Named human role (Admin, Fund Manager,
-  Compliance Officer)
-- **2nd priority:** Generic human role (User)
-- **3rd priority:** External System (Webhook, Partner API)
-- **4th priority:** System (Background job, Scheduler)
+1. **Named human role** implied by business domain
+   (e.g., Admin, Fund Manager, Compliance Officer, Media Analyst)
+2. **Generic human role** when domain role cannot be determined
+   -> "User", "Customer", "Visitor"
+3. **External System** -- trigger originates outside the application
+   boundary (webhooks, partner APIs, payment gateways, inbound
+   integrations). Do NOT use for internal subsystems.
+4. **System** -- ONLY if the behavior is fully internal and automated
+   with no human or external system initiating or consuming the
+   outcome. Covers: background jobs, queue workers, schedulers,
+   cron tasks, internal automation pipelines, script-triggered
+   API calls.
 
-**NEVER use:** Developer, Engineer, API, Service, Component, Module,
-Backend, Frontend, Database
+**Resolution rules:**
 
-Reuse an existing Persona if it matches. Create new ONLY if none
-fits.
+- Always check existing Personas FIRST before creating new ones
+- Merge similar roles (e.g., "Admin User" and "Administrator"
+  -> reuse one)
+- If the actor is ambiguous between User and System, ask:
+  "Does a human make a real-time decision that causes this to run?"
+  -> YES -> Use the human Persona
+  -> NO  -> Use "System"
+- If ambiguous between System and External System:
+  "Does the trigger originate outside this application's boundary?"
+  -> YES -> External System
+  -> NO  -> System
+- If the triggering actor is truly ambiguous, default to "User",
+  not "System"
+
+**Forbidden Persona names -- NEVER use:**
+
+- Developer, Engineer, Programmer, Architect
+- API, Service, Component, Module, Worker
+- Backend, Frontend, Database
+- Controller, Handler, Repository
+
+If you find yourself writing one of these, STOP and re-resolve
+using the priority order above.
 
 ### 4. Resolve Outcomes (REUSE FIRST)
+
+Outcomes represent **high-level business capabilities**, not
+technical functions or API endpoints.
 
 - Evaluate existing Outcomes FIRST
 - Prefer broader Outcomes over narrower ones
 - Capture variation as new Scenarios, NOT new Outcomes
 - Create new Outcome ONLY if none can logically contain the intent
+  without becoming misleading
+
+**Good Outcome names:**
+- "Manage Fund Allocations"
+- "Monitor Compliance Status"
+- "Generate Reports"
+- "Manage Code Ontology"
+
+**Bad Outcome names (anti-patterns):**
+- "Handle API Requests" (technical, not business)
+- "Process Database Queries" (implementation detail)
+- "Render Components" (frontend implementation)
+- One Outcome per API endpoint (too granular)
+- Outcome names matching function/class names (too technical)
+- Duplicate Outcomes with slightly different wording
+
+**Outcome quality checks:**
+- Understandable by non-technical stakeholders
+- Stable across implementation and code changes
+- Broad enough to absorb future Scenarios
+- If more than 3-4 new Outcomes appear necessary, re-evaluate
+  for over-segmentation
 
 ### 5. Create Scenarios
 
+A Scenario describes a **specific user or system flow** under an
+Outcome. It should be testable -- you can write acceptance criteria
+for it. It should have a clear start and end.
+
 - Reuse existing Scenario if flow is semantically similar
 - Create new only for genuinely distinct interaction paths
+- If two Scenarios share >70% of their steps, consider merging them
 - Each Scenario must include a brief description
+
+**Good Scenario names:**
+- "Filter Dashboard by Date Range"
+- "Submit Compliance Report"
+- "Import code repository"
+
+**Bad Scenario names:**
+- "Use the System" (too vague)
+- "Do Things with Data" (meaningless)
+
+**For System Persona scenarios**, the description MUST describe the
+internal processing behavior, NOT the UI that triggers it:
+- Good: "System processes embedding generation request, calls
+  Bedrock API, stores vectors, and runs clustering."
+- Bad: "Generate embeddings for code ontology and perform
+  clustering analysis in the background."
 
 ### 6. Create Steps
 
-Steps are the **sequential stages** within a Scenario. They represent
-the major phases a user or system goes through to complete the flow.
+Steps are the **sequential stages** within a Scenario. They
+represent the major phases a user or system goes through to
+complete the flow.
 
 **Step rules:**
 
 - Each Step is a distinct stage in the Scenario's flow
-- Steps are ORDERED — they represent a sequence (step 1, then 2,
-  then 3...)
+- Steps are ORDERED -- they represent a sequence
 - A Step name should be a short verb phrase describing the stage
-  (e.g., "Select Date Range", "View KPI Cards", "Apply Filters")
 - Each Step must include a description explaining what happens
-  during this stage
-- A Scenario typically has 3–8 Steps. If you have more than 10,
-  consider whether some Steps should be merged or the Scenario
-  should be split
 - Steps require a `scenarioId` (the parent Scenario's ID)
+
+**Good Step names:**
+- "Select Date Range"
+- "View KPI Cards"
+- "Apply Filters"
+- "Validate uploaded data"
+
+**Bad Step names:**
+- "Step 1" (not descriptive)
+- "Processing" (too vague)
+- "Misc" (meaningless)
+
+**Quantity guidelines:**
+- A Scenario typically has 3-8 Steps
+- If more than 10, consider splitting the Scenario
+- If fewer than 2, consider merging with another Scenario
 
 **Step data format for `Call_Create_Functional_Node_`:**
 
@@ -100,28 +186,38 @@ the major phases a user or system goes through to complete the flow.
   in the user journey
 - **Frontend Code:** Each major UI state change, page section
   render, or user interaction handler
-- **Backend Code:** Each processing phase (validate → transform →
-  persist → notify)
+- **Backend Code:** Each processing phase
+  (validate -> transform -> persist -> notify)
 
 ### 7. Create Actions
 
 Actions are the **granular UI interactions or system operations**
-within a Step. They represent the atomic things a user clicks, types,
-or sees — or the atomic operations a system performs.
+within a Step. They represent the atomic things a user clicks,
+types, or sees -- or the atomic operations a system performs.
 
 **Action rules:**
 
 - Each Action is a single, atomic interaction or operation
 - Actions are the MOST DETAILED level of the hierarchy
 - An Action name should be specific and concrete
-  (e.g., "Click 'Creer un tableau de bord' button",
-  "Enter start date in date picker",
-  "System validates input against schema")
 - Each Action must include a description with expected behavior
   or result
-- A Step typically has 1–5 Actions. If you have more, consider
-  splitting the parent Step
 - Actions require a `stepId` (the parent Step's ID)
+
+**Good Action names:**
+- "Click 'Submit' button"
+- "Enter email in login field"
+- "System validates JWT token"
+- "Click 'Creer un tableau de bord' button"
+
+**Bad Action names:**
+- "Interact with form" (too vague)
+- "Process data" (not specific)
+- "Handle click" (implementation term)
+
+**Quantity guidelines:**
+- A Step typically has 1-5 Actions
+- If more than 5, consider splitting the parent Step
 
 **Action data format for `Call_Create_Functional_Node_`:**
 
@@ -146,7 +242,7 @@ or sees — or the atomic operations a system performs.
 - **Backend Code:** Each API call, database query, validation
   check, or transformation operation
 
-**Example — full hierarchy for a dashboard filter:**
+**Example -- full hierarchy for a dashboard filter:**
 
     Persona: Media Analyst
       └─ Outcome: Manage Dashboard Configuration
@@ -164,7 +260,7 @@ or sees — or the atomic operations a system performs.
 ### 8. Create Nodes Top-Down
 
 Use `Call_Create_Functional_Node_` in strict order:
-Persona → Outcome → Scenario → Step → Action
+Persona -> Outcome -> Scenario -> Step -> Action
 
 Each call requires the parent ID from the previous level:
 
@@ -178,52 +274,116 @@ creating its children.
 
 Use `Call_Update_Functional_Node_` to refine existing nodes.
 
-### Input-Type Handling
+---
 
-**Figma/Design:**
-Persona = Human user of the UI.
-Outcome = Group by page/feature area.
-Scenario = Each screen/widget/interaction flow.
-Step = Each section or interaction zone on the screen.
-Action = Each button, input, toggle, chart interaction visible.
+## Input-Type Handling
 
-**Document/Requirements:**
-Persona = Actor of intent stated or implied.
-Outcome = Business capability described.
-Scenario = User journeys described.
-Step = Each phase or numbered step in the journey.
-Action = Each specific user action or system response in
-acceptance criteria.
+### Figma/Design
 
-**Frontend Code:**
-Persona = Human user of the UI.
-Outcome = Group by feature/page.
-Scenario = Map components to user flows.
-Step = Each major UI state change or section render.
-Action = Each event handler, form field, or conditional render.
+- Persona = Human user of the UI
+- Outcome = Group by page/feature area
+- Scenario = Each screen/widget/interaction flow
+- Step = Each section or interaction zone on the screen
+- Action = Each button, input, toggle, chart interaction visible
 
-**Backend Code (serves UI):**
-Persona = Human who triggers the API.
-Outcome = Business domain (not endpoint paths).
-Scenario = Infer user-facing flow.
-Step = Each processing phase (validate, transform, persist).
-Action = Each API call, DB query, or validation check.
+### Document/Requirements
 
-**Backend Code (internal):**
-Persona = System or External System.
-Outcome = Processing capability.
-Scenario = Describe processing flow.
-Step = Each processing stage in the pipeline.
-Action = Each atomic operation (parse, compute, store, emit).
+- Persona = Actor of intent stated or implied
+- Outcome = Business capability described
+- Scenario = User journeys described
+- Step = Each phase or numbered step in the journey
+- Action = Each specific user action or system response in
+  acceptance criteria
 
-### NO-OP Rule
+### Frontend Code
 
-If the input only elaborates on existing functionality and introduces
-no new Persona, Outcome, Scenario, Step, or Action, report:
-"No new nodes needed."
+- Persona = Human user of the UI
+- Outcome = Group by feature/page
+- Scenario = Map components to user flows
+- Step = Each major UI state change or section render
+- Action = Each event handler, form field, or conditional render
 
-## Full Generation Rules
+Mapping guide:
+- Components -> Scenarios (each major component maps to a flow)
+- Event handlers -> Actions (onClick, onChange, etc.)
+- Page sections -> Steps (each section is a stage)
+- Routes -> Outcomes (each route group serves a capability)
 
-See `func-prompt-rules.md` in this skill directory for the complete
-Persona/Outcome/Scenario/Step/Action generation rules including code cluster
-handling, technical content handling, and output format.
+### Backend Code (serves UI)
+
+- Persona = Human who triggers the API
+- Outcome = Business domain (not endpoint paths)
+- Scenario = Infer user-facing flow
+- Step = Each processing phase (validate, transform, persist)
+- Action = Each API call, DB query, or validation check
+
+Mapping guide:
+- Controllers/Routes -> Scenarios (each endpoint maps to a flow)
+- Middleware -> Steps (validation, auth, rate limiting)
+- Service methods -> Steps (business logic phases)
+- Database queries -> Actions (atomic data operations)
+
+### Backend Code (internal/automated)
+
+- Persona = System or External System
+- Outcome = Processing capability
+- Scenario = Describe processing flow (not user flow)
+- Step = Each processing stage in the pipeline
+- Action = Each atomic operation (parse, compute, store, emit)
+
+Do NOT invent fictional UI interactions for pure backend code.
+If no human triggers the functionality, use "System" as Persona.
+
+### Technical/Infrastructure Content
+
+When encountering purely technical content (config files, build
+scripts, infrastructure code):
+
+- Do NOT create Personas like "Developer" or "DevOps Engineer"
+- Ask: "What user-facing capability does this support?"
+- If it supports no direct user capability, it may not need
+  functional graph nodes
+- Infrastructure code -> map to the Outcomes it enables, not to
+  its own Outcome
+
+---
+
+## NO-OP Rule
+
+If the input only elaborates on existing functionality and
+introduces no new Persona, Outcome, Scenario, Step, or Action,
+report: "No new nodes needed."
+
+This applies when the input:
+- Only adds detail to existing nodes
+- Contains ONLY API endpoint definitions with no inferable
+  business intent
+- Contains ONLY internal utility/helper functions with no
+  user-facing behavior
+- Contains ONLY data models, schemas, or type definitions
+
+---
+
+## Output Format
+
+When proposing new nodes, present them in this format for user
+approval:
+
+```
+[CREATE/REUSE] Persona: <name> (ID: <id if reusing>)
+  [CREATE/REUSE] Outcome: <name> (ID: <id if reusing>)
+    [CREATE] Scenario: <name>
+      Description: <brief description>
+      [CREATE] Step 1: <name>
+        Description: <what happens>
+        [CREATE] Action: <specific interaction>
+          Description: <expected behavior>
+        [CREATE] Action: <specific interaction>
+          Description: <expected behavior>
+      [CREATE] Step 2: <name>
+        Description: <what happens>
+        ...
+```
+
+Always present the plan to the user for approval before calling
+`Call_Create_Functional_Node_`.
