@@ -7,7 +7,7 @@
     "plugins": [
       {
         "name": "breeze",
-        "source": ".",
+        "source": "./",
         "description": "Breeze AI — functional graph, code graph, design analysis, and requirement tracing skills via MCP",
         "version": "0.1.0",
         "author": {
