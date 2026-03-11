@@ -1,0 +1,1153 @@
+---
+title: "Breeze MCP Plugin — Skill Definitions"
+format: html
+---
+
+# Breeze MCP Plugin Skills
+
+This document defines 7 skills for the Breeze MCP Claude Code plugin.
+Each skill section contains what goes into its `SKILL.md` file.
+
+---
+
+## Plugin Directory Structure
+
+```
+breeze-plugin/
+├── .claude-plugin/
+│   └── plugin.json                          ← Plugin manifest
+├── .mcp.json                                ← MCP server config (breeze-mcp)
+└── skills/
+    ├── init/
+    │   └── SKILL.md                         ← Skill 1: Initialize Breeze
+    ├── search/
+    │   └── SKILL.md                         ← Skill 2: Search Graph
+    ├── update-graph/
+    │   ├── SKILL.md                         ← Skill 3: Update Functional Graph
+    │   └── func-prompt-rules.md             ← Supporting file: generation rules
+    ├── requirements/
+    │   └── SKILL.md                         ← Skill 4: Requirement Analysis
+    ├── design/
+    │   └── SKILL.md                         ← Skill 5: Design Analysis
+    ├── architecture/
+    │   └── SKILL.md                         ← Skill 6: Architecture Analysis
+    └── codegen/
+        └── SKILL.md                         ← Skill 7: Code & Test Generation
+```
+
+### File → Content Mapping
+
+| File | What goes in it |
+|------|-----------------|
+| `.claude-plugin/plugin.json` | Name, version, description, author |
+| `.mcp.json` | breeze-mcp server command + env config |
+| `skills/*/SKILL.md` | Frontmatter (name, description, triggers) + full instruction prompt |
+| `skills/update-graph/func-prompt-rules.md` | Persona/Outcome/Scenario generation rules (referenced by SKILL.md) |
+
+---
+
+## Tool Inventory
+
+### MCP Tools Used by Skills
+
+| Tool | Used By Skill |
+|------|---------------|
+| `Call_List_Project_` | init |
+| `Call_Create_Project_` | init |
+| `Call_Get_Project_Details_` | init |
+| `Functional_Graph_Search` | search, update-graph, requirements, design |
+| `Code_Graph_Search` | search, codegen |
+| `Documents` | requirements, design, architecture |
+| `Get_all_personas` | search, update-graph, requirements |
+| `Get_all_outcomes_for_a_persona_id` | search, update-graph, requirements |
+| `Get_all_scenarios_for_a_outcome_id` | search, update-graph, requirements |
+| `Get_all_steps_actions_for_a_scenario_id` | search, codegen |
+| `Call_Create_Functional_Node_` | update-graph |
+| `Call_Update_Functional_Node_` | update-graph |
+
+### Non-MCP Tools Used
+
+| Tool | Used By |
+|------|---------|
+| `Read` (.breeze.json) | init |
+| `Write` (.breeze.json) | init |
+| `Bash` (npx commands) | init |
+| `AskUserQuestion` | init |
+| `get_design_context` (Figma MCP) | design |
+
+### MCP Tools NOT Needed
+
+| Tool | Reason |
+|------|--------|
+| `Breeze_Workspace_Setup` | Logic embedded in `skills/init/SKILL.md` |
+| `Call_Delete_Project_` | Destructive — manual only |
+| `Call_Update_Project_` | Rarely needed |
+| All `Jira_*` tools | Separate plugin |
+
+---
+
+## Skill 1: Initialize Breeze
+
+> **File:** `skills/init/SKILL.md`
+> **Invoked as:** `/breeze:init`
+
+### SKILL.md Content
+
+````markdown
+---
+name: init
+description: >
+  Initialize or validate the Breeze workspace. Sets up .breeze.json
+  with API key and project UUID, checks ontology readiness, and
+  optionally uploads repo or documents. Use when: first time setup,
+  "init breeze", "setup breeze", or when any Breeze tool fails with
+  authorization errors.
+---
+
+## Prerequisites
+
+Read `.breeze.json` from the project root. If it exists and contains
+both `apiKey` and `projectUuid`, skip to **Step 3 — Ontology Status
+Check**.
+
+## Step 1 — API Key Setup
+
+If `apiKey` is missing from `.breeze.json`:
+
+1. Ask the user to generate an API key at:
+   https://ai.accionbreeze.com/mcp/generate/key
+2. Prompt: "Paste your Breeze API key."
+3. Save the key to `.breeze.json`
+
+Example `.breeze.json` after this step:
+
+    {
+      "apiKey": "<USER_API_KEY>"
+    }
+
+**Security:** Never print API keys in output. Store only in
+`.breeze.json`. Ensure `.breeze.json` is in `.gitignore`.
+
+## Step 2 — Project Linking
+
+If `projectUuid` is missing from `.breeze.json`:
+
+Ask: "Would you like to:
+1. Select an existing project
+2. Create a new project"
+
+**Option 1 — Select existing:**
+
+- Call `Call_List_Project_` with the apiKey
+- Display the project list (name + UUID)
+- User selects one → save `projectUuid` to `.breeze.json`
+
+**Option 2 — Create new:**
+
+- Ask for project name and description (optional)
+- Call `Call_Create_Project_` with name, description, apiKey
+- Save returned `projectUuid` to `.breeze.json`
+
+Confirm: "Project linked successfully."
+
+## Step 3 — Ontology Status Check
+
+Call `Call_Get_Project_Details_` with uuid and apiKey.
+Inspect the response for these status fields:
+
+**Document Ontology:**
+
+- `functionalMetricsGenerated`: none | inprogress | done | error
+- `architectureMetricsGenerated`: none | inprogress | done | error
+
+**Repository Graph:**
+
+- `fileGraphStatus`: started | node_creation | relationship_creation
+  | metadata_addition | active | error
+- Ontology generation requires `fileGraphStatus = active`
+
+**Ontology Status:**
+
+- `funcOntologyStatus`: none | inprogress | done | error
+- `arcOntologyStatus`: none | inprogress | done | error
+
+## Step 4 — Report Status & Recommend Next Steps
+
+Based on the status fields, report ONE of these:
+
+**No artifacts at all:**
+"Your project has no ontology data yet.
+What would you like to upload? 1. Repository  2. Documents  3. Skip"
+
+**fileGraphStatus != active:**
+"Repository indexing in progress. Ontology generation available
+once complete."
+
+**fileGraphStatus = active AND funcOntologyStatus = none:**
+"Repository graph ready. Generate ontology at:
+https://ai.accionbreeze.com/ontology/{projectUuid}/functional"
+
+**Any ontology status = inprogress:**
+"Ontology generation is currently in progress."
+
+**funcOntologyStatus = done:**
+"Ontology is ready for queries."
+
+## Step 5 — Artifact Upload (if user chooses)
+
+**Repository upload:**
+
+    npx github:accionlabs/breeze-code-ontology-generator \
+      repo-to-json-tree \
+      --repo <repo-path> \
+      --out breezeai \
+      --upload \
+      --user-api-key <apiKey> \
+      --uuid <uuid> \
+      --baseurl https://isometric-backend.accionbreeze.com
+
+**Document upload:**
+
+    npx github:accionlabs/breeze-code-ontology-generator \
+      upload-docs \
+      --path <docs-path> \
+      --uuid <uuid> \
+      --user-api-key <apiKey> \
+      --baseurl https://isometric-backend.accionbreeze.com
+
+After upload, report:
+"Upload complete. Artifact indexing has started.
+Next: Generate ontology at
+https://ai.accionbreeze.com/ontology/{projectUuid}/functional"
+````
+
+---
+
+## Skill 2: Search Graph
+
+> **File:** `skills/search/SKILL.md`
+> **Invoked as:** `/breeze:search <query>`
+
+### SKILL.md Content
+
+````markdown
+---
+name: search
+description: >
+  Search the functional graph or code graph to answer questions about
+  the system. Use for: feature discovery, impact analysis, "who
+  handles X", "how does Y work", finding code implementations,
+  cross-cutting queries. Default entry point for any question about
+  the project.
+---
+
+## Guard
+
+Read `.breeze.json`. If missing or incomplete, tell user to run
+`/breeze:init`. Extract `apiKey` and `projectUuid`.
+
+## Decision Logic
+
+Determine which search to perform based on $ARGUMENTS:
+
+**Behavior, features, workflows:**
+→ `Functional_Graph_Search`
+Examples: "how does login work", "what does admin do"
+
+**Who / roles / personas:**
+→ `Get_all_personas` then drill down
+Examples: "who manages invoices", "what roles exist"
+
+**Code structure, implementations:**
+→ `Code_Graph_Search`
+Examples: "find auth middleware", "where is validation"
+
+**Both (feature → code):**
+→ `Functional_Graph_Search` FIRST, then `Code_Graph_Search`
+Examples: "find code for payment processing"
+
+**Raw requirements, formulas:**
+→ `Documents`
+Examples: "NAV tolerance threshold", "acceptance criteria for X"
+
+## Search Priority
+
+1. **Functional_Graph_Search** — always try FIRST for behavior
+   questions
+2. **Hierarchy drill-down** (Get_all_personas → Get_all_outcomes →
+   Get_all_scenarios → Get_all_steps_actions) — for structured
+   traversal of a specific persona or feature
+3. **Code_Graph_Search** — for implementation/code questions
+4. **Documents** — ONLY when functional graph lacks detail (formulas,
+   thresholds, acceptance criteria)
+
+## Output
+
+Present results as a ranked list with:
+
+- Entity type (Persona / Outcome / Scenario / Step / Action / File /
+  Function / Class)
+- Name and description
+- Relevance score
+- Suggested drill-down paths
+````
+
+---
+
+## Skill 3: Update Functional Graph
+
+> **File:** `skills/update-graph/SKILL.md`
+> **Supporting file:** `skills/update-graph/func-prompt-rules.md`
+> **Invoked as:** `/breeze:update-graph`
+
+### SKILL.md Content
+
+````markdown
+---
+name: update-graph
+description: >
+  Create or update nodes in the functional graph
+  (Persona > Outcome > Scenario > Step > Action) from code,
+  documents, or Figma designs. Use when: "update functional graph",
+  "add to graph", "capture this in the functional graph", after
+  analyzing a Figma frame, document, or code cluster.
+---
+
+## Guard
+
+Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
+Extract `apiKey` and `projectUuid`.
+
+## Hierarchy
+
+    Persona (WHO — the actor of intent)
+      └─ Outcome (WHAT — high-level business capability)
+           └─ Scenario (HOW — specific user/system flow)
+                └─ Step (sequential stage within a scenario)
+                     └─ Action (granular UI interaction or system op)
+
+## Execution Flow
+
+### 1. Analyze Input
+
+Identify functional intents from the input (Figma frame, document,
+code).
+
+### 2. Load Existing Graph
+
+- Call `Get_all_personas` → get all existing personas
+- Call `Functional_Graph_Search` with key terms → find nearest
+  outcomes/scenarios
+
+### 3. Resolve Personas (REUSE FIRST)
+
+Apply persona resolution rules from `func-prompt-rules.md`:
+
+- **1st priority:** Named human role (Admin, Fund Manager,
+  Compliance Officer)
+- **2nd priority:** Generic human role (User)
+- **3rd priority:** External System (Webhook, Partner API)
+- **4th priority:** System (Background job, Scheduler)
+
+**NEVER use:** Developer, Engineer, API, Service, Component, Module,
+Backend, Frontend, Database
+
+Reuse an existing Persona if it matches. Create new ONLY if none
+fits.
+
+### 4. Resolve Outcomes (REUSE FIRST)
+
+- Evaluate existing Outcomes FIRST
+- Prefer broader Outcomes over narrower ones
+- Capture variation as new Scenarios, NOT new Outcomes
+- Create new Outcome ONLY if none can logically contain the intent
+
+### 5. Create Scenarios
+
+- Reuse existing Scenario if flow is semantically similar
+- Create new only for genuinely distinct interaction paths
+- Each Scenario must include a brief description
+
+### 6. Create Steps
+
+Steps are the **sequential stages** within a Scenario. They represent
+the major phases a user or system goes through to complete the flow.
+
+**Step rules:**
+
+- Each Step is a distinct stage in the Scenario's flow
+- Steps are ORDERED — they represent a sequence (step 1, then 2,
+  then 3...)
+- A Step name should be a short verb phrase describing the stage
+  (e.g., "Select Date Range", "View KPI Cards", "Apply Filters")
+- Each Step must include a description explaining what happens
+  during this stage
+- A Scenario typically has 3–8 Steps. If you have more than 10,
+  consider whether some Steps should be merged or the Scenario
+  should be split
+- Steps require a `scenarioId` (the parent Scenario's ID)
+
+**Step data format for `Call_Create_Functional_Node_`:**
+
+    label: "Step"
+    data: {
+      "step": "<short verb phrase>",
+      "description": "<what happens during this stage>",
+      "scenarioId": "<parent scenario ID>"
+    }
+
+**How to derive Steps from different inputs:**
+
+- **Figma/Design:** Each distinct section or interaction zone on the
+  screen (e.g., "View Header Navigation", "Configure Date Filters",
+  "Review Chart Widgets")
+- **Document/Requirements:** Each numbered step or phase described
+  in the user journey
+- **Frontend Code:** Each major UI state change, page section
+  render, or user interaction handler
+- **Backend Code:** Each processing phase (validate → transform →
+  persist → notify)
+
+### 7. Create Actions
+
+Actions are the **granular UI interactions or system operations**
+within a Step. They represent the atomic things a user clicks, types,
+or sees — or the atomic operations a system performs.
+
+**Action rules:**
+
+- Each Action is a single, atomic interaction or operation
+- Actions are the MOST DETAILED level of the hierarchy
+- An Action name should be specific and concrete
+  (e.g., "Click 'Creer un tableau de bord' button",
+  "Enter start date in date picker",
+  "System validates input against schema")
+- Each Action must include a description with expected behavior
+  or result
+- A Step typically has 1–5 Actions. If you have more, consider
+  splitting the parent Step
+- Actions require a `stepId` (the parent Step's ID)
+
+**Action data format for `Call_Create_Functional_Node_`:**
+
+    label: "Action"
+    data: {
+      "action": "<specific interaction or operation>",
+      "description": "<expected behavior or result>",
+      "stepId": "<parent step ID>"
+    }
+
+**How to derive Actions from different inputs:**
+
+- **Figma/Design:** Each button, input field, toggle, dropdown,
+  link, or interactive element visible in the design
+  (e.g., "Click download icon on widget", "Toggle 'Titre
+  uniquement' switch", "Hover over pie chart segment to see
+  tooltip")
+- **Document/Requirements:** Each specific user action or system
+  response mentioned in acceptance criteria
+- **Frontend Code:** Each event handler (onClick, onChange,
+  onSubmit), form field, or conditional render
+- **Backend Code:** Each API call, database query, validation
+  check, or transformation operation
+
+**Example — full hierarchy for a dashboard filter:**
+
+    Persona: Media Analyst
+      └─ Outcome: Manage Dashboard Configuration
+           └─ Scenario: Apply Filters and Date Range
+                └─ Step: Configure Date Range
+                     ├─ Action: Click 'Du' date picker input
+                     ├─ Action: Select start date from calendar
+                     ├─ Action: Click 'Au' date picker input
+                     └─ Action: Select end date from calendar
+                └─ Step: Apply Keyword Filter
+                     ├─ Action: Type keyword in 'Filtrer par
+                     │  mot-cles' input
+                     └─ Action: Toggle 'Titre uniquement' switch
+
+### 8. Create Nodes Top-Down
+
+Use `Call_Create_Functional_Node_` in strict order:
+Persona → Outcome → Scenario → Step → Action
+
+Each call requires the parent ID from the previous level:
+
+- Outcome needs `personaId`
+- Scenario needs `outcomeId`
+- Step needs `scenarioId`
+- Action needs `stepId`
+
+Wait for each create call to return the new node's `id` before
+creating its children.
+
+Use `Call_Update_Functional_Node_` to refine existing nodes.
+
+### Input-Type Handling
+
+**Figma/Design:**
+Persona = Human user of the UI.
+Outcome = Group by page/feature area.
+Scenario = Each screen/widget/interaction flow.
+Step = Each section or interaction zone on the screen.
+Action = Each button, input, toggle, chart interaction visible.
+
+**Document/Requirements:**
+Persona = Actor of intent stated or implied.
+Outcome = Business capability described.
+Scenario = User journeys described.
+Step = Each phase or numbered step in the journey.
+Action = Each specific user action or system response in
+acceptance criteria.
+
+**Frontend Code:**
+Persona = Human user of the UI.
+Outcome = Group by feature/page.
+Scenario = Map components to user flows.
+Step = Each major UI state change or section render.
+Action = Each event handler, form field, or conditional render.
+
+**Backend Code (serves UI):**
+Persona = Human who triggers the API.
+Outcome = Business domain (not endpoint paths).
+Scenario = Infer user-facing flow.
+Step = Each processing phase (validate, transform, persist).
+Action = Each API call, DB query, or validation check.
+
+**Backend Code (internal):**
+Persona = System or External System.
+Outcome = Processing capability.
+Scenario = Describe processing flow.
+Step = Each processing stage in the pipeline.
+Action = Each atomic operation (parse, compute, store, emit).
+
+### NO-OP Rule
+
+If the input only elaborates on existing functionality and introduces
+no new Persona, Outcome, Scenario, Step, or Action, report:
+"No new nodes needed."
+
+## Full Generation Rules
+
+See `func-prompt-rules.md` in this skill directory for the complete
+Persona/Outcome/Scenario generation rules including code cluster
+handling, technical content handling, and output format.
+````
+
+### func-prompt-rules.md Content
+
+> **File:** `skills/update-graph/func-prompt-rules.md`
+>
+> This file contains the full content of `func_prompt.txt` — the
+> complete generation rules for Persona identification, Outcome
+> resolution, Scenario rules, code cluster handling, and technical
+> content handling. It is referenced by `SKILL.md` as a supporting
+> document. Copy the contents of `func_prompt.txt.txt` into this file.
+
+---
+
+## Skill 4: Requirement Analysis
+
+> **File:** `skills/requirements/SKILL.md`
+> **Invoked as:** `/breeze:requirements <requirement text or context>`
+
+### SKILL.md Content
+
+````markdown
+---
+name: requirements
+description: >
+  Analyze requirements by cross-referencing with the functional graph.
+  Identifies coverage gaps, conflicts, dependencies, and impact.
+  Use when: "analyze this requirement", "is this covered", "impact
+  of this change", "break down this user story".
+---
+
+## Guard
+
+Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
+Extract `apiKey` and `projectUuid`.
+
+## Analysis Flow
+
+### 1. Search Existing Coverage
+
+Call `Functional_Graph_Search` with the requirement's key concepts.
+If matches found, drill down:
+Get_all_personas → Get_all_outcomes → Get_all_scenarios.
+
+### 2. Search Source Documents
+
+Call `Documents` to find related raw requirement text, acceptance
+criteria, formulas, and threshold values.
+
+### 3. Identify Gaps
+
+Compare the requirement against existing graph coverage:
+
+- What personas/outcomes/scenarios already cover this?
+- What is NOT yet captured?
+
+### 4. Assess Impact
+
+Identify existing features affected by this requirement using
+`Functional_Graph_Search` with impact-oriented queries.
+
+### 5. Optionally Update Graph
+
+If gaps found, ask user:
+"Would you like me to create the missing nodes?"
+
+If yes → use `Call_Create_Functional_Node_` following the
+update-graph rules.
+
+## Output Format
+
+Present your analysis using this structure:
+
+**Requirement Analysis: [Title]**
+
+**1. Existing Coverage**
+List matched personas, outcomes, scenarios with IDs.
+
+**2. Gap Analysis**
+List what is NOT covered — missing personas, outcomes, scenarios.
+
+**3. Impact Analysis**
+List existing features affected, cross-cutting concerns.
+
+**4. Dependencies**
+List prerequisites and related requirements.
+
+**5. Recommended Actions**
+List nodes to create or update in the functional graph.
+````
+
+---
+
+## Skill 5: Design Analysis
+
+> **File:** `skills/design/SKILL.md`
+> **Invoked as:** `/breeze:design <Figma URL or description>`
+
+### SKILL.md Content
+
+````markdown
+---
+name: design
+description: >
+  Analyze UI/UX designs from Figma frames. Extracts functional
+  summary, identifies components, maps to functional graph, flags
+  gaps. Use when: user shares a Figma URL, "analyze this design",
+  "what does this screen do", "map Figma to functional graph".
+  Requires Figma MCP server.
+---
+
+## Guard
+
+Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
+Extract `apiKey` and `projectUuid`.
+
+## Analysis Flow
+
+### 1. Fetch Design
+
+If a Figma URL is provided, extract fileKey and nodeId:
+
+- URL format: figma.com/design/:fileKey/:fileName?node-id=:nodeId
+- Convert "-" to ":" in nodeId
+
+Call `get_design_context` (Figma MCP) with fileKey and nodeId.
+Review the screenshot and generated code.
+
+### 2. Extract Functional Summary
+
+From the design, identify:
+
+- Page purpose and context
+- Navigation structure (tabs, sidebar, breadcrumbs)
+- Data displays (charts, tables, KPI cards)
+- User actions (buttons, forms, filters, toggles)
+- Interactive elements (modals, dropdowns, selectors)
+
+### 3. Search Existing Coverage
+
+Call `Functional_Graph_Search` with key terms from the design.
+Call `Get_all_personas` → drill down to check existing mapping.
+
+### 4. Cross-Reference Documents
+
+Call `Documents` to find related requirement text.
+
+### 5. Identify Gaps & Recommend
+
+Compare design components against functional graph coverage.
+Flag functionality in design not captured, and graph items missing
+from design.
+
+### 6. Optionally Update Graph
+
+Ask: "Would you like me to update the functional graph with the
+new findings?"
+
+If yes → use `Call_Create_Functional_Node_` following
+update-graph rules.
+
+## Output Format
+
+Present your analysis using this structure:
+
+**Design Analysis: [Frame Name]**
+
+**1. Functional Summary**
+Page purpose and key interactions.
+
+**2. Component Inventory**
+Table with columns: Component, Type, Functionality.
+
+**3. Functional Graph Mapping**
+Persona (matched or new), Outcomes (list), Scenarios (list).
+
+**4. Gaps**
+In design but not in graph. In graph but not in design.
+
+**5. Recommendations**
+Nodes to create or update.
+````
+
+---
+
+## Skill 6: Architecture Analysis
+
+> **File:** `skills/architecture/SKILL.md`
+> **Invoked as:** `/breeze:architecture <scope or query>`
+
+### SKILL.md Content
+
+````markdown
+---
+name: architecture
+description: >
+  Analyze system architecture using the code graph and documents.
+  Identifies service boundaries, dependencies, tech stack, and
+  patterns. Use when: "how is it architected", "service
+  dependencies", "tech stack for X", planning features across
+  services.
+---
+
+## Guard
+
+Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
+Extract `apiKey` and `projectUuid`.
+
+## Analysis Flow
+
+### 1. Search Code Graph
+
+Call `Code_Graph_Search` with architecture-relevant queries:
+
+- Service/module names from $ARGUMENTS
+- Broad queries like "controllers", "services", "middleware",
+  "routes"
+
+### 2. Search Documents
+
+Call `Documents` for architecture docs, design decisions,
+constraints, ADRs.
+
+### 3. Map to Functional Capabilities
+
+Call `Functional_Graph_Search` to correlate architecture components
+with functional outcomes — understand which code serves which
+business capability.
+
+## Output Format
+
+Present your analysis using this structure:
+
+**Architecture Analysis: [Scope]**
+
+**1. Component Overview**
+Key services/modules, tech stack per component.
+
+**2. Dependency Map**
+Service-to-service, external integrations, shared libraries.
+
+**3. Patterns Identified**
+MVC, microservices, event-driven, data flow, auth approach.
+
+**4. Functional Mapping**
+Which outcomes map to which components, coverage gaps.
+
+**5. Recommendations**
+Risks, concerns, improvements.
+````
+
+---
+
+## Skill 7: Code & Test Generation
+
+> **File:** `skills/codegen/SKILL.md`
+> **Invoked as:** `/breeze:codegen <feature or scenario>`
+
+### SKILL.md Content
+
+````markdown
+---
+name: codegen
+description: >
+  Generate code and test cases informed by the functional graph and
+  code graph. Ensures implementations align with requirements and
+  existing patterns. Use when: "generate code for X", "write tests
+  for Y", "implement this scenario", "scaffold the API for Z".
+  Basic generation guided by functional requirements.
+---
+
+## Guard
+
+Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
+Extract `apiKey` and `projectUuid`.
+
+## Generation Workflow
+
+### 1. UNDERSTAND — Get the functional spec
+
+- Call `Functional_Graph_Search` with the feature/scenario name
+- Call `Get_all_steps_actions_for_a_scenario_id` for matched
+  scenarios
+- This gives you the WHAT: steps, actions, expected user
+  interactions
+
+### 2. DISCOVER — Find existing code patterns
+
+- Call `Code_Graph_Search` with related terms
+- Find existing files, functions, patterns, utilities
+- This gives you the HOW: conventions, imports, patterns to follow
+
+### 3. REFERENCE — Get business rules
+
+- Call `Documents` for formulas, thresholds, validation rules
+- This gives you the CONSTRAINTS: exact rules the code must enforce
+
+### 4. GENERATE — Write code
+
+- Follow existing code patterns found in step 2
+- Align with functional steps from step 1
+- Reuse existing utilities/components from code graph
+- Apply business rules from step 3
+- Add comments referencing functional graph node IDs for
+  traceability
+
+### 5. TEST — Generate test cases from scenarios
+
+Map functional hierarchy to test structure:
+
+    For each Scenario:
+      describe("[Scenario Name]")
+        For each Step:
+          it("[Step Name]")
+            For each Action:
+              → Assert the expected behavior
+
+- One test suite per scenario
+- Test cases map 1:1 to steps
+- Edge cases derived from action descriptions
+- Include both happy path and error scenarios
+````
+
+---
+
+## Skill Dependency Graph
+
+```
+                    ┌─────────────────┐
+                    │  /breeze:init   │  ← prerequisite for all
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │ /breeze:search  │  ← used by all below
+                    └────────┬────────┘
+                             │
+          ┌──────────────────┼──────────────────┐
+          ▼                  ▼                   ▼
+┌──────────────────┐ ┌────────────────┐ ┌──────────────────┐
+│/breeze:update-   │ │/breeze:        │ │/breeze:design    │
+│graph             │ │requirements    │ │                  │
+└──────────────────┘ └────────────────┘ └──────────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │/breeze:         │
+                    │architecture     │
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │/breeze:codegen  │
+                    └─────────────────┘
+```
+
+---
+
+## Configuration
+
+### .breeze.json (project root, gitignored)
+
+```json
+{
+  "apiKey": "<BREEZE_API_KEY>",
+  "projectUuid": "<PROJECT_UUID>"
+}
+```
+
+### Guard Rule (all skills except init)
+
+Every skill MUST start with:
+
+1. Read `.breeze.json`
+2. If missing or incomplete → tell user: "Run `/breeze:init` first."
+3. Extract `apiKey` and `projectUuid` for tool calls
+
+---
+
+## Deployment Strategies
+
+### Key Insight: No Marketplace Needed
+
+A Claude Code plugin is just a **folder with a specific structure**.
+You do NOT need to publish to any marketplace, registry, or store.
+
+The simplest deployment is:
+
+1. Put the plugin folder in a git repo
+2. Team members point Claude Code at it with `--plugin-dir`
+
+That's it. Marketplaces are an optional distribution layer for when
+you want auto-install, versioning, or public distribution. For an
+internal team, they are unnecessary overhead.
+
+---
+
+### Strategy 1: Plugin Inside Your Project Repo (Simplest)
+
+Best for: your team right now. Zero extra infrastructure.
+
+The plugin folder lives directly inside your project repo. Every
+developer who clones the repo already has the plugin.
+
+**Directory layout:**
+
+```
+your-project/
+├── breeze-plugin/               ← plugin lives here
+│   ├── .claude-plugin/
+│   │   └── plugin.json
+│   ├── .mcp.json
+│   └── skills/
+│       └── ...
+├── src/
+├── package.json
+└── .breeze.json                 ← gitignored, per-developer
+```
+
+**How to use:**
+
+    claude --plugin-dir ./breeze-plugin
+
+Or add to your project's CLAUDE.md so devs know:
+
+    ## Breeze Plugin
+    Run: claude --plugin-dir ./breeze-plugin
+    Then: /breeze:init
+
+**Pros:**
+
+- Zero setup — clone repo, run command, done
+- Plugin changes go through the same PR process as code
+- Everyone is always on the same version
+
+**Cons:**
+
+- Plugin dir adds to the project repo size (minimal — it's just
+  markdown files)
+
+---
+
+### Strategy 2: Separate Git Repo (Shared Across Projects)
+
+Best for: when multiple projects need the same plugin.
+
+The plugin lives in its own repo. Team members clone it once and
+point to it.
+
+**Setup:**
+
+1. Create a repo (e.g., `accionlabs/breeze-plugin`)
+2. Push the plugin directory structure to it
+3. Team members clone it alongside their projects
+
+**How to use:**
+
+    git clone git@github.com:accionlabs/breeze-plugin.git
+    claude --plugin-dir ../breeze-plugin
+
+**Or as a git submodule** inside each project:
+
+    git submodule add git@github.com:accionlabs/breeze-plugin.git
+    claude --plugin-dir ./breeze-plugin
+
+**Pros:**
+
+- One plugin, many projects
+- Independent versioning with git tags
+
+**Cons:**
+
+- Extra repo to manage
+- Submodules add minor complexity
+
+---
+
+### Strategy 3: Auto-Load via Project Settings (No Manual Flag)
+
+Best for: removing the need for `--plugin-dir` flag every time.
+
+If you don't want developers to remember the `--plugin-dir` flag,
+you can configure it in project settings.
+
+**Add to your project's `.claude/settings.json`:**
+
+```json
+{
+  "plugins": ["./breeze-plugin"]
+}
+```
+
+Commit this file. Now when any developer runs `claude` in this
+project, the plugin loads automatically. No flag needed.
+
+**Note:** Each developer still runs `/breeze:init` once to create
+their personal `.breeze.json` (API key + project UUID). This file
+is gitignored.
+
+---
+
+### When Would You Need a Marketplace?
+
+You DON'T need a marketplace if:
+
+- Your team uses a shared git repo (strategies 1-3 above)
+- You can tell developers to clone/pull the plugin
+- You control the development environment
+
+You MIGHT want a marketplace if:
+
+- You want to distribute to external users who don't have repo
+  access
+- You want `claude plugin install` one-liner setup
+- You want automatic update notifications
+- You plan to publish publicly on the Anthropic marketplace
+
+**If you decide later to add marketplace distribution**, you can do
+so without changing the plugin itself — just create a
+`marketplace.json` in a separate repo or submit to Anthropic. The
+plugin folder structure is the same either way.
+
+---
+
+## Build Steps (For Your Tech Team)
+
+Follow these steps to build the plugin from this document:
+
+### Step 1 — Scaffold
+
+Create the directory structure:
+
+    mkdir -p breeze-plugin/.claude-plugin
+    mkdir -p breeze-plugin/skills/init
+    mkdir -p breeze-plugin/skills/search
+    mkdir -p breeze-plugin/skills/update-graph
+    mkdir -p breeze-plugin/skills/requirements
+    mkdir -p breeze-plugin/skills/design
+    mkdir -p breeze-plugin/skills/architecture
+    mkdir -p breeze-plugin/skills/codegen
+
+### Step 2 — Create plugin.json
+
+Create `breeze-plugin/.claude-plugin/plugin.json`:
+
+```json
+{
+  "name": "breeze",
+  "version": "0.1.0",
+  "description": "Breeze AI — functional graph, code graph, and design analysis skills",
+  "author": {
+    "name": "Accion Breeze"
+  }
+}
+```
+
+### Step 3 — Create .mcp.json
+
+Create `breeze-plugin/.mcp.json` with your breeze-mcp server
+config. This is the same config you currently have in your
+project-level MCP settings.
+
+### Step 4 — Create SKILL.md Files
+
+For each skill (1 through 7), copy the content from the
+**"SKILL.md Content"** section in this document (the text inside
+the `````markdown` fences) into the corresponding file:
+
+- `skills/init/SKILL.md` ← Skill 1 content
+- `skills/search/SKILL.md` ← Skill 2 content
+- `skills/update-graph/SKILL.md` ← Skill 3 content
+- `skills/requirements/SKILL.md` ← Skill 4 content
+- `skills/design/SKILL.md` ← Skill 5 content
+- `skills/architecture/SKILL.md` ← Skill 6 content
+- `skills/codegen/SKILL.md` ← Skill 7 content
+
+### Step 5 — Create Supporting File
+
+Copy the full contents of `func_prompt.txt.txt` into:
+`skills/update-graph/func-prompt-rules.md`
+
+### Step 6 — Test
+
+    claude --plugin-dir ./breeze-plugin
+
+Try each skill:
+
+    /breeze:init
+    /breeze:search how does dashboard filtering work
+    /breeze:update-graph
+    /breeze:requirements analyze login requirement
+    /breeze:design <figma-url>
+    /breeze:architecture main service dependencies
+    /breeze:codegen implement dashboard filter
+
+### Step 7 — Validate
+
+    claude plugin validate ./breeze-plugin
+
+### Step 8 — Iterate
+
+- If a skill prompt doesn't produce good results, edit the
+  SKILL.md and run `/reload-plugins`
+- No rebuild, no recompile — SKILL.md files are just markdown
+  prompts that Claude reads at invocation time
+
+---
+
+## Versioning
+
+Use semver in `plugin.json`. Update the version when you change
+skill prompts, add skills, or modify the MCP config.
+
+- **Patch** (0.1.1): Fix skill prompt wording, typos
+- **Minor** (0.2.0): Add new skill, add supporting file
+- **Major** (1.0.0): Breaking changes to skill names or directory
+  structure
+
+If using a separate repo, tag releases:
+
+    git tag v0.2.0
+    git push origin v0.2.0
