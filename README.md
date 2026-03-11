@@ -42,7 +42,7 @@ To avoid passing `--plugin-dir` every time, add this to your project's `.claude/
 
 ```json
 {
-  "plugins": ["./breeze-plugin"]
+  "plugins": ["./breeze-claude-plugin"]
 }
 ```
 
@@ -50,15 +50,15 @@ To avoid passing `--plugin-dir` every time, add this to your project's `.claude/
 
 ### Option A: Plugin inside your project repo
 
-Place the `breeze-plugin/` folder in your project repo. Everyone who clones the repo has it.
+Place the `breeze-claude-plugin/` folder in your project repo. Everyone who clones the repo has it.
 
 ### Option B: Separate shared repo
 
 Clone the plugin repo alongside your project:
 
 ```bash
-git clone git@github.com:accionlabs/breeze-plugin.git
-claude --plugin-dir ../breeze-plugin
+git clone git@github.com:accionlabs/breeze-claude-plugin.git
+claude --plugin-dir ../breeze-claude-plugin
 ```
 
 ## Notes
