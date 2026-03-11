@@ -7,7 +7,7 @@ A Claude Code plugin that integrates with the Breeze AI platform for functional 
 ### 1. Run Claude Code with the plugin
 
 ```bash
-claude --plugin-dir ./breeze-claude-plugin
+/plugin marketplace add accionlabs/breezeai-claude-plugin
 ```
 
 ### 2. Initialize Breeze
