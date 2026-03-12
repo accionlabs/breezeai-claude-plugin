@@ -15,6 +15,12 @@ The architectural graph consists of 8 layers under a root `Architectural` node:
 
 ---
 
+### Metadata Priority Rule
+
+When populating component metadata, **prefer the fields defined below for each layer first**. These are the standard metadata fields per layer. Only accept or add extra metadata fields if the user explicitly provides them separately. Do not invent or assume additional fields beyond the layer-specific ones unless the user requests it.
+
+---
+
 ### Data Model Samples
 
 #### 1. Architectural (Root)
@@ -56,8 +62,7 @@ Frontend/client applications.
   "description": "Main web dashboard for users",
   "repository_url": "https://github.com/org/frontend",
   "access_url": "https://app.example.com",
-  "deployment": "Vercel",
-  "scenario": ["user-login", "dashboard-view"]
+  "deployment": "Vercel"
 }
 ```
 
@@ -66,7 +71,6 @@ Frontend/client applications.
 - `name` — Component name
 - `technologies` — Tech stack used
 - `pattern` — Architecture patterns (SPA, SSR, etc.)
-- `scenario` — Linked functional scenarios
 
 ---
 
@@ -90,8 +94,7 @@ API gateway handling routing and authentication.
   "emits_events": true,
   "metrics": ["request_count", "latency_p99"],
   "description": "Central API gateway",
-  "deployment": "Kubernetes",
-  "scenario": ["api-routing"]
+  "deployment": "Kubernetes"
 }
 ```
 
@@ -122,8 +125,7 @@ Backend microservices.
   "metrics": ["request_latency", "error_rate"],
   "description": "Handles user CRUD and authentication",
   "repository_url": "https://github.com/org/user-service",
-  "access_url": "http://user-service:3000",
-  "scenario": ["user-registration", "user-login"]
+  "access_url": "http://user-service:3000"
 }
 ```
 
@@ -283,45 +285,17 @@ Cloud infrastructure and deployment.
 
 ---
 
-### Hierarchy & Relationship Summary
-
-```
-Architectural (1) ──HAS_USER_EXPERIENCE──► UserExperience (many)
-Architectural (1) ──HAS_API_GATEWAY──► ApiGateway (many)
-Architectural (1) ──HAS_SERVICES──► Services (many)
-Architectural (1) ──HAS_AGENTS──► Agents (many)
-Architectural (1) ──HAS_EVENT_QUEUE──► EventQueue (many)
-Architectural (1) ──HAS_DATA_LAKE──► DataLake (many)
-Architectural (1) ──HAS_OBSERVABILITY_MONITORING──► ObservabilityMonitoring (many)
-Architectural (1) ──HAS_INFRASTRUCTURE──► Infrastructure (many)
-```
-
-### Inter-Layer Relationships
-
-```
-UserExperience ──ACCESSES──► ApiGateway
-ApiGateway ──ROUTES_TO──► Services
-ApiGateway ──ROUTES_TO──► Agents
-Services ──PUBLISHES_TO──► EventQueue
-Services ──PERSISTS_TO──► DataLake
-Services ──READS_FROM──► DataLake
-Agents ──ORCHESTRATES──► Services
-Agents ──READS_FROM──► DataLake
-EventQueue ──TRIGGERS──► Services
-EventQueue ──TRIGGERS──► Agents
-EventQueue ──STREAMS_TO──► DataLake
-```
-
----
 
 ### MCP Tools Mapping
 
 | Operation | Tool |
 |-----------|------|
-| Full architecture analysis | `Call_Green_architecture_Ontology` |
-| Search architectural components | `Call_Green_architecture_Ontology` |
+| Full architecture analysis | `Get_All_architecture_Graph` |
+| get architectural components by label | `Get_Architecture_Nodes_By_Label` |
 | Setup project/workspace | `Breeze_Workspace_Setup` |
 | Get project details | `Call_Get_Project_Details_` |
+| Update architectural graph | `Update_Architecture_Node` |
+| Create architectural graph | `Create_Architecture_Node` |
 
 ---
 
