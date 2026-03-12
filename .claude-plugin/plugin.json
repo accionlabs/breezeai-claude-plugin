@@ -5,6 +5,5 @@
   "author": {
     "name": "Accion Breeze"
   },
-  "mcpServers": "./.mcp.json",
-  "hooks": "./hooks/hooks.json"
+  "mcpServers": "./.mcp.json"
 }
