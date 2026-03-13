@@ -350,10 +350,10 @@ Use the markdown generator script:
 
 ```bash
 # Plain mode (no enrichments)
-python3 {SKILL_BASE_DIR}/generate-markdown.py <saved-json-file> functional-spec.md
+python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> functional-spec.md
 
 # Full mode with enrichments
-python3 {SKILL_BASE_DIR}/generate-markdown.py <saved-json-file> functional-spec.md --enrichments enrichments.json
+python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> functional-spec.md --enrichments enrichments.json
 ```
 
 The script:
@@ -391,7 +391,7 @@ When `$ARGUMENTS` contains `--html`:
    a. Run the extraction script to produce a compact outline:
 
    ```bash
-   python3 {SKILL_BASE_DIR}/extract-graph-summary.py <saved-json-file> outline outline.json
+   python3 {SKILL_BASE_DIR}/scripts/extract-graph-summary.py <saved-json-file> outline outline.json
    ```
 
    This produces a ~60-130 KB JSON with persona/outcome/scenario names
@@ -405,7 +405,7 @@ When `$ARGUMENTS` contains `--html`:
    c. For **per-outcome enrichments**, use batch extraction:
 
    ```bash
-   python3 {SKILL_BASE_DIR}/extract-graph-summary.py <saved-json-file> batch outcome-details/
+   python3 {SKILL_BASE_DIR}/scripts/extract-graph-summary.py <saved-json-file> batch outcome-details/
    ```
 
    This produces one JSON file per outcome (~2-10KB each) in
@@ -414,7 +414,7 @@ When `$ARGUMENTS` contains `--html`:
 
    Alternatively, for a single outcome:
    ```bash
-   python3 {SKILL_BASE_DIR}/extract-graph-summary.py <saved-json-file> outcome <outcome-id> outcome-detail.json
+   python3 {SKILL_BASE_DIR}/scripts/extract-graph-summary.py <saved-json-file> outcome <outcome-id> outcome-detail.json
    ```
 
    d. Write the combined `enrichments.json` file:
@@ -477,10 +477,10 @@ When `$ARGUMENTS` contains `--html`:
 
 ```bash
 # Without enrichments (--html only)
-python3 {SKILL_BASE_DIR}/generate-html.py <saved-json-file> functional-spec.html
+python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> functional-spec.html
 
 # With enrichments (--html --full)
-python3 {SKILL_BASE_DIR}/generate-html.py <saved-json-file> functional-spec.html --enrichments enrichments.json
+python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> functional-spec.html --enrichments enrichments.json
 ```
 
 Where `{SKILL_BASE_DIR}` is the base directory of this skill
@@ -552,7 +552,7 @@ When the user gives feedback after document generation:
    the relevant enrichment fields with better synthesis:
 
    ```bash
-   python3 {SKILL_BASE_DIR}/extract-graph-summary.py <saved-json-file> outcome <outcome-id> /tmp/outcome-detail.json
+   python3 {SKILL_BASE_DIR}/scripts/extract-graph-summary.py <saved-json-file> outcome <outcome-id> /tmp/outcome-detail.json
    ```
 
    Read the detail, re-synthesize, update enrichments.json.
@@ -561,10 +561,10 @@ When the user gives feedback after document generation:
 
    ```bash
    # For HTML
-   python3 {SKILL_BASE_DIR}/generate-html.py <saved-json-file> functional-spec.html --enrichments enrichments.json
+   python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> functional-spec.html --enrichments enrichments.json
 
    # For Markdown
-   python3 {SKILL_BASE_DIR}/generate-markdown.py <saved-json-file> functional-spec.md --enrichments enrichments.json
+   python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> functional-spec.md --enrichments enrichments.json
    ```
 
 5. **Tell the user** what was changed and that the document has been
