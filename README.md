@@ -35,6 +35,7 @@ Your credentials are saved to `.breeze.json` in the project root (gitignored).
 | **Design** | `/breeze:design <Figma URL>` | Analyze Figma designs and map to functional graph |
 | **Architecture** | `/breeze:architecture <scope>` | Analyze system architecture from code graph |
 | **Code Gen** | `/breeze:codegen <feature>` | Generate code and tests from functional graph |
+| **Generate Doc** | `/breeze:generate-doc` | Generate functional specification documents |
 
 ## Auto-Loading (No Flag Needed)
 
