@@ -49,14 +49,24 @@ def extract_graph(raw):
 
 def get_citations(node):
     """Extract citation document names from a node."""
+    raw = node.get("citations", [])
+    # Handle citations stored as a JSON string
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return []
     citations = []
-    for c in node.get("citations", []):
-        if isinstance(c, dict):
-            doc_name = c.get("documentName", c.get("name", ""))
-        else:
-            doc_name = str(c)
-        if doc_name and doc_name not in citations:
-            citations.append(doc_name)
+    if isinstance(raw, list):
+        for c in raw:
+            if isinstance(c, dict):
+                doc_name = c.get("documentName", c.get("name", ""))
+            elif isinstance(c, str) and len(c) > 1:
+                doc_name = c
+            else:
+                continue
+            if doc_name and doc_name not in citations:
+                citations.append(doc_name)
     return citations
 
 
