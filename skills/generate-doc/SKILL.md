@@ -28,14 +28,14 @@ Instead, present the user with a guide:
 
 | Option | Command | Description |
 |--------|---------|-------------|
-| **Plain Markdown** | `/breeze:generate-doc` + choose below | Concise tabular spec with scenarios, steps, and actions grouped by persona. Best for: quick reference, sharing in PRs, lightweight documentation. |
+| **Plain Markdown** | `--plain` | Concise tabular spec with scenarios, steps, and actions grouped by persona. Best for: quick reference, sharing in PRs, lightweight documentation. |
 | **Rich Markdown** | `--full` | Everything in plain + AI-synthesized executive summary, business objectives, stakeholders, capabilities, per-outcome business value, business rules, and mermaid diagrams. Best for: stakeholder reviews, proposals, comprehensive documentation. |
 | **Plain HTML** | `--html` | Interactive single-file viewer with sidebar navigation, search, collapsible accordions, light/dark theme. Best for: team browsing, client demos, embedding in wikis. |
 | **Rich HTML** | `--html --full` | Everything in plain HTML + all AI enrichments rendered visually — stakeholder cards, capability accordions, mermaid diagrams, persona descriptions. Best for: client deliverables, executive presentations, full specification review. |
 
 **Scope options** (append to any command above):
 - Full project (default): all personas and outcomes
-- Single persona: `/breeze:generate-doc --full "Financial Institution User"`
+- Single persona: `/breeze:generate-doc --plain "Financial Institution User"`
 - Single outcome: `/breeze:generate-doc --html --full "Manage Integrations"`
 
 **Export to other formats** (after generating markdown):
@@ -64,20 +64,34 @@ When `$ARGUMENTS` contains `--export docx` or `--export pdf`:
    "pandoc is required for export. Install it with:
    `sudo apt install pandoc` (Linux) or `brew install pandoc` (Mac)"
 
-3. Run the conversion:
+3. Pre-render mermaid diagrams:
+   ```bash
+   python3 {SKILL_BASE_DIR}/scripts/render-mermaid.py functional-spec.md functional-spec-export.md
+   ```
+   - If mermaid blocks exist and rendering succeeds, use `functional-spec-export.md` for conversion
+   - If no mermaid blocks found, use `functional-spec.md` directly
+   - If rendering fails (no chromium/mmdc), warn the user and proceed with `functional-spec.md`
+     ("Mermaid diagrams will appear as code blocks. Install chromium for rendered diagrams.")
+
+4. Run the conversion:
    ```bash
    # For DOCX
-   pandoc functional-spec.md -o functional-spec.docx --from=gfm
+   pandoc <source.md> -o functional-spec.docx --from=gfm
 
    # For PDF (requires a LaTeX engine)
-   pandoc functional-spec.md -o functional-spec.pdf --from=gfm --pdf-engine=xelatex
+   pandoc <source.md> -o functional-spec.pdf --from=gfm --pdf-engine=xelatex
    ```
 
-4. Print: "Exported to functional-spec.docx" (or .pdf)
+5. Clean up temporary files:
+   ```bash
+   rm -rf _mermaid_images/ functional-spec-export.md
+   ```
+
+6. Print: "Exported to functional-spec.docx" (or .pdf)
 
 Note: The `--full` markdown works best for export since it includes
-all the enrichment content. Plain markdown exports work too but will
-be more concise.
+all the enrichment content (including mermaid diagrams rendered as
+images). Plain markdown exports work too but will be more concise.
 
 ### With arguments — resolve scope
 
@@ -173,9 +187,9 @@ following the structure below **exactly**.
 
 ## Output Structure
 
-### Mode 1 — Plain (default)
+### Mode 1 — Plain (`--plain` or default)
 
-Use this mode when `$ARGUMENTS` does NOT contain `--full`.
+Use this mode when `$ARGUMENTS` contains `--plain` or does NOT contain `--full`.
 
 Generate a concise tabular document:
 
