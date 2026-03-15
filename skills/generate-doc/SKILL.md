@@ -29,14 +29,19 @@ Instead, present the user with a guide:
 | Option | Command | Description |
 |--------|---------|-------------|
 | **Plain Markdown** | `--plain` | Functional Requirements Document with numbered sections (FR-001), scenario IDs (SC-01), nested step/action format. Best for: quick reference, sharing in PRs, formal specs. |
-| **Rich Markdown** | `--full` | Everything in plain + AI-synthesized document overview, project context, business objectives, stakeholders, per-outcome business value, optional mermaid diagrams, NFR section, glossary. Best for: stakeholder reviews, client deliverables, comprehensive documentation. |
+| **Rich Markdown** | `--full` | Everything in plain + AI-synthesized document overview, project context, business objectives, stakeholders, per-outcome business value, NFR section, glossary. Best for: stakeholder reviews, client deliverables, comprehensive documentation. |
 | **Plain HTML** | `--html` | Interactive single-file viewer with sidebar navigation, search, collapsible accordions, light/dark theme. Best for: team browsing, client demos, embedding in wikis. |
-| **Rich HTML** | `--html --full` | Everything in plain HTML + all AI enrichments rendered visually — stakeholder cards, mermaid diagrams, persona descriptions. Best for: client deliverables, executive presentations, full specification review. |
+| **Rich HTML** | `--html --full` | Everything in plain HTML + all AI enrichments rendered visually — stakeholder cards, persona descriptions. Best for: client deliverables, executive presentations, full specification review. |
 
-**Scope options** (append to any command above):
-- Full project (default): all personas and outcomes
-- Single persona: `/breeze:generate-doc --plain "Financial Institution User"`
-- Single outcome: `/breeze:generate-doc --html --full "Manage Integrations"`
+**Additional options** (append to any command above):
+- `--mermaid` — Include mermaid workflow diagrams per outcome (requires `--full`)
+- Scope: full project (default), single persona, or single outcome
+
+**Examples:**
+- `/breeze:generate-doc --plain` — plain FRD markdown
+- `/breeze:generate-doc --full --mermaid` — rich FRD with diagrams
+- `/breeze:generate-doc --html --full --mermaid` — rich HTML with diagrams
+- `/breeze:generate-doc --full "Financial Institution User"` — single persona
 
 **Export to other formats** (after generating markdown):
 - Word: `/breeze:generate-doc --export docx`
@@ -53,7 +58,7 @@ Wait for the user to choose before proceeding.
 
 When `$ARGUMENTS` contains `--export docx` or `--export pdf`:
 
-1. Check if `functional-spec.md` exists in the project root.
+1. Check if `{project-name}-functional-spec.md` exists in the project root.
    If not, tell the user to generate the markdown first.
 
 2. Check if `pandoc` is installed:
@@ -66,28 +71,28 @@ When `$ARGUMENTS` contains `--export docx` or `--export pdf`:
 
 3. Pre-render mermaid diagrams:
    ```bash
-   python3 {SKILL_BASE_DIR}/scripts/render-mermaid.py functional-spec.md functional-spec-export.md
+   python3 {SKILL_BASE_DIR}/scripts/render-mermaid.py {project-name}-functional-spec.md {project-name}-functional-spec-export.md
    ```
-   - If mermaid blocks exist and rendering succeeds, use `functional-spec-export.md` for conversion
-   - If no mermaid blocks found, use `functional-spec.md` directly
-   - If rendering fails (no chromium/mmdc), warn the user and proceed with `functional-spec.md`
+   - If mermaid blocks exist and rendering succeeds, use `{project-name}-functional-spec-export.md` for conversion
+   - If no mermaid blocks found, use `{project-name}-functional-spec.md` directly
+   - If rendering fails (no chromium/mmdc), warn the user and proceed with `{project-name}-functional-spec.md`
      ("Mermaid diagrams will appear as code blocks. Install chromium for rendered diagrams.")
 
 4. Run the conversion:
    ```bash
    # For DOCX
-   pandoc <source.md> -o functional-spec.docx --from=gfm
+   pandoc <source.md> -o {project-name}-functional-spec.docx --from=gfm
 
    # For PDF (requires a LaTeX engine)
-   pandoc <source.md> -o functional-spec.pdf --from=gfm --pdf-engine=xelatex
+   pandoc <source.md> -o {project-name}-functional-spec.pdf --from=gfm --pdf-engine=xelatex
    ```
 
 5. Clean up temporary files:
    ```bash
-   rm -rf _mermaid_images/ functional-spec-export.md
+   rm -rf _mermaid_images/ {project-name}-functional-spec-export.md
    ```
 
-6. Print: "Exported to functional-spec.docx" (or .pdf)
+6. Print: "Exported to {project-name}-functional-spec.docx" (or .pdf)
 
 Note: The `--full` markdown works best for export since it includes
 all the enrichment content (including mermaid diagrams rendered as
@@ -292,8 +297,8 @@ sections include business value text.
   Do NOT call any extra tools for this — derive from collected data.
 - Per-outcome Business Value is **synthesized by you** from that
   outcome's scenarios, steps, and actions.
-- Mermaid diagrams are **optional**. Only include when it adds
-  clarity. Skip for straightforward CRUD outcomes.
+- Mermaid diagrams are only included when `--mermaid` flag is
+  passed. Do NOT generate them otherwise.
 
 ---
 
@@ -303,14 +308,17 @@ After generating the document:
 
 ### Markdown output (default)
 
+Use the project name from the graph data for output filenames.
+Lowercase and hyphenate: e.g., "Kinective" → `kinective-functional-spec.md`.
+
 Use the markdown generator script:
 
 ```bash
 # Plain mode (no enrichments)
-python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> functional-spec.md
+python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> {project-name}-functional-spec.md
 
 # Full mode with enrichments
-python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> functional-spec.md --enrichments enrichments.json
+python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> {project-name}-functional-spec.md --enrichments enrichments.json
 ```
 
 The script generates a Functional Requirements Document (FRD) with:
@@ -348,13 +356,13 @@ and available Jinja2 filters (`slugify`, `escape_pipe`, `e`, `url_encode`,
 Print a summary:
 
 ```
-Written to functional-spec.md
+Written to {project-name}-functional-spec.md
 
   {N} personas, {N} outcomes, {N} scenarios, {N} steps, {N} actions
 
 To convert to other formats:
-  docx:  pandoc functional-spec.md -o functional-spec.docx
-  pdf:   pandoc functional-spec.md -o functional-spec.pdf
+  docx:  pandoc {project-name}-functional-spec.md -o {project-name}-functional-spec.docx
+  pdf:   pandoc {project-name}-functional-spec.md -o {project-name}-functional-spec.pdf
   html:  use --html flag instead
 ```
 
@@ -418,7 +426,7 @@ When `$ARGUMENTS` contains `--html`:
      "outcomeEnrichments": {
        "<outcome-id>": {
          "businessValue": "1-2 sentence value statement",
-         "mermaidDiagram": "graph TD\n  A[Persona] -->|action| B[Feature]"
+         "mermaidDiagram": "graph TD\n  A[Persona] -->|action| B[Feature]"  // only if --mermaid
        }
      }
    }
@@ -437,20 +445,21 @@ When `$ARGUMENTS` contains `--html`:
    *Per-outcome (from outcome detail files):*
    Synthesize across ALL scenarios — do not document individually.
    - Business Value: What business problem does this outcome solve?
-   - Mermaid Diagram (**optional**): `graph TD` format. Only include
-     if the outcome has a non-trivial flow worth visualizing.
-     Represent the outcome as a container/subgraph. Show high-level
-     flow and dependencies. 5-10 nodes max. Avoid UI-level or
-     step-level detail. Skip for straightforward CRUD outcomes.
+   - Mermaid Diagram (**only if `--mermaid` flag is present**):
+     `graph TD` format. Represent the outcome as a container/subgraph.
+     Show high-level flow and dependencies. 5-10 nodes max. Avoid
+     UI-level or step-level detail. Skip for straightforward CRUD
+     outcomes. Do NOT generate mermaid diagrams unless the user
+     explicitly passes `--mermaid`.
 
 3. Run the HTML generator script:
 
 ```bash
 # Without enrichments (--html only)
-python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> functional-spec.html
+python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> {project-name}-functional-spec.html
 
 # With enrichments (--html --full)
-python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> functional-spec.html --enrichments enrichments.json
+python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> {project-name}-functional-spec.html --enrichments enrichments.json
 
 # Custom template (requires pip install jinja2)
 python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> output.html --template /path/to/custom.html.j2
@@ -480,7 +489,7 @@ The script:
   - Stats dashboard (personas, outcomes, scenarios, steps, actions)
 - No build step, no dependencies — single HTML file
 
-4. Print: "Written to functional-spec.html — open in any browser."
+4. Print: "Written to {project-name}-functional-spec.html — open in any browser."
 
 ---
 
@@ -532,10 +541,10 @@ When the user gives feedback after document generation:
 
    ```bash
    # For HTML
-   python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> functional-spec.html --enrichments enrichments.json
+   python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> {project-name}-functional-spec.html --enrichments enrichments.json
 
    # For Markdown
-   python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> functional-spec.md --enrichments enrichments.json
+   python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> {project-name}-functional-spec.md --enrichments enrichments.json
    ```
 
 5. **Tell the user** what was changed and that the document has been
