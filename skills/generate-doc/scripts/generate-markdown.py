@@ -9,17 +9,34 @@ Usage:
     # Full mode with AI enrichments
     python3 generate-markdown.py <graph-json-file> <output.md> --enrichments enrichments.json
 
+    # Custom template
+    python3 generate-markdown.py <graph-json-file> <output.md> --template my-template.md.j2
+
 Input:  Saved MCP tool response JSON (nested wrapper format)
         Optional: enrichments.json for AI-synthesized content
+        Optional: custom Jinja2 template file
 Output: Markdown functional specification document
 """
 
 import json
 import sys
+import os
+
+# Try to import the template engine (requires Jinja2)
+try:
+    from template_engine import load_graph, build_context, render_template, count_totals
+    HAS_TEMPLATE_ENGINE = True
+except ImportError:
+    HAS_TEMPLATE_ENGINE = False
+
+# ---------------------------------------------------------------------------
+# Fallback functions (used when Jinja2 is not installed)
+# ---------------------------------------------------------------------------
+
 from datetime import datetime
 
 
-def extract_graph(raw):
+def _extract_graph(raw):
     """Unwrap nested MCP tool response layers."""
     if isinstance(raw, list) and len(raw) > 0:
         inner = raw[0]
@@ -37,10 +54,9 @@ def extract_graph(raw):
     return raw
 
 
-def get_citations(node):
+def _get_citations(node):
     """Extract citation document names from a node."""
     raw = node.get("citations", [])
-    # Handle citations stored as a JSON string
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
@@ -60,17 +76,19 @@ def get_citations(node):
     return citations
 
 
-def slugify(text):
-    """Create a markdown anchor from text."""
+def _slugify(text):
     return text.lower().replace(" ", "-").replace("/", "-")
 
 
-def escape_pipe(text):
-    """Escape pipe characters for markdown tables."""
+def _escape_pipe(text):
     return text.replace("|", "\\|")
 
 
-def generate_plain(personas, project_name):
+def _sort_by_order(items):
+    return sorted(items, key=lambda x: (x.get("order") is None, x.get("order", 0)))
+
+
+def _generate_plain(personas, project_name):
     """Generate plain mode markdown (tabular, no enrichments)."""
     generated = datetime.now().strftime("%B %d, %Y")
     lines = []
@@ -82,7 +100,6 @@ def generate_plain(personas, project_name):
     lines.append("---")
     lines.append("")
 
-    # Table of Contents
     lines.append("## Table of Contents")
     lines.append("")
     for p in personas:
@@ -91,13 +108,12 @@ def generate_plain(personas, project_name):
         lines.append(f"### {persona_name} ({len(outcomes)} outcomes)")
         for o in outcomes:
             outcome_name = o.get("outcome", "Outcome")
-            lines.append(f"- [{outcome_name}](#{slugify(persona_name + '-' + outcome_name)})")
+            lines.append(f"- [{outcome_name}](#{_slugify(persona_name + '-' + outcome_name)})")
         lines.append("")
 
     lines.append("---")
     lines.append("")
 
-    # Per-persona sections
     for p in personas:
         persona_name = p.get("persona", "Unknown")
         outcomes = p.get("outcomes", [])
@@ -107,10 +123,10 @@ def generate_plain(personas, project_name):
 
         for o in outcomes:
             outcome_name = o.get("outcome", "Outcome")
-            citations = get_citations(o)
+            citations = _get_citations(o)
             scenarios = o.get("scenarios", [])
 
-            anchor = slugify(persona_name + "-" + outcome_name)
+            anchor = _slugify(persona_name + "-" + outcome_name)
             lines.append(f'### {outcome_name} {{#{anchor}}}')
             lines.append("")
 
@@ -119,7 +135,6 @@ def generate_plain(personas, project_name):
                 lines.append(f"> **Sources:** {sources}")
                 lines.append("")
 
-            # Workflow table
             lines.append("| # | Scenario | Step | Actions | Source |")
             lines.append("|---|----------|------|---------|--------|")
 
@@ -127,40 +142,36 @@ def generate_plain(personas, project_name):
                 lines.append("| | *(No scenarios defined)* | | | |")
             else:
                 for si, scenario in enumerate(scenarios):
-                    scenario_name = escape_pipe(scenario.get("scenario", "Scenario"))
+                    scenario_name = _escape_pipe(scenario.get("scenario", "Scenario"))
                     steps = scenario.get("steps", [])
                     first_scenario_row = True
 
                     if not steps:
-                        snum = str(si + 1) if first_scenario_row else ""
-                        sname = scenario_name if first_scenario_row else ""
-                        lines.append(f"| {snum} | {sname} | *(No steps defined)* | | |")
+                        lines.append(f"| {si + 1} | {scenario_name} | *(No steps defined)* | | |")
                         continue
 
-                    for sti, step in enumerate(steps):
-                        step_name = escape_pipe(step.get("step", "Step"))
-                        actions = step.get("actions", [])
-                        step_citations = get_citations(step)
+                    for sti, step in enumerate(_sort_by_order(steps)):
+                        step_name = _escape_pipe(step.get("step", "Step"))
+                        actions = _sort_by_order(step.get("actions", []))
+                        step_citations = _get_citations(step)
                         first_step_row = True
 
                         if not actions:
                             snum = str(si + 1) if first_scenario_row else ""
                             sname = scenario_name if first_scenario_row else ""
-                            stname = step_name if first_step_row else ""
                             source = f"`{step_citations[0]}`" if step_citations else ""
-                            lines.append(f"| {snum} | {sname} | {stname} | *(No actions defined)* | {source} |")
+                            lines.append(f"| {snum} | {sname} | {step_name} | *(No actions defined)* | {source} |")
                             first_scenario_row = False
                             continue
 
                         for action in actions:
-                            action_name = escape_pipe(action.get("action", ""))
-                            action_citations = get_citations(action)
+                            action_name = _escape_pipe(action.get("action", ""))
+                            action_citations = _get_citations(action)
 
                             snum = str(si + 1) if first_scenario_row else ""
                             sname = scenario_name if first_scenario_row else ""
                             stname = step_name if first_step_row else ""
 
-                            # Source: deepest citation wins
                             source = ""
                             if action_citations:
                                 source = f"`{action_citations[0]}`"
@@ -180,7 +191,7 @@ def generate_plain(personas, project_name):
     return "\n".join(lines)
 
 
-def generate_full(personas, project_name, enrichments):
+def _generate_full(personas, project_name, enrichments):
     """Generate full mode markdown with AI-synthesized enrichments."""
     generated = datetime.now().strftime("%B %d, %Y")
     lines = []
@@ -192,7 +203,6 @@ def generate_full(personas, project_name, enrichments):
     lines.append("---")
     lines.append("")
 
-    # Executive Summary
     exec_summary = enrichments.get("executiveSummary", "")
     if exec_summary:
         lines.append("## Executive Summary")
@@ -200,7 +210,6 @@ def generate_full(personas, project_name, enrichments):
         lines.append(exec_summary)
         lines.append("")
 
-    # Key Business Objectives
     objectives = enrichments.get("keyBusinessObjectives", [])
     if objectives:
         lines.append("## Key Business Objectives")
@@ -209,7 +218,6 @@ def generate_full(personas, project_name, enrichments):
             lines.append(f"{i + 1}. {obj}")
         lines.append("")
 
-    # Key Stakeholders
     stakeholders = enrichments.get("keyStakeholders", [])
     if stakeholders:
         lines.append("## Key Stakeholders")
@@ -217,12 +225,11 @@ def generate_full(personas, project_name, enrichments):
         lines.append("| Role | Interest |")
         lines.append("|------|----------|")
         for s in stakeholders:
-            role = escape_pipe(s.get("role", ""))
-            interest = escape_pipe(s.get("interest", ""))
+            role = _escape_pipe(s.get("role", ""))
+            interest = _escape_pipe(s.get("interest", ""))
             lines.append(f"| {role} | {interest} |")
         lines.append("")
 
-    # Key Capabilities
     capabilities = enrichments.get("keyCapabilities", [])
     if capabilities:
         lines.append("## Key Capabilities")
@@ -234,7 +241,6 @@ def generate_full(personas, project_name, enrichments):
     lines.append("---")
     lines.append("")
 
-    # Table of Contents
     lines.append("## Table of Contents")
     lines.append("")
     for p in personas:
@@ -243,13 +249,12 @@ def generate_full(personas, project_name, enrichments):
         lines.append(f"### {persona_name} ({len(outcomes)} outcomes)")
         for o in outcomes:
             outcome_name = o.get("outcome", "Outcome")
-            lines.append(f"- [{outcome_name}](#{slugify(persona_name + '-' + outcome_name)})")
+            lines.append(f"- [{outcome_name}](#{_slugify(persona_name + '-' + outcome_name)})")
         lines.append("")
 
     lines.append("---")
     lines.append("")
 
-    # Per-persona sections
     persona_enrichments = enrichments.get("personaEnrichments", {})
     outcome_enrichments = enrichments.get("outcomeEnrichments", {})
 
@@ -260,7 +265,6 @@ def generate_full(personas, project_name, enrichments):
         lines.append(f"## {persona_name}")
         lines.append("")
 
-        # Persona description
         pe = persona_enrichments.get(persona_name, {})
         pdesc = pe.get("description", "")
         if pdesc:
@@ -270,14 +274,13 @@ def generate_full(personas, project_name, enrichments):
         for o in outcomes:
             outcome_name = o.get("outcome", "Outcome")
             outcome_id = o.get("id", "")
-            citations = get_citations(o)
+            citations = _get_citations(o)
             scenarios = o.get("scenarios", [])
 
-            anchor = slugify(persona_name + "-" + outcome_name)
+            anchor = _slugify(persona_name + "-" + outcome_name)
             lines.append(f'### {outcome_name} {{#{anchor}}}')
             lines.append("")
 
-            # Business Value + Sources
             oe = outcome_enrichments.get(outcome_id, {})
             bv = oe.get("businessValue", "")
             if bv:
@@ -292,7 +295,6 @@ def generate_full(personas, project_name, enrichments):
                 lines.append(f"> **Sources:** {sources}")
                 lines.append("")
 
-            # Capabilities
             caps = oe.get("capabilities", [])
             if caps:
                 lines.append(f"<details><summary>Capabilities ({len(caps)})</summary>")
@@ -300,14 +302,13 @@ def generate_full(personas, project_name, enrichments):
                 lines.append("| Capability | Description |")
                 lines.append("|------------|-------------|")
                 for c in caps:
-                    cname = escape_pipe(c.get("capabilityName", ""))
-                    cdesc = escape_pipe(c.get("description", ""))
+                    cname = _escape_pipe(c.get("capabilityName", ""))
+                    cdesc = _escape_pipe(c.get("description", ""))
                     lines.append(f"| {cname} | {cdesc} |")
                 lines.append("")
                 lines.append("</details>")
                 lines.append("")
 
-            # Business Rules
             rules = oe.get("businessRules", [])
             if rules:
                 lines.append(f"<details><summary>Business Rules ({len(rules)})</summary>")
@@ -315,14 +316,13 @@ def generate_full(personas, project_name, enrichments):
                 lines.append("| Rule | Description |")
                 lines.append("|------|-------------|")
                 for r in rules:
-                    rid = escape_pipe(r.get("ruleId", ""))
-                    rdesc = escape_pipe(r.get("description", ""))
+                    rid = _escape_pipe(r.get("ruleId", ""))
+                    rdesc = _escape_pipe(r.get("description", ""))
                     lines.append(f"| {rid} | {rdesc} |")
                 lines.append("")
                 lines.append("</details>")
                 lines.append("")
 
-            # Mermaid diagram
             diagram = oe.get("mermaidDiagram", "")
             if diagram:
                 lines.append("```mermaid")
@@ -330,7 +330,6 @@ def generate_full(personas, project_name, enrichments):
                 lines.append("```")
                 lines.append("")
 
-            # Workflow
             lines.append("#### Workflow")
             lines.append("")
 
@@ -356,10 +355,10 @@ def generate_full(personas, project_name, enrichments):
                     if not steps:
                         lines.append("| | *(No steps defined)* | | |")
                     else:
-                        for sti, step in enumerate(steps):
-                            step_name = escape_pipe(step.get("step", "Step"))
-                            actions = step.get("actions", [])
-                            step_citations = get_citations(step)
+                        for sti, step in enumerate(_sort_by_order(steps)):
+                            step_name = _escape_pipe(step.get("step", "Step"))
+                            actions = _sort_by_order(step.get("actions", []))
+                            step_citations = _get_citations(step)
                             first_step_row = True
 
                             if not actions:
@@ -368,8 +367,8 @@ def generate_full(personas, project_name, enrichments):
                                 continue
 
                             for action in actions:
-                                action_name = escape_pipe(action.get("action", ""))
-                                action_citations = get_citations(action)
+                                action_name = _escape_pipe(action.get("action", ""))
+                                action_citations = _get_citations(action)
 
                                 stnum = str(sti + 1) if first_step_row else ""
                                 stname = step_name if first_step_row else ""
@@ -393,40 +392,80 @@ def generate_full(personas, project_name, enrichments):
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__, file=sys.stderr)
         sys.exit(1)
 
-    graph_file = sys.argv[1]
-    output_file = sys.argv[2]
+    args = sys.argv[1:]
+    graph_file = args[0]
+    output_file = args[1]
 
-    # Parse optional --enrichments flag
+    # Parse optional flags
     enrichments = None
-    if "--enrichments" in sys.argv:
-        idx = sys.argv.index("--enrichments")
-        if idx + 1 < len(sys.argv):
-            with open(sys.argv[idx + 1], "r") as f:
+    custom_template = None
+    i = 2
+    while i < len(args):
+        if args[i] == "--enrichments" and i + 1 < len(args):
+            with open(args[i + 1], "r") as f:
                 enrichments = json.load(f)
+            i += 2
+        elif args[i] == "--template" and i + 1 < len(args):
+            custom_template = args[i + 1]
+            i += 2
+        else:
+            i += 1
 
+    # Template-based rendering (preferred)
+    if HAS_TEMPLATE_ENGINE and (custom_template is not None or True):
+        graph_data = load_graph(graph_file)
+        context = build_context(graph_data, enrichments)
+        totals = context["totals"]
+
+        if custom_template:
+            template_name = custom_template
+        elif enrichments:
+            template_name = "full.md.j2"
+        else:
+            template_name = "plain.md.j2"
+
+        md = render_template(template_name, context)
+        mode_label = f"template: {template_name}"
+        if enrichments and not custom_template:
+            mode_label = "with AI enrichments"
+        elif not custom_template:
+            mode_label = "plain"
+
+        with open(output_file, "w") as f:
+            f.write(md)
+
+        print(f"Written to {output_file} ({mode_label})")
+        print(f"  {totals['personas']} personas, {totals['outcomes']} outcomes, "
+              f"{totals['scenarios']} scenarios, {totals['steps']} steps, {totals['actions']} actions")
+        return
+
+    # Fallback: direct Python rendering (no Jinja2 needed)
     with open(graph_file, "r") as f:
         raw = json.load(f)
 
-    data = extract_graph(raw)
+    data = _extract_graph(raw)
     personas = data.get("personas", [])
     project_name = data.get("project", {}).get("name", "Unknown Project")
 
     if enrichments:
-        md = generate_full(personas, project_name, enrichments)
+        md = _generate_full(personas, project_name, enrichments)
         mode_label = "with AI enrichments"
     else:
-        md = generate_plain(personas, project_name)
+        md = _generate_plain(personas, project_name)
         mode_label = "plain"
 
     with open(output_file, "w") as f:
         f.write(md)
 
-    # Count totals
     total_outcomes = 0
     total_scenarios = 0
     total_steps = 0

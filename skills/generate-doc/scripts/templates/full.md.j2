@@ -1,0 +1,135 @@
+# Functional Specification: {{ project_name }}
+
+**Version:** 1.0 | **Generated:** {{ generated }}
+
+---
+{% if has_enrichments and enrichments %}
+{% if enrichments.executiveSummary %}
+
+## Executive Summary
+
+{{ enrichments.executiveSummary }}
+{% endif %}
+{% if enrichments.keyBusinessObjectives %}
+
+## Key Business Objectives
+{% for objective in enrichments.keyBusinessObjectives %}
+{{ loop.index }}. {{ objective }}
+{% endfor %}
+{% endif %}
+{% if enrichments.keyStakeholders %}
+
+## Key Stakeholders
+
+| Role | Interest |
+|------|----------|
+{% for s in enrichments.keyStakeholders %}
+| {{ s.role | escape_pipe }} | {{ s.interest | escape_pipe }} |
+{% endfor %}
+{% endif %}
+{% if enrichments.keyCapabilities %}
+
+## Key Capabilities
+{% for capability in enrichments.keyCapabilities %}
+- {{ capability }}
+{% endfor %}
+{% endif %}
+
+---
+{% endif %}
+
+## Table of Contents
+{% for persona in personas %}
+
+### {{ persona.persona }} ({{ persona._outcomes | length }} outcomes)
+{% for outcome in persona._outcomes %}
+- [{{ outcome.outcome }}](#{{ (persona.persona ~ '-' ~ outcome.outcome) | slugify }})
+{% endfor %}
+{% endfor %}
+
+---
+{% for persona in personas %}
+
+## {{ persona.persona }}
+{% if persona.enrichment and persona.enrichment.description %}
+
+> {{ persona.enrichment.description }}
+{% endif %}
+{% for outcome in persona._outcomes %}
+
+### {{ outcome.outcome }} {{ '{' }}#{{ (persona.persona ~ '-' ~ outcome.outcome) | slugify }}{{ '}' }}
+{% if outcome.description %}
+
+> {{ outcome.description }}
+{% endif %}
+{% if outcome._enrichment %}
+{% if outcome._enrichment.businessValue or outcome._citations %}
+
+{% if outcome._enrichment.businessValue %}
+> **Business Value:** {{ outcome._enrichment.businessValue }}
+{% if outcome._citations %}
+>
+{% endif %}
+{% endif %}
+{% if outcome._citations %}
+> **Sources:** {% for cite in outcome._citations %}`{{ cite }}`{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endif %}
+{% endif %}
+{% if outcome._enrichment.capabilities %}
+
+<details><summary>Capabilities ({{ outcome._enrichment.capabilities | length }})</summary>
+
+| Capability | Description |
+|------------|-------------|
+{% for cap in outcome._enrichment.capabilities %}
+| {{ cap.capabilityName | escape_pipe }} | {{ cap.description | escape_pipe }} |
+{% endfor %}
+
+</details>
+{% endif %}
+{% if outcome._enrichment.businessRules %}
+
+<details><summary>Business Rules ({{ outcome._enrichment.businessRules | length }})</summary>
+
+| Rule | Description |
+|------|-------------|
+{% for rule in outcome._enrichment.businessRules %}
+| {{ rule.ruleId | escape_pipe }} | {{ rule.description | escape_pipe }} |
+{% endfor %}
+
+</details>
+{% endif %}
+{% if outcome._enrichment.mermaidDiagram %}
+
+```mermaid
+{{ outcome._enrichment.mermaidDiagram }}
+```
+{% endif %}
+{% else %}
+{% if outcome._citations %}
+
+> **Sources:** {% for cite in outcome._citations %}`{{ cite }}`{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endif %}
+{% endif %}
+
+#### Workflow
+{% for scenario in outcome._scenarios %}
+
+##### Scenario: {{ scenario.scenario }}
+{% if scenario.description %}
+
+> {{ scenario.description }}
+{% endif %}
+
+| # | Step | Actions | Source |
+|---|------|---------|--------|
+{% for row in scenario._table_rows %}
+| {{ row.step_num }} | {{ row.step_name }} | {{ row.action_name }} | {{ row.source }} |
+{% endfor %}
+{% endfor %}
+
+---
+{% endfor %}
+{% endfor %}

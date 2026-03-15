@@ -1,0 +1,37 @@
+# Functional Specification: {{ project_name }}
+
+**Generated:** {{ generated }}
+
+---
+
+## Table of Contents
+
+{% for p in personas %}
+### {{ p.persona }} ({{ p._outcomes | length }} outcomes)
+{% for o in p._outcomes %}
+- [{{ o.outcome }}](#{{ (p.persona ~ "-" ~ o.outcome) | slugify }})
+{% endfor %}
+{% endfor %}
+
+---
+
+{% for p in personas %}
+## {{ p.persona }}
+
+{% for o in p._outcomes %}
+### {{ o.outcome }} {{ '{' }}#{{ (p.persona ~ "-" ~ o.outcome) | slugify }}{{ '}' }}
+
+{% if o._citations %}
+> **Sources:** {% for c in o._citations %}`{{ c }}`{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}
+
+| # | Scenario | Step | Actions | Source |
+|---|----------|------|---------|--------|
+{% for row in o._plain_rows %}
+| {{ row.scenario_num }} | {{ row.scenario_name | escape_pipe }} | {{ row.step_name | escape_pipe }} | {{ row.action_name | escape_pipe }} | {{ row.source }} |
+{% endfor %}
+
+---
+
+{% endfor %}
+{% endfor %}

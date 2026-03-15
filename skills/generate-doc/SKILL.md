@@ -121,8 +121,8 @@ This returns the **entire hierarchy** in a single call:
             {
               id, scenario, description, steps: [
                 {
-                  id, step, description, actions: [
-                    { id, action, description }
+                  id, step, description, order, actions: [
+                    { id, action, description, order }
                   ]
                 }
               ]
@@ -378,6 +378,26 @@ The script:
   business value, capabilities, business rules, mermaid diagrams,
   and workflow tables
 - Uses `<details>` tags for collapsible sections in full mode
+- Steps and actions are sorted by their `order` attribute when present
+
+**Custom templates** (requires `pip install jinja2`):
+
+```bash
+python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> output.md --template /path/to/custom.md.j2
+```
+
+Built-in templates are in `{SKILL_BASE_DIR}/scripts/templates/`:
+- `plain.md.j2` — plain markdown
+- `full.md.j2` — rich markdown with enrichments
+- `plain.html.j2` — HTML without enrichments
+- `full.html.j2` — HTML with enrichments
+
+Templates receive a standard context with `personas` (preprocessed with
+`_outcomes`, `_plain_rows`, `_scenarios`, `_sorted_steps`, `_enrichment`
+etc.), `project_name`, `generated`, `totals`, `enrichments`, and
+`has_enrichments`. See `template_engine.py` for the full context schema
+and available Jinja2 filters (`slugify`, `escape_pipe`, `e`, `url_encode`,
+`sort_by_order`, `get_citations`).
 
 Print a summary:
 
@@ -495,6 +515,9 @@ python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> functional-s
 
 # With enrichments (--html --full)
 python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> functional-spec.html --enrichments enrichments.json
+
+# Custom template (requires pip install jinja2)
+python3 {SKILL_BASE_DIR}/scripts/generate-html.py <saved-json-file> output.html --template /path/to/custom.html.j2
 ```
 
 Where `{SKILL_BASE_DIR}` is the base directory of this skill
