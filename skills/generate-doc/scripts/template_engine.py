@@ -281,14 +281,35 @@ def build_full_table_rows(steps, outcome_citations):
     return rows
 
 
+def aggregate_outcome_citations(outcome):
+    """Collect all unique citation document names from an outcome and all its children."""
+    docs = []
+    seen = set()
+
+    def _add(names):
+        for n in names:
+            if n and n not in seen:
+                seen.add(n)
+                docs.append(n)
+
+    _add(get_citations(outcome))
+    for s in outcome.get("scenarios", []):
+        _add(get_citations(s))
+        for st in s.get("steps", []):
+            _add(get_citations(st))
+            for a in st.get("actions", []):
+                _add(get_citations(a))
+    return docs
+
+
 def preprocess_personas(personas, enrichments=None):
     """Preprocess personas with flattened table rows and enrichment data.
 
     Returns a list of persona dicts augmented with:
-    - outcomes[].citations: extracted citation names
-    - outcomes[].table_rows: flattened rows for plain mode
-    - outcomes[].scenarios[].table_rows: flattened rows for full mode
-    - outcomes[].enrichment: per-outcome enrichment data
+    - outcomes[]._citations: aggregated citations (outcome + all children)
+    - outcomes[]._plain_rows: flattened rows for plain mode
+    - outcomes[]._scenarios[]._table_rows: flattened rows for full mode
+    - outcomes[]._enrichment: per-outcome enrichment data
     - persona.enrichment: persona enrichment data
     """
     enrichments = enrichments or {}
@@ -306,7 +327,7 @@ def preprocess_personas(personas, enrichments=None):
         for oi, o in enumerate(p.get("outcomes", [])):
             outcome_data = dict(o)
             outcome_data["_index"] = oi
-            citations = get_citations(o)
+            citations = aggregate_outcome_citations(o)
             outcome_data["_citations"] = citations
             scenarios = o.get("scenarios", [])
 
@@ -428,6 +449,36 @@ def build_context(graph_data, enrichments=None):
     # Preprocess personas with flattened rows and enrichments
     processed_personas = preprocess_personas(personas, enrichments)
 
+    # Collect all unique source documents across the entire graph
+    all_docs = []
+    seen_docs = set()
+    for p in personas:
+        for o in p.get("outcomes", []):
+            for doc in aggregate_outcome_citations(o):
+                if doc and doc not in seen_docs:
+                    seen_docs.add(doc)
+                    all_docs.append(doc)
+    sorted_docs = sorted(all_docs)
+
+    # Build doc_name → number index (1-based)
+    doc_index = {name: i + 1 for i, name in enumerate(sorted_docs)}
+
+    SUPERSCRIPT_DIGITS = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+
+    def cite_refs(node):
+        """Return tiny superscript linked references for a node's own citations."""
+        cites = get_citations(node)
+        if not cites:
+            return ""
+        nums = sorted(set(doc_index[c] for c in cites if c in doc_index))
+        if not nums:
+            return ""
+        refs = "˙".join(
+            f'<a href="#src-{n}" style="text-decoration:none;color:#6366f1;font-size:0.65em;vertical-align:super;">{str(n).translate(SUPERSCRIPT_DIGITS)}</a>'
+            for n in nums
+        )
+        return f" {refs}"
+
     return {
         "personas": processed_personas,
         "project": project,
@@ -436,4 +487,7 @@ def build_context(graph_data, enrichments=None):
         "totals": totals,
         "enrichments": enrichments or {},
         "has_enrichments": bool(enrichments),
+        "source_documents": sorted_docs,
+        "doc_index": doc_index,
+        "cite_refs": cite_refs,
     }

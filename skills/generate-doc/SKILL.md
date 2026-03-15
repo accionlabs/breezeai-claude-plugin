@@ -28,10 +28,10 @@ Instead, present the user with a guide:
 
 | Option | Command | Description |
 |--------|---------|-------------|
-| **Plain Markdown** | `--plain` | Concise tabular spec with scenarios, steps, and actions grouped by persona. Best for: quick reference, sharing in PRs, lightweight documentation. |
-| **Rich Markdown** | `--full` | Everything in plain + AI-synthesized executive summary, business objectives, stakeholders, capabilities, per-outcome business value, business rules, and mermaid diagrams. Best for: stakeholder reviews, proposals, comprehensive documentation. |
+| **Plain Markdown** | `--plain` | Functional Requirements Document with numbered sections (FR-001), scenario IDs (SC-01), nested step/action format. Best for: quick reference, sharing in PRs, formal specs. |
+| **Rich Markdown** | `--full` | Everything in plain + AI-synthesized document overview, project context, business objectives, stakeholders, per-outcome business value, optional mermaid diagrams, NFR section, glossary. Best for: stakeholder reviews, client deliverables, comprehensive documentation. |
 | **Plain HTML** | `--html` | Interactive single-file viewer with sidebar navigation, search, collapsible accordions, light/dark theme. Best for: team browsing, client demos, embedding in wikis. |
-| **Rich HTML** | `--html --full` | Everything in plain HTML + all AI enrichments rendered visually — stakeholder cards, capability accordions, mermaid diagrams, persona descriptions. Best for: client deliverables, executive presentations, full specification review. |
+| **Rich HTML** | `--html --full` | Everything in plain HTML + all AI enrichments rendered visually — stakeholder cards, mermaid diagrams, persona descriptions. Best for: client deliverables, executive presentations, full specification review. |
 
 **Scope options** (append to any command above):
 - Full project (default): all personas and outcomes
@@ -189,49 +189,65 @@ following the structure below **exactly**.
 
 ### Mode 1 — Plain (`--plain` or default)
 
-Use this mode when `$ARGUMENTS` contains `--plain` or does NOT contain `--full`.
+Use this mode when `$ARGUMENTS` does NOT contain `--full`.
 
-Generate a concise tabular document:
+Generates a Functional Requirements Document (FRD) with nested structure:
 
 ```
-# Functional Specification: {Project Name}
+# {Project Name}
 
-**Generated:** {current date}
+## Functional Requirements Document
+
+| | |
+|---|---|
+| **Version** | 1.0 |
+| **Date** | {current date} |
+| **Source** | Breeze.AI Functional Graph — {N} personas, {N} outcomes, ... |
 
 ---
 
 ## Table of Contents
 
-### {Persona Name} ({N} outcomes)
-- [Outcome Name](#anchor)
-- ...
+1. [Persona Summary](#persona-summary)
+2. [FR-001 — {Persona Name}](#fr-001--{persona-slug})
+   - 2.1 [{Outcome Name}](#anchor)
 
 ---
 
-## {Persona Name}
+## 1. Persona Summary
 
-### {Outcome Name}
+| ID | Persona | Outcomes | Description |
+|----|---------|----------|-------------|
+| FR-001 | {Persona Name} | {N} | |
+
+---
+
+## 2. FR-001 — {Persona Name}
+
+### 2.1 {Outcome Name}
 
 > **Sources:** `{document1.pdf}`, `{document2.pdf}`
 
-| # | Scenario | Step | Actions | Source |
-|---|----------|------|---------|--------|
-| 1 | {Scenario Name} | {Step Name} | {Action 1} | `{doc.pdf}` |
-| | | | {Action 2} | |
-| | | {Step 2 Name} | {Action 1} | `{doc.pdf}` |
-| 2 | {Scenario 2} | {Step Name} | {Action 1} | `{doc.pdf}` |
+- **SC-01 {Scenario Name}** — {description}
+    - **Step 1: {Step Name}**
+        - → {Action 1}
+        - → {Action 2}
+    - **Step 2: {Step Name}**
+        - → {Action 1}
+- **SC-02 {Scenario 2}**
+    - **Step 1: {Step Name}**
+        - → {Action 1}
 
 ---
 ```
 
-**Table rules:**
-- Scenario number only on the first row of each scenario
-- Step name only on the first row of each step
-- Each action gets its own row
-- Source column shows the citation document name (from the deepest
-  level that has a citation — action > step > scenario > outcome)
-- If no actions exist for a step, show the step with "(No actions defined)"
-- If no steps exist for a scenario, show the scenario with "(No steps defined)"
+**Format rules:**
+- Personas are numbered as FR-001, FR-002, etc.
+- Outcomes are numbered under their persona (2.1, 2.2, etc.)
+- Scenarios are prefixed with SC-01, SC-02, etc.
+- Steps and actions are nested list items under their scenario
+- Steps and actions are sorted by their `order` attribute when present
+- Citations appear as Sources at the outcome level
 
 ---
 
@@ -239,118 +255,45 @@ Generate a concise tabular document:
 
 Use this mode when `$ARGUMENTS` contains `--full`.
 
-Generate a rich document with AI-synthesized summaries. This mirrors
-the structure of the HTML functional specification viewer.
+Generates the same FRD structure as plain mode, plus AI-synthesized
+enrichment sections:
 
 ```
-# Functional Specification: {Project Name}
+## 1. Document Overview
 
-**Version:** 1.0 | **Generated:** {current date}
+{Executive summary synthesized from all personas, outcomes, scenarios}
 
----
+| | |
+|---|---|
+| **Personas** | {N} |
+| **Outcomes** | {N} |
+...
 
-## Executive Summary
+## 2. Project Context
 
-{Write a 2-3 paragraph executive summary synthesized from all the
-personas, outcomes, and scenarios in the graph. Describe what the
-application does, who uses it, and its key capabilities.}
-
-## Key Business Objectives
-
-{Synthesize 4-6 high-level business objectives from the outcomes.}
-
+### Key Business Objectives
 1. {Objective}
-2. {Objective}
 
-## Key Stakeholders
+### Key Stakeholders
+| Role | Interest |
+|------|----------|
+| {Persona name} | {What they care about} |
 
-| Role | Interest | Personas |
-|------|----------|----------|
-| {Stakeholder role} | {What they care about} | {Persona names} |
-
-## Key Capabilities
-
-{Synthesize 5-8 key capabilities from across all outcomes.}
-
+### Key Capabilities
 - {Capability}
-- {Capability}
-
----
-
-## Table of Contents
-
-### {Persona Name} ({N} outcomes)
-- [Outcome Name](#anchor)
-- ...
-
----
-
-## {Persona Name}
-
-### {Outcome Name}
-
-> **Business Value:** {Synthesize a 1-2 sentence business value
-> statement from the outcome's scenarios and actions.}
->
-> **Sources:** `{document1.pdf}`, `{document2.pdf}`
-
-<details><summary>Capabilities ({N})</summary>
-
-{Synthesize capabilities from the scenarios and steps under this outcome.}
-
-| Capability | Description |
-|------------|-------------|
-| {Name} | {Description} |
-
-</details>
-
-<details><summary>Inputs / Outputs</summary>
-
-{Infer inputs and outputs from the steps and actions.}
-
-**Inputs:** {list}
-**Outputs:** {list}
-
-</details>
-
-<details><summary>Business Rules ({N})</summary>
-
-{Infer business rules from the actions and steps — constraints,
-validations, conditions mentioned.}
-
-| Rule | Description |
-|------|-------------|
-| BR-{N} | {Description} |
-
-</details>
-
-#### Workflow
-
-##### Scenario: {Scenario Name}
-
-> {Scenario description}
-
-| # | Step | Actions | Source |
-|---|------|---------|--------|
-| 1 | {Step Name} | {Action 1} | `{doc.pdf}` |
-| | | {Action 2} | |
-| 2 | {Step 2 Name} | {Action 1} | `{doc.pdf}` |
-
----
 ```
+
+The persona summary table includes descriptions, and per-outcome
+sections include business value text.
 
 **Full mode rules:**
 - Executive Summary, Business Objectives, Key Capabilities, and
   Key Stakeholders are **synthesized by you** from the graph data.
   Do NOT call any extra tools for this — derive from collected data.
-- Per-outcome Business Value, Capabilities, Inputs/Outputs, and
-  Business Rules are **synthesized by you** from that outcome's
-  scenarios, steps, and actions.
-- Use `<details>` tags for collapsible sections (Capabilities,
-  Inputs/Outputs, Business Rules).
-- Workflow tables follow the same rules as Plain mode.
-- If an outcome has a Mermaid-compatible flow, include a
-  ```mermaid block after the workflow tables.
+- Per-outcome Business Value is **synthesized by you** from that
+  outcome's scenarios, steps, and actions.
+- Mermaid diagrams are **optional**. Only include when it adds
+  clarity. Skip for straightforward CRUD outcomes.
 
 ---
 
@@ -370,15 +313,18 @@ python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> function
 python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> functional-spec.md --enrichments enrichments.json
 ```
 
-The script:
-- Reads the MCP tool JSON output (handles the nested wrapper format)
-- Plain mode: concise tabular document (scenario/step/action tables)
-- Full mode: rich document with executive summary, objectives,
-  stakeholders, capabilities, persona descriptions, per-outcome
-  business value, capabilities, business rules, mermaid diagrams,
-  and workflow tables
-- Uses `<details>` tags for collapsible sections in full mode
-- Steps and actions are sorted by their `order` attribute when present
+The script generates a Functional Requirements Document (FRD) with:
+- Numbered sections per persona (FR-001, FR-002, etc.)
+- Numbered outcomes (4.1, 4.2, etc.)
+- Scenario IDs (SC-01, SC-02, etc.)
+- Nested step/action format with indentation
+- Steps and actions sorted by their `order` attribute when present
+- Source citations preserved at the outcome level
+- Plain mode: scenarios, steps, actions grouped by persona
+- Full mode (with `--enrichments`): adds document overview, project
+  context, business objectives, stakeholders, persona descriptions,
+  per-outcome business value, optional mermaid diagrams, NFR and
+  glossary sections
 
 **Custom templates** (requires `pip install jinja2`):
 
@@ -387,14 +333,14 @@ python3 {SKILL_BASE_DIR}/scripts/generate-markdown.py <saved-json-file> output.m
 ```
 
 Built-in templates are in `{SKILL_BASE_DIR}/scripts/templates/`:
-- `plain.md.j2` — plain markdown
-- `full.md.j2` — rich markdown with enrichments
+- `frd-plain.md.j2` — FRD markdown (default, no enrichments)
+- `frd-full.md.j2` — FRD with enrichments (overview, context, NFR, glossary)
 - `plain.html.j2` — HTML without enrichments
 - `full.html.j2` — HTML with enrichments
 
 Templates receive a standard context with `personas` (preprocessed with
-`_outcomes`, `_plain_rows`, `_scenarios`, `_sorted_steps`, `_enrichment`
-etc.), `project_name`, `generated`, `totals`, `enrichments`, and
+`_outcomes`, `_scenarios`, `_sorted_steps`, `_enrichment` etc.),
+`project_name`, `generated`, `totals`, `enrichments`, and
 `has_enrichments`. See `template_engine.py` for the full context schema
 and available Jinja2 filters (`slugify`, `escape_pipe`, `e`, `url_encode`,
 `sort_by_order`, `get_citations`).
@@ -472,12 +418,6 @@ When `$ARGUMENTS` contains `--html`:
      "outcomeEnrichments": {
        "<outcome-id>": {
          "businessValue": "1-2 sentence value statement",
-         "capabilities": [
-           { "capabilityName": "Name", "description": "Description" }
-         ],
-         "businessRules": [
-           { "ruleId": "BR-001", "description": "Rule description" }
-         ],
          "mermaidDiagram": "graph TD\n  A[Persona] -->|action| B[Feature]"
        }
      }
@@ -497,15 +437,11 @@ When `$ARGUMENTS` contains `--html`:
    *Per-outcome (from outcome detail files):*
    Synthesize across ALL scenarios — do not document individually.
    - Business Value: What business problem does this outcome solve?
-   - Capabilities: Inferred from repeated intents or workflow patterns.
-     Each capability must be supported by at least one scenario.
-   - Business Rules: Constraints, validations, conditions implied
-     by steps/actions. Derived from the workflows, not invented.
-   - Mermaid Diagram: `graph TD` format. Represent the outcome as a
-     container/subgraph. Show inferred capabilities as nodes, not
-     individual scenarios. Show high-level flow and dependencies.
-     5-10 nodes max. Avoid UI-level or step-level detail.
-     The diagram should explain the module at a glance to a stakeholder.
+   - Mermaid Diagram (**optional**): `graph TD` format. Only include
+     if the outcome has a non-trivial flow worth visualizing.
+     Represent the outcome as a container/subgraph. Show high-level
+     flow and dependencies. 5-10 nodes max. Avoid UI-level or
+     step-level detail. Skip for straightforward CRUD outcomes.
 
 3. Run the HTML generator script:
 
@@ -531,7 +467,7 @@ The script:
   - Key Business Objectives section (if enrichments provided)
   - Key Stakeholders cards (if enrichments provided)
   - Key Capabilities section (if enrichments provided)
-  - Per-outcome Business Value & Capabilities (if enrichments provided)
+  - Per-outcome Business Value (if enrichments provided)
   - Sidebar navigation with Outcomes/Scenarios tabs
   - Clickable stakeholder cards linking to persona sections
   - Search/filter across outcomes and scenarios
@@ -578,9 +514,7 @@ When the user gives feedback after document generation:
    | "executive summary is too generic" | Update `executiveSummary` |
    | "wrong persona description" | Update `personaEnrichments.<name>.description` |
    | "mermaid for X is wrong" | Update `outcomeEnrichments.<id>.mermaidDiagram` |
-   | "add business rules for Y" | Append to `outcomeEnrichments.<id>.businessRules` |
    | "stakeholder interest is inaccurate" | Update `keyStakeholders[].interest` |
-   | "add a capability" | Append to `outcomeEnrichments.<id>.capabilities` |
    | "this outcome description doesn't reflect what it does" | Update `outcomeEnrichments.<id>.businessValue` |
 
 3. **For deeper feedback** (e.g., "the Manage Integrations section

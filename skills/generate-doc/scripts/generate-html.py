@@ -287,61 +287,8 @@ def build_enrichment_sections(enrichments, personas=None):
 
 
 def build_outcome_enrichment_html(outcome_id, enrichments):
-    """Build HTML for per-outcome enrichment (business value, capabilities)."""
-    if not enrichments:
-        return ""
-
-    oe = enrichments.get("outcomeEnrichments", {}).get(outcome_id, {})
-    if not oe:
-        return ""
-
-    html = ""
-
-    # Capabilities
-    caps = oe.get("capabilities", [])
-    if caps:
-        cap_cards = "".join(
-            f"""<div class="info-card">
-              <div class="info-card-title">{e(c.get("capabilityName", ""))}</div>
-              <div class="info-card-text">{e(c.get("description", ""))}</div>
-            </div>"""
-            for c in caps
-        )
-        html += f"""
-          <div class="accordion">
-            <button class="accordion-trigger" onclick="toggleAccordion(this)" aria-expanded="false">
-              <span class="accordion-icon">&#9654;</span>
-              <span class="accordion-title">Capabilities</span>
-              <span class="accordion-count">{len(caps)}</span>
-            </button>
-            <div class="accordion-panel">
-              <div class="cards-grid">{cap_cards}</div>
-            </div>
-          </div>
-        """
-
-    # Business Rules
-    rules = oe.get("businessRules", [])
-    if rules:
-        rule_cards = "".join(
-            f"""<div class="business-rule-card" style="padding:12px 16px;background:var(--color-gray-50);border-radius:var(--radius-sm);margin-bottom:8px;border-left:3px solid var(--color-warning);">
-              <div style="font-size:11px;font-weight:700;color:var(--color-warning);margin-bottom:4px;">{e(r.get("ruleId", ""))}</div>
-              <div style="font-size:14px;color:var(--color-gray-700);">{e(r.get("description", ""))}</div>
-            </div>"""
-            for r in rules
-        )
-        html += f"""
-          <div class="accordion">
-            <button class="accordion-trigger" onclick="toggleAccordion(this)" aria-expanded="false">
-              <span class="accordion-icon">&#9654;</span>
-              <span class="accordion-title">Business Rules</span>
-              <span class="accordion-count">{len(rules)}</span>
-            </button>
-            <div class="accordion-panel">{rule_cards}</div>
-          </div>
-        """
-
-    return html
+    """Build HTML for per-outcome enrichment (currently unused — capabilities and business rules removed)."""
+    return ""
 
 
 def build_content_html(personas, project_name, enrichments=None):

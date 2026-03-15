@@ -1,0 +1,89 @@
+# {{ project_name }}
+
+## Functional Requirements Document
+
+| | |
+|---|---|
+| **Version** | 1.0 |
+| **Date** | {{ generated }} |
+| **Source** | Breeze.AI Functional Graph — {{ totals.personas }} personas, {{ totals.outcomes }} outcomes, {{ totals.scenarios }} scenarios, {{ totals.steps }} steps, {{ totals.actions }} actions |
+
+---
+
+## Table of Contents
+
+1. [Persona Summary](#persona-summary)
+{% for p in personas %}
+{% set sec = loop.index + 1 %}
+{{ sec }}. [FR-{{ '%03d' % loop.index }} — {{ p.persona }}](#fr-{{ '%03d' % loop.index }}--{{ p.persona | slugify }})
+{% for o in p._outcomes %}
+   - {{ sec }}.{{ loop.index }} [{{ o.outcome }}](#{{ (p.persona ~ '-' ~ o.outcome) | slugify }})
+{% endfor %}
+{% endfor %}
+{% set appendix_sec = personas | length + 2 %}
+{{ appendix_sec }}. [Source Documents](#source-documents)
+
+---
+
+## 1. Persona Summary
+
+| ID | Persona | Outcomes | Description |
+|----|---------|----------|-------------|
+{% for p in personas %}
+| FR-{{ '%03d' % loop.index }} | {{ p.persona | escape_pipe }} | {{ p._outcomes | length }} | |
+{% endfor %}
+
+---
+
+{% for p in personas %}
+{% set persona_sec = loop.index + 1 %}
+## <a id="fr-{{ '%03d' % loop.index }}--{{ p.persona | slugify }}"></a>{{ persona_sec }}. FR-{{ '%03d' % loop.index }} — {{ p.persona }}
+
+{% for o in p._outcomes %}
+### <a id="{{ (p.persona ~ '-' ~ o.outcome) | slugify }}"></a>{{ persona_sec }}.{{ loop.index }} {{ o.outcome }}{{ cite_refs(o) }}
+
+{% if o.description %}
+{{ o.description }}
+
+{% endif %}
+{% if not o._scenarios %}
+*No scenarios defined for this outcome.*
+{% else %}
+{% for scenario in o._scenarios %}
+- **SC-{{ '%02d' % loop.index }} {{ scenario.scenario }}**{{ cite_refs(scenario) }}
+{% if scenario.description %}
+
+    {{ scenario.description }}
+{% endif %}
+
+{% for step in scenario._sorted_steps %}
+    - **Step {{ step._index + 1 }}: {{ step.step }}**{{ cite_refs(step) }}
+{% for action in step._actions %}
+        - → {{ action.action }}{{ cite_refs(action) }}
+{% endfor %}
+{% if not step._actions %}
+        - → *(No actions defined)*
+{% endif %}
+{% endfor %}
+{% if not scenario._sorted_steps %}
+    - *No steps defined.*
+{% endif %}
+{% endfor %}
+{% endif %}
+
+---
+
+{% endfor %}
+{% endfor %}
+{% set appendix_sec = personas | length + 2 %}
+## {{ appendix_sec }}. Source Documents
+
+{% if source_documents %}
+| # | Document |
+|---|----------|
+{% for doc in source_documents %}
+| <a id="src-{{ loop.index }}"></a>{{ loop.index }} | {{ doc | escape_pipe }} |
+{% endfor %}
+{% else %}
+*No source documents referenced.*
+{% endif %}

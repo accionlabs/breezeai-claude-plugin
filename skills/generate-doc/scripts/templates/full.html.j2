@@ -1910,47 +1910,7 @@
             <div style="padding:12px 36px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;"><strong style="font-size:12px;color:var(--color-gray-500);margin-right:4px;">Sources:</strong> {% for c in o._citations %}<span class="persona-badge" style="background:rgb(99 102 241 / 0.1);color:var(--color-primary);font-size:11px;">{{ c | e }}</span> {% endfor %}</div>
 {% endif %}
             <div class="outcome-body">
-{# ── Per-outcome enrichment accordions ── #}
-{% if o._enrichment %}
-{% if o._enrichment.capabilities %}
-{% set caps = o._enrichment.capabilities %}
-          <div class="accordion">
-            <button class="accordion-trigger" onclick="toggleAccordion(this)" aria-expanded="false">
-              <span class="accordion-icon">&#9654;</span>
-              <span class="accordion-title">Capabilities</span>
-              <span class="accordion-count">{{ caps | length }}</span>
-            </button>
-            <div class="accordion-panel">
-              <div class="cards-grid">
-{% for c in caps %}
-                <div class="info-card">
-              <div class="info-card-title">{{ c.capabilityName | default("") | e }}</div>
-              <div class="info-card-text">{{ c.description | default("") | e }}</div>
-            </div>
-{% endfor %}
-              </div>
-            </div>
-          </div>
-{% endif %}
-{% if o._enrichment.businessRules %}
-{% set rules = o._enrichment.businessRules %}
-          <div class="accordion">
-            <button class="accordion-trigger" onclick="toggleAccordion(this)" aria-expanded="false">
-              <span class="accordion-icon">&#9654;</span>
-              <span class="accordion-title">Business Rules</span>
-              <span class="accordion-count">{{ rules | length }}</span>
-            </button>
-            <div class="accordion-panel">
-{% for r in rules %}
-              <div class="business-rule-card" style="padding:12px 16px;background:var(--color-gray-50);border-radius:var(--radius-sm);margin-bottom:8px;border-left:3px solid var(--color-warning);">
-              <div style="font-size:11px;font-weight:700;color:var(--color-warning);margin-bottom:4px;">{{ r.ruleId | default("") | e }}</div>
-              <div style="font-size:14px;color:var(--color-gray-700);">{{ r.description | default("") | e }}</div>
-            </div>
-{% endfor %}
-            </div>
-          </div>
-{% endif %}
-{% endif %}
+{# ── Per-outcome enrichment accordions (capabilities and business rules removed) ── #}
 {# ── Scenarios accordion ── #}
 {% if o._scenarios %}
               <div class="accordion accordion-features">
