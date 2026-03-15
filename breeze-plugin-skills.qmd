@@ -56,7 +56,8 @@ breeze-plugin/
 | `Call_Create_Project_` | init |
 | `Call_Get_Project_Details_` | init |
 | `Functional_Graph_Search` | search, update-graph, requirements, design |
-| `Code_Graph_Search` | search, codegen |
+| `Code_Graph_Search` | search, codegen, architecture |
+| `Get_Code_File_Details` | search, codegen, architecture |
 | `Documents` | requirements, design, architecture |
 | `Get_all_personas` | search, update-graph, requirements |
 | `Get_all_outcomes_for_a_persona_id` | search, update-graph, requirements |
@@ -259,7 +260,7 @@ Examples: "how does login work", "what does admin do"
 Examples: "who manages invoices", "what roles exist"
 
 **Code structure, implementations:**
-→ `Code_Graph_Search`
+→ `Code_Graph_Search`, then `Get_Code_File_Details` to drill into specific files
 Examples: "find auth middleware", "where is validation"
 
 **Both (feature → code):**
@@ -277,7 +278,7 @@ Examples: "NAV tolerance threshold", "acceptance criteria for X"
 2. **Hierarchy drill-down** (Get_all_personas → Get_all_outcomes →
    Get_all_scenarios → Get_all_steps_actions) — for structured
    traversal of a specific persona or feature
-3. **Code_Graph_Search** — for implementation/code questions
+3. **Code_Graph_Search** — for implementation/code questions; follow up with **Get_Code_File_Details** for file-level detail
 4. **Documents** — ONLY when functional graph lacks detail (formulas,
    thresholds, acceptance criteria)
 
@@ -750,6 +751,10 @@ Call `Code_Graph_Search` with architecture-relevant queries:
 - Broad queries like "controllers", "services", "middleware",
   "routes"
 
+Then call `Get_Code_File_Details` on key files from the results to
+understand API routes (from decorator statements), class structure,
+and method implementations.
+
 ### 2. Search Documents
 
 Call `Documents` for architecture docs, design decisions,
@@ -821,6 +826,8 @@ Extract `apiKey` and `projectUuid`.
 ### 2. DISCOVER — Find existing code patterns
 
 - Call `Code_Graph_Search` with related terms
+- Call `Get_Code_File_Details` on the most relevant files to inspect
+  class structure, methods, and patterns
 - Find existing files, functions, patterns, utilities
 - This gives you the HOW: conventions, imports, patterns to follow
 

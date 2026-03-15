@@ -38,7 +38,7 @@ Examples:
 
 ### Code Structure, Implementations
 
--> `Code_Graph_Search`
+-> `Code_Graph_Search`, then `Get_Code_File_Details` to drill into specific files
 Examples:
 - "find auth middleware"
 - "where is validation"
@@ -67,7 +67,7 @@ Examples:
    - `Get_all_scenarios`
    - `Get_all_steps_actions`
    -> Used for structured traversal of a persona or feature
-3. **Code_Graph_Search** -- for implementation or code questions
+3. **Code_Graph_Search** -- for implementation or code questions; follow up with **Get_Code_File_Details** for file-level detail
 4. **Documents** -- **ONLY** when the functional graph lacks detail
    (formulas, thresholds, acceptance criteria)
 

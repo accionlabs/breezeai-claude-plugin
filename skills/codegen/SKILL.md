@@ -26,6 +26,8 @@ Extract `apiKey` and `projectUuid`.
 ### 2. DISCOVER — Find existing code patterns
 
 - Call `Code_Graph_Search` with related terms
+- Call `Get_Code_File_Details` on the most relevant files to inspect
+  class structure, methods, and patterns
 - Find existing files, functions, patterns, utilities
 - This gives you the HOW: conventions, imports, patterns to follow
 
