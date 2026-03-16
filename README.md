@@ -28,13 +28,13 @@ Your credentials are saved to `.breeze.json` in the project root (gitignored).
 
 | Skill | Command | Description |
 |-------|---------|-------------|
-| **Init** | `/breeze:init` | Set up API key, link project, check ontology status |
-| **Search** | `/breeze:search <query>` | Search functional graph or code graph |
-| **Update Graph** | `/breeze:update-graph` | Create/update nodes in the functional graph |
-| **Requirements** | `/breeze:requirements <text>` | Analyze requirements against the functional graph |
-| **Design** | `/breeze:design <Figma URL>` | Analyze Figma designs and map to functional graph |
-| **Architecture** | `/breeze:architecture <scope>` | Analyze system architecture from code graph |
-| **Code Gen** | `/breeze:codegen <feature>` | Generate code and tests from functional graph |
+| **Init** | `/breeze:init` | Set up API key, link project, check ontology status, optionally upload repo or documents |
+| **Functional Analysis** | `/breeze:functional-analysis` | Analyze requirements against the existing functional graph — identifies coverage gaps, conflicts, dependencies, and impact |
+| **Architecture Analysis** | `/breeze:architecture-analysis` | Analyze requirements against the existing architectural graph — identifies impacted layers and components across 8 architecture layers |
+| **Search** | `/breeze:search <query>` | Search functional graph or code graph for feature discovery, impact analysis, and cross-cutting queries |
+| **Design** | `/breeze:design <Figma URL>` | Analyze UI/UX designs from Figma frames — extracts functional summary, identifies components, maps to functional graph, flags gaps |
+| **Code Gen** | `/breeze:codegen <feature>` | Generate code and test cases informed by the functional graph and code graph, ensuring implementations align with requirements |
+| **Update Functional Graph** | `/breeze:update-functional-graph` | Create/update nodes in the functional graph |
 | **Generate Doc** | `/breeze:generate-doc` | Generate functional specification documents |
 
 ## Auto-Loading (No Flag Needed)
