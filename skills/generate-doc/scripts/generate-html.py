@@ -1,0 +1,2596 @@
+#!/usr/bin/env python3
+"""
+Generate a standalone HTML functional specification document from the
+Breeze functional graph JSON.
+
+Usage:
+  python3 generate-html.py <input.json> [output.html] [--enrichments enrichments.json] [--template template.html.j2]
+
+Input:  JSON file from Get_complete_functional_graph MCP tool output
+Output: Standalone HTML file with sidebar, search, mermaid diagrams,
+        light/dark theme, font size toggle, and persona-grouped structure.
+
+Optional: --enrichments file adds AI-synthesized content:
+  - Executive Summary
+  - Key Business Objectives
+  - Key Stakeholders
+  - Key Capabilities
+  - Per-outcome Business Value & Capabilities
+
+Optional: --template file uses a custom Jinja2 template (requires pip install jinja2)
+"""
+
+import json
+import sys
+import html as html_mod
+from datetime import datetime
+from urllib.parse import quote as url_encode
+
+
+def extract_graph(raw):
+    """Unwrap the MCP tool response layers to get the graph data."""
+    data = raw
+    # Layer 1: [{type, text}]
+    if isinstance(data, list) and data and isinstance(data[0], dict) and "type" in data[0]:
+        data = json.loads(data[0]["text"])
+    # Layer 2: [{type, text}] again
+    if isinstance(data, list) and data and isinstance(data[0], dict) and "type" in data[0]:
+        data = json.loads(data[0]["text"])
+    # Layer 3: [{success, data}]
+    if isinstance(data, list) and data and isinstance(data[0], dict) and "data" in data[0]:
+        data = data[0]["data"]
+    # Direct format: {personas, project, summary}
+    if isinstance(data, dict) and "personas" in data:
+        return data
+    raise ValueError("Could not find 'personas' in input JSON")
+
+
+def e(text):
+    """HTML-escape a string."""
+    return html_mod.escape(str(text)) if text else ""
+
+
+def get_citations(obj):
+    """Extract citation document names from an entity."""
+    cit = obj.get("citations", "")
+    if not cit:
+        return []
+    if isinstance(cit, str):
+        try:
+            cit = json.loads(cit)
+        except (json.JSONDecodeError, TypeError):
+            return []
+    if isinstance(cit, list):
+        return [c.get("documentName", "") for c in cit if c.get("documentName")]
+    return []
+
+
+def sort_by_order(items):
+    """Sort items by their 'order' attribute, falling back to original order."""
+    return sorted(items, key=lambda x: (x.get("order") is None, x.get("order", 0)))
+
+
+def count_totals(personas):
+    """Count total outcomes, scenarios, steps, actions."""
+    outcomes = scenarios = steps = actions = 0
+    for p in personas:
+        for o in p.get("outcomes", []):
+            outcomes += 1
+            for s in o.get("scenarios", []):
+                scenarios += 1
+                for st in s.get("steps", []):
+                    steps += 1
+                    actions += len(st.get("actions", []))
+    return outcomes, scenarios, steps, actions
+
+
+def build_nav_html(personas, enrichments=None):
+    """Build sidebar navigation HTML."""
+    nav = ""
+
+    # Tabs at the top — Overview / Outcomes / Scenarios
+    nav += """
+        <div class="nav-tabs">
+          <button class="nav-tab active" data-tab="overview" onclick="switchNavTab('overview')">Overview</button>
+          <button class="nav-tab" data-tab="outcomes" onclick="switchNavTab('outcomes')">Outcomes</button>
+          <button class="nav-tab" data-tab="scenarios" onclick="switchNavTab('scenarios')">Scenarios</button>
+        </div>
+    """
+
+    # Overview tab content
+    nav += '<div class="nav-tab-content" id="navTabOverview">'
+    nav += """
+        <div class="nav-group">
+          <ul class="nav-list">
+            <li class="nav-item"><a onclick="scrollToSection('heroSection')">Overview</a></li>
+    """
+    if enrichments:
+        if enrichments.get("executiveSummary"):
+            nav += '<li class="nav-item"><a onclick="scrollToSection(\'executiveSummarySection\')">Executive Summary</a></li>'
+        if enrichments.get("keyBusinessObjectives"):
+            nav += '<li class="nav-item"><a onclick="scrollToSection(\'objectivesSection\')">Business Objectives</a></li>'
+        if enrichments.get("keyStakeholders"):
+            nav += '<li class="nav-item"><a onclick="scrollToSection(\'stakeholdersSection\')">Stakeholders</a></li>'
+        if enrichments.get("keyCapabilities"):
+            nav += '<li class="nav-item"><a onclick="scrollToSection(\'capabilitiesSection\')">Key Capabilities</a></li>'
+    nav += "</ul></div>"
+
+    # Also list personas in overview tab for quick access
+    nav += """
+        <div class="nav-group">
+          <div class="nav-group-header">Personas</div>
+          <ul class="nav-list">
+    """
+    for pi, p in enumerate(personas):
+        persona_name = e(p.get("persona", "Unknown"))
+        outcome_count = len(p.get("outcomes", []))
+        nav += f"""
+            <li class="nav-item">
+              <a onclick="scrollToSection('persona-{pi}')">
+                {persona_name}
+                <span class="nav-item-count">{outcome_count} outcomes</span>
+              </a>
+            </li>
+        """
+    nav += "</ul></div></div>"
+
+    # Outcomes tab content
+    nav += '<div class="nav-tab-content" id="navTabOutcomes" style="display:none;">'
+    for pi, p in enumerate(personas):
+        persona_name = e(p.get("persona", "Unknown"))
+        outcomes = p.get("outcomes", [])
+        nav += f"""
+        <div class="nav-group">
+          <div class="nav-group-header">{persona_name}</div>
+          <ul class="nav-list">
+        """
+        for oi, o in enumerate(outcomes):
+            outcome_name = e(o.get("outcome", "Outcome"))
+            scenario_count = len(o.get("scenarios", []))
+            nav += f"""
+            <li class="nav-item">
+              <a onclick="scrollToSection('outcome-{pi}-{oi}')">
+                {outcome_name}
+                <span class="nav-item-count">{scenario_count} scenarios</span>
+              </a>
+            </li>
+            """
+        nav += "</ul></div>"
+    nav += "</div>"
+
+    # Scenarios tab content
+    nav += '<div class="nav-tab-content" id="navTabScenarios" style="display:none;">'
+    for pi, p in enumerate(personas):
+        persona_name = e(p.get("persona", "Unknown"))
+        outcomes = p.get("outcomes", [])
+        has_scenarios = any(o.get("scenarios") for o in outcomes)
+        if not has_scenarios:
+            continue
+        nav += f"""
+        <div class="nav-group">
+          <div class="nav-group-header">{persona_name}</div>
+          <ul class="nav-list">
+        """
+        for oi, o in enumerate(outcomes):
+            for si, s in enumerate(o.get("scenarios", [])):
+                scenario_name = e(s.get("scenario", "Scenario"))
+                step_count = len(s.get("steps", []))
+                nav += f"""
+            <li class="nav-item">
+              <a onclick="scrollToScenario('scenario-{pi}-{oi}-{si}')">
+                {scenario_name}
+                <span class="nav-item-count">{step_count} steps</span>
+              </a>
+            </li>
+                """
+        nav += "</ul></div>"
+    nav += "</div>"
+
+    return nav
+
+
+def build_enrichment_sections(enrichments, personas=None):
+    """Build HTML sections for AI-synthesized enrichment content.
+    Matches the exact HTML structure from func_doc.html."""
+    if not enrichments:
+        return ""
+
+    # Build persona name -> index map for linking
+    persona_index = {}
+    if personas:
+        for pi, p in enumerate(personas):
+            persona_index[p.get("persona", "")] = pi
+
+    html = ""
+
+    # Executive Summary + Key Capabilities (rendered together, matching func_doc.html renderSummary)
+    summary = enrichments.get("executiveSummary", "")
+    caps = enrichments.get("keyCapabilities", [])
+    if summary or caps:
+        summary_html = f'<div class="summary-box">{e(summary)}</div>' if summary else ""
+        caps_html = ""
+        if caps:
+            cap_items = "".join(
+                f'<li><span class="item-number">{i+1}</span><span>{e(c)}</span></li>'
+                for i, c in enumerate(caps)
+            )
+            caps_html = f'<div style="margin-top:24px"><h4 style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--color-gray-700)">Key Capabilities</h4><ul class="item-list">{cap_items}</ul></div>'
+
+        html += f"""
+      <section class="section" id="executiveSummarySection">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon blue">&#9679;</span>
+            Executive Summary
+          </h2>
+        </div>
+        <div class="section-content" id="executiveSummaryContent">
+          {summary_html}
+          {caps_html}
+        </div>
+      </section>
+        """
+
+    # Key Business Objectives (matches func_doc.html renderObjectives)
+    objectives = enrichments.get("keyBusinessObjectives", [])
+    if objectives:
+        items = "".join(
+            f'<li><span class="item-number green">{i+1}</span><span>{e(obj)}</span></li>'
+            for i, obj in enumerate(objectives)
+        )
+        html += f"""
+      <section class="section" id="objectivesSection">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon green">&#9679;</span>
+            Business Objectives
+          </h2>
+        </div>
+        <div class="section-content" id="objectivesContent">
+          <ul class="item-list">{items}</ul>
+        </div>
+      </section>
+        """
+
+    # Key Stakeholders (matches func_doc.html renderStakeholders)
+    stakeholders = enrichments.get("keyStakeholders", [])
+    if stakeholders:
+        def _stakeholder_card(s):
+            role = s.get("role", "Stakeholder")
+            pi = persona_index.get(role)
+            if pi is not None:
+                return f"""<div class="info-card" style="cursor:pointer;" onclick="scrollToSection('persona-{pi}')">
+            <div class="info-card-title">{e(role)}</div>
+            <div class="info-card-text">{e(s.get("interest", ""))}</div>
+          </div>"""
+            else:
+                return f"""<div class="info-card">
+            <div class="info-card-title">{e(role)}</div>
+            <div class="info-card-text">{e(s.get("interest", ""))}</div>
+          </div>"""
+        cards = "".join(_stakeholder_card(s) for s in stakeholders)
+        html += f"""
+      <section class="section" id="stakeholdersSection">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon purple">&#9679;</span>
+            Stakeholders
+          </h2>
+        </div>
+        <div class="section-content" id="stakeholdersContent">
+          <div class="cards-grid">{cards}</div>
+        </div>
+      </section>
+        """
+
+    return html
+
+
+def build_outcome_enrichment_html(outcome_id, enrichments):
+    """Build HTML for per-outcome enrichment (currently unused — capabilities and business rules removed)."""
+    return ""
+
+
+def build_content_html(personas, project_name, enrichments=None):
+    """Build main content HTML."""
+    total_outcomes, total_scenarios, total_steps, total_actions = count_totals(personas)
+    generated = datetime.now().strftime("%B %d, %Y")
+
+    content = f"""
+    <div class="container">
+      <header id="heroSection">
+        <div class="hero">
+          <div class="hero-inner">
+            <div class="hero-brand">
+              <div class="hero-brand-logo">Ab</div>
+              <div class="hero-brand-text">
+                <span class="hero-brand-name">AccionBreeze.ai</span>
+                <span class="hero-brand-tagline">Functional Specification</span>
+              </div>
+            </div>
+            <div class="hero-settings">
+              <div class="hero-settings-group">
+                <span class="hero-settings-label">Font</span>
+                <div class="font-size-toggle">
+                  <button class="font-btn" data-size="small" title="Small" onclick="handleFontSize('small')">A</button>
+                  <button class="font-btn active" data-size="medium" title="Medium" onclick="handleFontSize('medium')">A</button>
+                  <button class="font-btn" data-size="large" title="Large" onclick="handleFontSize('large')">A</button>
+                </div>
+              </div>
+              <div class="hero-settings-group">
+                <span class="hero-settings-label">Theme</span>
+                <div class="theme-toggle">
+                  <button class="theme-btn active" data-theme="light" title="Light" onclick="handleTheme('light')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                      <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                    </svg>
+                  </button>
+                  <button class="theme-btn" data-theme="dark" title="Dark" onclick="handleTheme('dark')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="hero-main">
+              <div class="hero-content">
+                <div class="hero-label">Application</div>
+                <h1>{e(project_name)}</h1>
+                <div class="hero-meta">
+                  <span>{generated}</span>
+                  <span class="hero-meta-divider"></span>
+                  <span>{len(personas)} Personas</span>
+                </div>
+              </div>
+              <div class="stats-strip">
+                <div class="stats-strip-item">
+                  <div class="stats-strip-value">{len(personas)}</div>
+                  <div class="stats-strip-label">Personas</div>
+                </div>
+                <div class="stats-strip-item">
+                  <div class="stats-strip-value">{total_outcomes}</div>
+                  <div class="stats-strip-label">Outcomes</div>
+                </div>
+                <div class="stats-strip-item">
+                  <div class="stats-strip-value">{total_scenarios}</div>
+                  <div class="stats-strip-label">Scenarios</div>
+                </div>
+                <div class="stats-strip-item">
+                  <div class="stats-strip-value">{total_steps}</div>
+                  <div class="stats-strip-label">Steps</div>
+                </div>
+                <div class="stats-strip-item">
+                  <div class="stats-strip-value">{total_actions}</div>
+                  <div class="stats-strip-label">Actions</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+    """
+
+    # Add enrichment sections (executive summary, objectives, stakeholders, capabilities)
+    content += build_enrichment_sections(enrichments, personas)
+
+    for pi, persona in enumerate(personas):
+        persona_name = e(persona.get("persona", "Unknown"))
+        outcomes = persona.get("outcomes", [])
+
+        # Get persona description from enrichments
+        persona_desc_html = ""
+        if enrichments:
+            pe = enrichments.get("personaEnrichments", {}).get(persona.get("persona", ""), {})
+            pdesc = pe.get("description", "")
+            if pdesc:
+                persona_desc_html = f'<div class="outcome-summary" style="margin-bottom:0;">{e(pdesc)}</div>'
+
+        content += f"""
+      <section class="section persona-section" id="persona-{pi}">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon purple">&#9679;</span>
+            {persona_name}
+          </h2>
+          <span class="persona-badge">{len(outcomes)} outcomes</span>
+        </div>
+        {persona_desc_html}
+        <div class="section-content">
+        """
+
+        for oi, outcome in enumerate(outcomes):
+            outcome_name = e(outcome.get("outcome", "Outcome"))
+            outcome_desc = e(outcome.get("description", ""))
+            citations = get_citations(outcome)
+            scenarios = outcome.get("scenarios", [])
+            scenario_count = len(scenarios)
+            step_count = sum(len(s.get("steps", [])) for s in scenarios)
+            action_count = sum(
+                len(st.get("actions", []))
+                for s in scenarios
+                for st in s.get("steps", [])
+            )
+
+            sources_html = "".join(
+                f'<span class="persona-badge" style="background:rgb(99 102 241 / 0.1);color:var(--color-primary);font-size:11px;">{e(c)}</span> '
+                for c in citations
+            )
+
+            # Get enrichments for this outcome
+            outcome_id = outcome.get("id", "")
+            diagram_html = ""
+            outcome_summary = outcome_desc
+            if enrichments:
+                oe = enrichments.get("outcomeEnrichments", {}).get(outcome_id, {})
+                diagram = oe.get("mermaidDiagram", "")
+                if diagram:
+                    diagram_html = f'<div class="diagram-wrapper" style="margin:0;border-radius:0" role="img"><div class="diagram-expand-hint">Click to expand</div><div class="mermaid" data-diagram="{url_encode(diagram)}">{diagram}</div></div>'
+                # Use businessValue as description if no graph description
+                if not outcome_summary:
+                    bv = oe.get("businessValue", "")
+                    if bv:
+                        outcome_summary = e(bv)
+
+            content += f"""
+          <div class="outcome-card" id="outcome-{pi}-{oi}">
+            <div class="outcome-header">
+              <h3>{outcome_name}</h3>
+              <span class="outcome-badge">{scenario_count} Scenarios &middot; {step_count} Steps &middot; {action_count} Actions</span>
+            </div>
+            {"<div class='outcome-summary'>" + outcome_summary + "</div>" if outcome_summary else ""}
+            {diagram_html}
+            {('<div style="padding:12px 36px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;"><strong style=\"font-size:12px;color:var(--color-gray-500);margin-right:4px;\">Sources:</strong> ' + sources_html + '</div>') if citations else ""}
+            <div class="outcome-body">
+            """
+
+            # Add enrichment accordions (Capabilities, Business Rules) inside outcome-body
+            content += build_outcome_enrichment_html(outcome_id, enrichments)
+
+            # Wrap all scenarios in a single "Scenarios" accordion
+            if scenarios:
+                # Build inner scenario content
+                scenarios_inner = ""
+                for si, scenario in enumerate(scenarios):
+                    scenario_name = e(scenario.get("scenario", "Scenario"))
+                    scenario_desc = e(scenario.get("description", ""))
+                    steps = scenario.get("steps", [])
+                    s_step_count = len(steps)
+                    s_action_count = sum(len(st.get("actions", [])) for st in steps)
+
+                    scenarios_inner += f"""
+                  <div class="accordion" id="scenario-{pi}-{oi}-{si}">
+                    <button class="accordion-trigger" onclick="toggleAccordion(this)" aria-expanded="false">
+                      <span class="accordion-icon">&#9654;</span>
+                      <span class="accordion-title">{scenario_name}</span>
+                      <span class="accordion-stats">
+                        <span class="stat-badge stat-steps">{s_step_count} Steps</span>
+                        <span class="stat-badge stat-actions">{s_action_count} Actions</span>
+                      </span>
+                    </button>
+                    <div class="accordion-panel">
+                      {"<div class='overview-block'>" + scenario_desc + "</div>" if scenario_desc else ""}
+                    """
+
+                    for sti, step in enumerate(sort_by_order(steps)):
+                        step_name = e(step.get("step", "Step"))
+                        step_desc = e(step.get("description", ""))
+                        step_actions = sort_by_order(step.get("actions", []))
+
+                        scenarios_inner += f"""
+                      <div class="workflow-step">
+                        <div class="step-indicator">{sti + 1}</div>
+                        <div class="step-content">
+                          <div class="step-name">{step_name}</div>
+                          {"<div style='font-size:13px;color:var(--color-gray-500);margin-bottom:8px;'>" + step_desc + "</div>" if step_desc else ""}
+                        """
+
+                        for action in step_actions:
+                            action_name = e(action.get("action", ""))
+                            action_desc = e(action.get("description", ""))
+                            scenarios_inner += f"""
+                          <div class="action-item">
+                            <div class="action-text">{action_name}</div>
+                            {"<div style='font-size:12px;color:var(--color-gray-500);margin-top:4px;'>" + action_desc + "</div>" if action_desc else ""}
+                          </div>
+                            """
+
+                        if not step_actions:
+                            scenarios_inner += '<div class="empty-state" style="padding:12px;">No actions defined</div>'
+
+                        scenarios_inner += "</div></div>"
+
+                    if not steps:
+                        scenarios_inner += '<div class="empty-state">No steps defined</div>'
+
+                    scenarios_inner += "</div></div>"
+
+                content += f"""
+              <div class="accordion accordion-features">
+                <button class="accordion-trigger" onclick="toggleAccordion(this)" aria-expanded="false">
+                  <span class="accordion-icon">&#9654;</span>
+                  <span class="accordion-title">Scenarios</span>
+                  <span class="accordion-count">{scenario_count}</span>
+                </button>
+                <div class="accordion-panel">
+                  {scenarios_inner}
+                </div>
+              </div>
+                """
+            else:
+                content += '<div class="empty-state">No scenarios defined for this outcome</div>'
+
+            content += "</div></div>"
+
+        content += "</div></section>"
+
+    content += "</div>"
+    return content
+
+
+CSS = r"""
+    /* ========================================================================
+       CSS VARIABLES & THEMING
+       ======================================================================== */
+    :root {
+      --color-primary: #6366f1;
+      --color-primary-dark: #4f46e5;
+      --color-primary-light: #a5b4fc;
+      --color-primary-subtle: #eef2ff;
+      --color-secondary: #06b6d4;
+      --color-success: #10b981;
+      --color-success-subtle: #d1fae5;
+      --color-warning: #f59e0b;
+      --color-warning-subtle: #fef3c7;
+      --color-danger: #ef4444;
+      --color-purple: #8b5cf6;
+      --color-purple-subtle: #ede9fe;
+
+      --color-gray-50: #f8fafc;
+      --color-gray-100: #f1f5f9;
+      --color-gray-200: #e2e8f0;
+      --color-gray-300: #cbd5e1;
+      --color-gray-400: #94a3b8;
+      --color-gray-500: #64748b;
+      --color-gray-600: #475569;
+      --color-gray-700: #334155;
+      --color-gray-800: #1e293b;
+      --color-gray-900: #0f172a;
+
+      --sidebar-width: 300px;
+      --header-height: 64px;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 24px;
+      --radius-2xl: 32px;
+      --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.03);
+      --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+      --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.06), 0 4px 6px -4px rgb(0 0 0 / 0.06);
+      --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.08), 0 8px 10px -6px rgb(0 0 0 / 0.08);
+      --shadow-glow: 0 0 20px rgb(99 102 241 / 0.15);
+      --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Dark Theme */
+    [data-theme="dark"] {
+      --color-gray-50: #0f172a;
+      --color-gray-100: #1e293b;
+      --color-gray-200: #334155;
+      --color-gray-300: #475569;
+      --color-gray-400: #64748b;
+      --color-gray-500: #94a3b8;
+      --color-gray-600: #cbd5e1;
+      --color-gray-700: #e2e8f0;
+      --color-gray-800: #f1f5f9;
+      --color-gray-900: #f8fafc;
+      --color-primary-subtle: rgba(99, 102, 241, 0.15);
+      --color-success-subtle: rgba(16, 185, 129, 0.15);
+      --color-warning-subtle: rgba(245, 158, 11, 0.15);
+      --color-purple-subtle: rgba(139, 92, 246, 0.15);
+    }
+
+    [data-theme="dark"] .main {
+      background: #0a0f1a;
+    }
+
+    [data-theme="dark"] .hero {
+      background: linear-gradient(135deg, #050508 0%, #0a0a12 50%, #0f0f1a 100%);
+    }
+
+    [data-theme="dark"] .section {
+      background: #0f172a;
+      border-color: rgba(148, 163, 184, 0.1);
+      box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.05);
+    }
+
+    [data-theme="dark"] .feature-card {
+      background: #0f172a;
+      border-color: rgba(148, 163, 184, 0.1);
+    }
+
+    [data-theme="dark"] .outcome-card {
+      background: #0f172a;
+      border-color: rgba(148, 163, 184, 0.1);
+    }
+
+    [data-theme="dark"] .accordion-trigger {
+      background: rgba(30, 41, 59, 0.5);
+      border-color: rgba(148, 163, 184, 0.1);
+    }
+
+    [data-theme="dark"] .accordion-trigger:hover {
+      background: rgba(30, 41, 59, 0.8);
+    }
+
+    [data-theme="dark"] .overview-block {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.08) 100%);
+      border-left-color: var(--color-primary);
+    }
+
+    [data-theme="dark"] .info-card {
+      background: rgba(30, 41, 59, 0.5);
+      border-color: rgba(148, 163, 184, 0.1);
+    }
+
+    [data-theme="dark"] .workflow-step {
+      border-color: rgba(148, 163, 184, 0.1);
+    }
+
+    [data-theme="dark"] .action-item {
+      background: rgba(30, 41, 59, 0.5);
+      border-left-color: var(--color-success);
+    }
+
+    /* Light theme content */
+    [data-theme="light"] .main {
+      background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    }
+
+    [data-theme="light"] .section {
+      background: white;
+      border: 1px solid var(--color-gray-200);
+      box-shadow: var(--shadow-sm);
+    }
+
+    [data-theme="light"] .feature-card {
+      background: white;
+      border: 1px solid var(--color-gray-200);
+      box-shadow: var(--shadow-xs);
+    }
+
+    [data-theme="light"] .outcome-card {
+      background: white;
+      border: 1px solid var(--color-gray-200);
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* Light theme sidebar */
+    [data-theme="light"] .sidebar {
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      border-right: 1px solid var(--color-gray-200);
+      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.03);
+    }
+
+    [data-theme="light"] .sidebar-brand {
+      border-bottom-color: var(--color-gray-100);
+    }
+
+    [data-theme="light"] .sidebar-brand h1 {
+      color: var(--color-gray-900);
+    }
+
+    [data-theme="light"] .sidebar-search {
+      border-bottom-color: var(--color-gray-100);
+    }
+
+    [data-theme="light"] .search-input {
+      background: var(--color-gray-50);
+      border-color: var(--color-gray-200);
+      color: var(--color-gray-800);
+    }
+
+    [data-theme="light"] .search-input:focus {
+      background: white;
+    }
+
+    [data-theme="light"] .search-input::placeholder {
+      color: var(--color-gray-400);
+    }
+
+    [data-theme="light"] .sidebar-filters {
+      border-bottom: 1px solid var(--color-gray-100);
+    }
+
+    [data-theme="light"] .filter-chip {
+      background: var(--color-gray-50);
+      border-color: var(--color-gray-200);
+      color: var(--color-gray-600);
+    }
+
+    [data-theme="light"] .filter-chip:hover {
+      background: var(--color-gray-100);
+      border-color: var(--color-gray-300);
+      color: var(--color-gray-700);
+    }
+
+    [data-theme="light"] .filter-chip[aria-pressed="true"] {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: white;
+      box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+    }
+
+    [data-theme="light"] .nav-group-header {
+      color: var(--color-gray-400);
+    }
+
+    [data-theme="light"] .nav-item a {
+      color: var(--color-gray-600);
+    }
+
+    [data-theme="light"] .nav-item a:hover {
+      background: var(--color-gray-100);
+      color: var(--color-gray-900);
+    }
+
+    [data-theme="light"] .nav-item a.active {
+      background: var(--color-primary-subtle);
+      color: var(--color-primary-dark);
+      font-weight: 600;
+    }
+
+    [data-theme="light"] .nav-item-count {
+      background: var(--color-gray-100);
+      color: var(--color-gray-500);
+    }
+
+    /* Dark theme sidebar */
+    [data-theme="dark"] .sidebar {
+      background: linear-gradient(180deg, #0f172a 0%, #0a0f1a 100%);
+      border-right: 1px solid rgba(148, 163, 184, 0.08);
+      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.2);
+    }
+
+    [data-theme="dark"] .sidebar-brand {
+      border-bottom-color: rgba(148, 163, 184, 0.08);
+    }
+
+    [data-theme="dark"] .sidebar-search {
+      border-bottom-color: rgba(148, 163, 184, 0.08);
+    }
+
+    [data-theme="dark"] .search-input {
+      background: rgba(30, 41, 59, 0.5);
+      border-color: rgba(148, 163, 184, 0.1);
+    }
+
+    [data-theme="dark"] .search-input:focus {
+      background: rgba(30, 41, 59, 0.8);
+      border-color: var(--color-primary);
+    }
+
+    [data-theme="dark"] .sidebar-filters {
+      border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+    }
+
+    [data-theme="dark"] .filter-chip {
+      background: rgba(30, 41, 59, 0.3);
+      border-color: rgba(148, 163, 184, 0.1);
+    }
+
+    [data-theme="dark"] .filter-chip:hover {
+      background: rgba(30, 41, 59, 0.6);
+    }
+
+    [data-theme="dark"] .filter-chip[aria-pressed="true"] {
+      box-shadow: 0 2px 12px rgba(99, 102, 241, 0.3);
+    }
+
+    [data-theme="dark"] .nav-item a.active {
+      background: var(--color-primary-subtle);
+    }
+
+    [data-theme="dark"] .nav-item-count {
+      background: rgba(148, 163, 184, 0.1);
+    }
+
+    /* Font Sizes - Small */
+    [data-font="small"] { font-size: 13px; }
+    [data-font="small"] .hero h1 { font-size: 26px; }
+    [data-font="small"] .hero-label { font-size: 11px; }
+    [data-font="small"] .hero-meta { font-size: 12px; }
+    [data-font="small"] .stats-strip-value { font-size: 20px; }
+    [data-font="small"] .stats-strip-label { font-size: 10px; }
+    [data-font="small"] .section-header h2 { font-size: 16px; }
+    [data-font="small"] .feature-title { font-size: 14px; }
+    [data-font="small"] .feature-header { font-size: 12px; }
+    [data-font="small"] .outcome-header h3 { font-size: 16px; }
+    [data-font="small"] .overview-block { font-size: 12px; }
+    [data-font="small"] .accordion-title { font-size: 12px; }
+    [data-font="small"] .step-name { font-size: 13px; }
+    [data-font="small"] .action-text { font-size: 12px; }
+    [data-font="small"] .action-details { font-size: 10px; }
+    [data-font="small"] .info-card-title { font-size: 13px; }
+    [data-font="small"] .info-card-text { font-size: 12px; }
+    [data-font="small"] .summary-box { font-size: 13px; }
+    [data-font="small"] .nav-item a { font-size: 12px; }
+    [data-font="small"] .tag { font-size: 9px; }
+
+    /* Font Sizes - Medium (default) */
+    [data-font="medium"] { font-size: 15px; }
+
+    /* Font Sizes - Large */
+    [data-font="large"] { font-size: 17px; }
+    [data-font="large"] .hero h1 { font-size: 38px; }
+    [data-font="large"] .hero-label { font-size: 14px; }
+    [data-font="large"] .hero-meta { font-size: 15px; }
+    [data-font="large"] .stats-strip-value { font-size: 28px; }
+    [data-font="large"] .stats-strip-label { font-size: 13px; }
+    [data-font="large"] .section-header h2 { font-size: 24px; }
+    [data-font="large"] .feature-title { font-size: 20px; }
+    [data-font="large"] .feature-header { font-size: 15px; }
+    [data-font="large"] .outcome-header h3 { font-size: 22px; }
+    [data-font="large"] .overview-block { font-size: 16px; }
+    [data-font="large"] .accordion-title { font-size: 16px; }
+    [data-font="large"] .step-name { font-size: 17px; }
+    [data-font="large"] .action-text { font-size: 16px; }
+    [data-font="large"] .action-details { font-size: 14px; }
+    [data-font="large"] .info-card-title { font-size: 17px; }
+    [data-font="large"] .info-card-text { font-size: 16px; }
+    [data-font="large"] .summary-box { font-size: 17px; }
+    [data-font="large"] .nav-item a { font-size: 15px; }
+    [data-font="large"] .tag { font-size: 12px; }
+
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--color-gray-700);
+      background: var(--color-gray-50);
+      font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    }
+
+    /* Import Inter font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+    /* Layout */
+    .app {
+      display: grid;
+      grid-template-columns: var(--sidebar-width) 1fr;
+      min-height: 100vh;
+    }
+
+    .app.sidebar-hidden {
+      grid-template-columns: 0 1fr;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: var(--sidebar-width);
+      height: 100vh;
+      background: var(--color-gray-900);
+      display: flex;
+      flex-direction: column;
+      z-index: 100;
+      transition: transform var(--transition-normal);
+    }
+
+    .app.sidebar-hidden .sidebar {
+      transform: translateX(-100%);
+    }
+
+    .sidebar-brand {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--color-gray-700);
+    }
+
+    .sidebar-brand h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: white;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .sidebar-brand h1::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      background: var(--color-primary-light);
+      border-radius: 50%;
+    }
+
+    .sidebar-search {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--color-gray-700);
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 10px 14px 10px 38px;
+      background: var(--color-gray-800);
+      border: 1px solid var(--color-gray-700);
+      border-radius: var(--radius-md);
+      color: white;
+      font-size: 14px;
+      transition: all var(--transition-fast);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: 12px center;
+      background-size: 18px;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px rgb(79 70 229 / 0.2);
+    }
+
+    .search-input::placeholder {
+      color: var(--color-gray-500);
+    }
+
+    .sidebar-filters {
+      display: flex;
+      gap: 6px;
+      padding: 16px 20px;
+    }
+
+    .filter-chip {
+      flex: 1;
+      padding: 8px 12px;
+      background: transparent;
+      border: 1px solid var(--color-gray-700);
+      border-radius: var(--radius-sm);
+      color: var(--color-gray-400);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .filter-chip:hover {
+      border-color: var(--color-gray-600);
+      color: var(--color-gray-300);
+    }
+
+    .filter-chip[aria-pressed="true"] {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: white;
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+
+    .nav-group {
+      padding: 8px 0;
+    }
+
+    .nav-group-header {
+      padding: 10px 24px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-gray-500);
+    }
+
+    .nav-list {
+      list-style: none;
+    }
+
+    .nav-item a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 24px;
+      color: var(--color-gray-400);
+      text-decoration: none;
+      font-size: 14px;
+      transition: all var(--transition-fast);
+      cursor: pointer;
+      border-left: 3px solid transparent;
+    }
+
+    .nav-item a:hover {
+      background: var(--color-gray-800);
+      color: white;
+    }
+
+    .nav-item a.active {
+      background: rgb(79 70 229 / 0.15);
+      color: var(--color-primary-light);
+      border-left-color: var(--color-primary);
+    }
+
+    .nav-item-count {
+      margin-left: auto;
+      padding: 2px 8px;
+      background: var(--color-gray-800);
+      border-radius: 12px;
+      font-size: 11px;
+      color: var(--color-gray-500);
+    }
+
+    .nav-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--color-gray-800);
+      margin-bottom: 8px;
+    }
+
+    .nav-tab {
+      flex: 1;
+      padding: 6px 12px;
+      border: none;
+      background: transparent;
+      color: var(--color-gray-500);
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .nav-tab:hover {
+      color: var(--color-gray-300);
+      background: var(--color-gray-800);
+    }
+
+    .nav-tab.active {
+      background: var(--color-primary);
+      color: white;
+    }
+
+    [data-theme="light"] .nav-tab {
+      color: var(--color-gray-500);
+    }
+
+    [data-theme="light"] .nav-tab:hover {
+      color: var(--color-gray-700);
+      background: var(--color-gray-100);
+    }
+
+    [data-theme="light"] .nav-tab.active {
+      background: var(--color-primary);
+      color: white;
+    }
+
+    [data-theme="light"] .nav-tabs {
+      border-bottom-color: var(--color-gray-200);
+    }
+
+    .nav-tab-content {
+      overflow-y: auto;
+    }
+
+    /* Toggle Button */
+    .sidebar-toggle {
+      position: fixed;
+      top: 20px;
+      left: calc(var(--sidebar-width) + 16px);
+      z-index: 101;
+      width: 40px;
+      height: 40px;
+      background: white;
+      border: 1px solid var(--color-gray-200);
+      border-radius: var(--radius-md);
+      color: var(--color-gray-600);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--transition-normal);
+      box-shadow: var(--shadow-md);
+    }
+
+    .sidebar-toggle:hover {
+      background: var(--color-gray-50);
+      color: var(--color-gray-900);
+    }
+
+    .app.sidebar-hidden .sidebar-toggle {
+      left: 16px;
+    }
+
+    .sidebar-toggle svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    /* Main Content */
+    .main {
+      grid-column: 2;
+      min-height: 100vh;
+      background: var(--color-gray-50);
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 40px 80px;
+    }
+
+    /* Hero Header */
+    .hero {
+      background: linear-gradient(135deg, #08080c 0%, #0c0c14 50%, #12121f 100%);
+      border-radius: var(--radius-2xl);
+      padding: 0;
+      margin-bottom: 32px;
+      color: white;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -20%;
+      width: 70%;
+      height: 200%;
+      background: radial-gradient(ellipse, rgba(99, 102, 241, 0.12) 0%, rgba(139, 92, 246, 0.06) 30%, transparent 60%);
+      pointer-events: none;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: -20%;
+      left: -10%;
+      width: 50%;
+      height: 100%;
+      background: radial-gradient(ellipse, rgba(99, 102, 241, 0.06) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    .hero-inner {
+      position: relative;
+      z-index: 1;
+      padding: 48px 56px;
+    }
+
+    .hero-brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 36px;
+    }
+
+    .hero-brand-logo {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 18px;
+      color: white;
+      letter-spacing: -0.05em;
+      box-shadow: 0 8px 24px rgba(99, 102, 241, 0.35);
+    }
+
+    .hero-brand-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .hero-brand-name {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: white;
+    }
+
+    .hero-brand-tagline {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-weight: 500;
+    }
+
+    .hero-settings {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .hero-settings-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .hero-settings-label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .hero-settings .font-size-toggle,
+    .hero-settings .theme-toggle {
+      display: flex;
+      gap: 4px;
+    }
+
+    .hero-settings .font-btn {
+      width: 26px;
+      height: 26px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.05);
+      color: rgba(255,255,255,0.6);
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all var(--transition-fast);
+    }
+
+    .hero-settings .font-btn:nth-child(1) { font-size: 10px; }
+    .hero-settings .font-btn:nth-child(2) { font-size: 12px; }
+    .hero-settings .font-btn:nth-child(3) { font-size: 14px; }
+
+    .hero-settings .font-btn:hover {
+      border-color: rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.9);
+    }
+
+    .hero-settings .font-btn.active {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: white;
+    }
+
+    .hero-settings .theme-btn {
+      width: 30px;
+      height: 26px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.05);
+      color: rgba(255,255,255,0.6);
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--transition-fast);
+    }
+
+    .hero-settings .theme-btn:hover {
+      border-color: rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.9);
+    }
+
+    .hero-settings .theme-btn.active {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: white;
+    }
+
+    .hero-main {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 48px;
+    }
+
+    .hero-content {
+      flex: 1;
+    }
+
+    .hero-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #a5b4fc;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      margin-bottom: 16px;
+      padding: 6px 14px;
+      background: rgba(165, 180, 252, 0.1);
+      border-radius: 20px;
+      border: 1px solid rgba(165, 180, 252, 0.2);
+    }
+
+    .hero h1 {
+      font-size: 42px;
+      font-weight: 800;
+      letter-spacing: -0.035em;
+      margin-bottom: 20px;
+      line-height: 1.1;
+      color: white;
+      background: linear-gradient(135deg, #ffffff 0%, #e0e7ff 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-meta {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      font-size: 14px;
+      color: rgba(255,255,255,0.6);
+      font-weight: 500;
+    }
+
+    .hero-meta-divider {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.3);
+    }
+
+    /* Stats Strip */
+    .stats-strip {
+      display: flex;
+      gap: 2px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 20px;
+      overflow: hidden;
+      flex-shrink: 0;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .stats-strip-item {
+      padding: 20px 28px;
+      background: rgba(255,255,255,0.03);
+      text-align: center;
+      min-width: 95px;
+      transition: background var(--transition-fast);
+    }
+
+    .stats-strip-item:hover {
+      background: rgba(255,255,255,0.08);
+    }
+
+    .stats-strip-item:first-child {
+      border-radius: 18px 0 0 18px;
+    }
+
+    .stats-strip-item:last-child {
+      border-radius: 0 18px 18px 0;
+    }
+
+    .stats-strip-value {
+      font-size: 26px;
+      font-weight: 700;
+      color: white;
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+
+    .stats-strip-label {
+      font-size: 10px;
+      color: rgba(255,255,255,0.5);
+      margin-top: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 600;
+    }
+
+    /* Section Styles */
+    .section {
+      background: white;
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--color-gray-200);
+      margin-bottom: 24px;
+      overflow: hidden;
+      transition: box-shadow var(--transition-normal), border-color var(--transition-normal);
+    }
+
+    .section:hover {
+      border-color: var(--color-gray-300);
+      box-shadow: var(--shadow-md);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 32px;
+      border-bottom: 1px solid var(--color-gray-100);
+      background: linear-gradient(180deg, rgba(248, 250, 252, 0.5) 0%, transparent 100%);
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--color-gray-900);
+      letter-spacing: -0.01em;
+    }
+
+    .section-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .section-icon.blue { background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); color: #2563eb; }
+    .section-icon.green { background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); color: #059669; }
+    .section-icon.purple { background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%); color: #7c3aed; }
+    .section-icon.orange { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); color: #d97706; }
+
+    .section-content {
+      padding: 28px 32px;
+    }
+
+    /* Outcome Card */
+    .outcome-card {
+      background: white;
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--color-gray-200);
+      margin-bottom: 32px;
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      transition: all var(--transition-normal);
+    }
+
+    .outcome-card:hover {
+      box-shadow: var(--shadow-lg);
+    }
+
+    .outcome-header {
+      padding: 32px 36px;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+      color: white;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .outcome-header::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -20%;
+      width: 60%;
+      height: 200%;
+      background: radial-gradient(ellipse, rgba(99, 102, 241, 0.15) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    .outcome-header h3 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      letter-spacing: -0.02em;
+      position: relative;
+    }
+
+    .outcome-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: rgba(99, 102, 241, 0.2);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #a5b4fc;
+      position: relative;
+    }
+
+    .outcome-badge::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      background: #a5b4fc;
+      border-radius: 50%;
+    }
+
+    .outcome-summary {
+      padding: 24px 36px;
+      background: linear-gradient(180deg, var(--color-gray-50) 0%, white 100%);
+      border-bottom: 1px solid var(--color-gray-100);
+      font-size: 15px;
+      color: var(--color-gray-600);
+      line-height: 1.75;
+    }
+
+    .outcome-body {
+      padding: 32px 36px;
+    }
+
+    /* Persona Section */
+    .persona-section .section-content {
+      padding: 28px 32px;
+    }
+
+    .persona-badge {
+      padding: 4px 12px;
+      background: rgb(139 92 246 / 0.1);
+      border-radius: 16px;
+      font-size: 12px;
+      color: var(--color-purple);
+      font-weight: 500;
+    }
+
+    /* Feature Card */
+    .feature-card {
+      background: white;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--color-gray-200);
+      margin-bottom: 16px;
+      transition: all var(--transition-fast);
+    }
+
+    .feature-card:hover {
+      border-color: var(--color-gray-300);
+      box-shadow: var(--shadow-md);
+    }
+
+    .feature-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--color-gray-100);
+    }
+
+    .feature-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--color-gray-900);
+    }
+
+    .feature-tags {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .tag-id { background: var(--color-gray-100); color: var(--color-gray-600); }
+    .tag-steps { background: rgb(139 92 246 / 0.15); color: #7c3aed; }
+    .tag-actions { background: rgb(16 185 129 / 0.15); color: #059669; }
+
+    /* Stats badges for accordion headers */
+    .accordion-stats {
+      display: flex;
+      gap: 8px;
+      margin-left: auto;
+    }
+
+    .stat-badge {
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .stat-steps {
+      background: rgb(139 92 246 / 0.15);
+      color: #7c3aed;
+    }
+
+    .stat-actions {
+      background: rgb(16 185 129 / 0.15);
+      color: #059669;
+    }
+
+    .feature-body {
+      padding: 24px;
+    }
+
+    .overview-block {
+      padding: 16px 20px;
+      background: linear-gradient(135deg, rgb(59 130 246 / 0.05) 0%, rgb(139 92 246 / 0.05) 100%);
+      border-radius: var(--radius-md);
+      border-left: 3px solid var(--color-secondary);
+      margin-bottom: 20px;
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--color-gray-700);
+    }
+
+    /* Accordion */
+    .accordion {
+      margin-bottom: 12px;
+    }
+
+    .accordion-trigger {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      background: var(--color-gray-50);
+      border: 1px solid var(--color-gray-100);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .accordion-trigger:hover {
+      background: var(--color-gray-100);
+    }
+
+    .accordion-trigger[aria-expanded="true"] {
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
+      border-bottom-color: transparent;
+    }
+
+    .accordion-icon {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-gray-400);
+      transition: transform var(--transition-fast);
+    }
+
+    .accordion-trigger[aria-expanded="true"] .accordion-icon {
+      transform: rotate(90deg);
+    }
+
+    .accordion-title {
+      flex: 1;
+      text-align: left;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--color-gray-700);
+    }
+
+    .accordion-count {
+      padding: 2px 8px;
+      background: var(--color-gray-200);
+      border-radius: 10px;
+      font-size: 11px;
+      color: var(--color-gray-600);
+    }
+
+    .accordion-panel {
+      display: none;
+      padding: 20px;
+      background: white;
+      border: 1px solid var(--color-gray-100);
+      border-top: none;
+      border-radius: 0 0 var(--radius-md) var(--radius-md);
+    }
+
+    .accordion-panel.open {
+      display: block;
+    }
+
+    /* Workflow Steps */
+    .workflow-step {
+      display: flex;
+      gap: 16px;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--color-gray-100);
+    }
+
+    .workflow-step:last-child {
+      border-bottom: none;
+    }
+
+    .step-indicator {
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-purple) 100%);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .step-content {
+      flex: 1;
+    }
+
+    .step-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--color-gray-800);
+      margin-bottom: 10px;
+    }
+
+    .action-item {
+      padding: 12px 16px;
+      background: var(--color-gray-50);
+      border-radius: var(--radius-sm);
+      margin-bottom: 8px;
+      border-left: 3px solid var(--color-success);
+    }
+
+    .action-text {
+      font-size: 14px;
+      color: var(--color-gray-700);
+    }
+
+    /* Summary Box */
+    .summary-box {
+      padding: 24px 28px;
+      background: linear-gradient(135deg, var(--color-primary-subtle) 0%, var(--color-purple-subtle) 100%);
+      border-radius: var(--radius-lg);
+      border-left: 4px solid var(--color-primary);
+      font-size: 15px;
+      line-height: 1.8;
+      color: var(--color-gray-700);
+      position: relative;
+    }
+
+    .summary-box::before {
+      content: '“';
+      position: absolute;
+      top: 12px;
+      left: 20px;
+      font-size: 48px;
+      color: var(--color-primary);
+      opacity: 0.2;
+      font-family: Georgia, serif;
+      line-height: 1;
+    }
+
+    /* Cards Grid */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .info-card {
+      padding: 24px;
+      background: var(--color-gray-50);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--color-gray-100);
+      transition: all var(--transition-normal);
+      position: relative;
+    }
+
+    .info-card:hover {
+      background: white;
+      border-color: var(--color-gray-200);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }
+
+    .info-card-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--color-gray-900);
+      margin-bottom: 10px;
+      letter-spacing: -0.01em;
+    }
+
+    .info-card-text {
+      font-size: 14px;
+      color: var(--color-gray-600);
+      line-height: 1.7;
+    }
+
+    .info-card-meta {
+      margin-top: 14px;
+      font-size: 12px;
+      color: var(--color-primary);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .info-card-meta::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      background: var(--color-primary);
+      border-radius: 50%;
+    }
+
+    /* List Items */
+    .item-list {
+      list-style: none;
+    }
+
+    .item-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--color-gray-100);
+    }
+
+    .item-list li:last-child {
+      border-bottom: none;
+    }
+
+    .item-number {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      background: var(--color-primary);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .item-number.green { background: var(--color-success); }
+    .item-number.purple { background: var(--color-purple); }
+
+    /* Diagram Container */
+    .diagram-wrapper {
+      background: var(--color-gray-50);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      margin: 16px 0;
+      position: relative;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      border: 1px solid var(--color-gray-100);
+    }
+
+    .diagram-wrapper:hover {
+      background: var(--color-gray-100);
+      border-color: var(--color-gray-200);
+    }
+
+    .diagram-expand-hint {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      padding: 6px 12px;
+      background: var(--color-gray-800);
+      color: white;
+      font-size: 11px;
+      border-radius: var(--radius-sm);
+      opacity: 0;
+      transition: opacity var(--transition-fast);
+    }
+
+    .diagram-wrapper:hover .diagram-expand-hint {
+      opacity: 1;
+    }
+
+    .mermaid {
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgb(0 0 0 / 0.8);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      justify-content: center;
+      align-items: center;
+      padding: 24px;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal {
+      width: 95vw;
+      max-width: 1400px;
+      height: 90vh;
+      background: white;
+      border-radius: var(--radius-xl);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: var(--shadow-xl);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      background: var(--color-gray-900);
+      color: white;
+    }
+
+    .modal-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .modal-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .modal-btn {
+      width: 36px;
+      height: 36px;
+      background: rgb(255 255 255 / 0.1);
+      border: none;
+      border-radius: var(--radius-sm);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background var(--transition-fast);
+    }
+
+    .modal-btn:hover {
+      background: rgb(255 255 255 / 0.2);
+    }
+
+    .modal-btn.close {
+      background: var(--color-danger);
+    }
+
+    .modal-btn.close:hover {
+      background: #dc2626;
+    }
+
+    .modal-btn svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .zoom-display {
+      padding: 0 12px;
+      font-size: 13px;
+      min-width: 60px;
+      text-align: center;
+    }
+
+    .modal-body {
+      flex: 1;
+      overflow: auto;
+      padding: 32px;
+      background: var(--color-gray-50);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .modal-diagram {
+      transform-origin: top center;
+      transition: transform var(--transition-fast);
+    }
+
+    /* Loading & Error States */
+    .loading-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 60px;
+      color: var(--color-gray-400);
+    }
+
+    .loading-spinner {
+      width: 24px;
+      height: 24px;
+      border: 3px solid var(--color-gray-200);
+      border-top-color: var(--color-primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 12px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .error-state {
+      padding: 20px 24px;
+      background: rgb(239 68 68 / 0.08);
+      border: 1px solid rgb(239 68 68 / 0.2);
+      border-radius: var(--radius-md);
+      color: var(--color-danger);
+      font-size: 14px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px;
+      color: var(--color-gray-400);
+      font-size: 15px;
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .stats-strip-item {
+        padding: 16px 24px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      :root {
+        --sidebar-width: 100%;
+      }
+
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        transform: translateX(-100%);
+      }
+
+      .app.sidebar-visible .sidebar {
+        transform: translateX(0);
+      }
+
+      .sidebar-toggle {
+        left: 16px;
+      }
+
+      .container {
+        padding: 20px;
+      }
+
+      .hero-inner {
+        padding: 32px 24px;
+      }
+
+      .hero-brand {
+        margin-bottom: 28px;
+      }
+
+      .hero-main {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 28px;
+      }
+
+      .hero h1 {
+        font-size: 28px;
+      }
+
+      .hero-meta {
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .hero-meta-divider {
+        display: none;
+      }
+
+      .stats-strip {
+        width: 100%;
+      }
+
+      .stats-strip-item {
+        flex: 1;
+        padding: 16px 20px;
+      }
+
+      .stats-strip-value {
+        font-size: 22px;
+      }
+    }
+
+    /* Print Styles */
+    @media print {
+      .sidebar, .sidebar-toggle, .modal-backdrop {
+        display: none !important;
+      }
+
+      .app {
+        display: block;
+      }
+
+      .main {
+        margin: 0;
+      }
+
+      .section, .outcome-card, .feature-card {
+        break-inside: avoid;
+      }
+    }
+"""
+
+
+def generate_html(graph_data, enrichments=None):
+    """Generate the complete standalone HTML document."""
+    personas = graph_data.get("personas", [])
+    project = graph_data.get("project", {})
+    project_name = project.get("name", "Application")
+
+    nav_html = build_nav_html(personas, enrichments)
+    content_html = build_content_html(personas, project_name, enrichments)
+
+    # Build HTML parts using list concatenation to avoid f-string/script tag issues
+    parts = []
+
+    parts.append(f"""<!DOCTYPE html>
+<html lang="en" data-theme="light" data-font="medium">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Functional Specification Document Viewer">
+  <title>Functional Specification - {e(project_name)}</title>
+
+  <!-- Mermaid.js for diagram rendering (requires network access) -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+
+  <style>
+{CSS}
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar" role="navigation" aria-label="Document navigation">
+      <div class="sidebar-brand">
+        <h1>Functional Spec</h1>
+      </div>
+      <div class="sidebar-search">
+        <input type="search" class="search-input" id="searchBox" placeholder="Search outcomes, scenarios..." aria-label="Search" oninput="handleSearch(this.value)">
+      </div>
+      <nav class="sidebar-nav" id="navigationMenu">
+        {nav_html}
+      </nav>
+    </aside>
+
+    <button class="sidebar-toggle" id="toggleSidebar" aria-label="Toggle navigation" aria-expanded="true" onclick="toggleSidebar()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+
+    <main class="main" id="mainContent">
+      {content_html}
+    </main>
+  </div>
+
+  <!-- Diagram Modal -->
+  <div class="modal-backdrop" id="diagramModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="modalTitle">Diagram</span>
+        <div class="modal-controls" role="toolbar" aria-label="Diagram controls">
+          <button class="modal-btn" onclick="zoomDiagram(-0.25)" aria-label="Zoom out">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
+          </button>
+          <span class="zoom-display" id="zoomLevel" aria-live="polite">150%</span>
+          <button class="modal-btn" onclick="zoomDiagram(0.25)" aria-label="Zoom in">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <button class="modal-btn" onclick="resetZoom()" aria-label="Reset zoom">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M20.5 9A9 9 0 0 0 5.3 5.3L4 4m15.7 15.7A9 9 0 0 1 4.5 15"/></svg>
+          </button>
+          <button class="modal-btn" onclick="exportAsPNG()" aria-label="Export as PNG">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          </button>
+          <button class="modal-btn" onclick="exportAsSVG()" aria-label="Export as SVG">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+          </button>
+          <button class="modal-btn close" onclick="closeDiagramModal()" aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="modal-body" id="modalBody">
+        <div class="modal-diagram" id="modalContent"></div>
+      </div>
+    </div>
+  </div>
+""")
+
+    # JavaScript goes in a separate raw string to avoid f-string issues with JS curly braces
+    parts.append("""  <script>
+    'use strict';
+
+    // === Configuration ===
+    const CONFIG = {
+      zoom: { initial: 1.5, min: 0.25, max: 10, step: 0.25 },
+      search: { debounceMs: 150 }
+    };
+
+    const State = {
+      zoom: CONFIG.zoom.initial,
+      sidebarOpen: true,
+      filter: 'all',
+      search: ''
+    };
+
+    const qid = id => document.getElementById(id);
+    const qall = sel => document.querySelectorAll(sel);
+
+    // === Mermaid ===
+    if (typeof mermaid !== 'undefined') {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'default',
+        securityLevel: 'loose',
+        suppressErrorRendering: true,
+        flowchart: { useMaxWidth: true, htmlLabels: true }
+      });
+    }
+
+    // === Diagram Modal ===
+    function openDiagramModal(el, title) {
+      const modal = qid('diagramModal');
+      const content = qid('modalContent');
+      const svg = el.querySelector('svg');
+      content.innerHTML = '';
+      if (svg) content.appendChild(svg.cloneNode(true));
+      qid('modalTitle').textContent = title || 'Diagram';
+      State.zoom = CONFIG.zoom.initial;
+      content.style.transform = 'scale(' + State.zoom + ')';
+      updateZoomDisplay();
+      modal.classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeDiagramModal() {
+      qid('diagramModal').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    function zoomDiagram(delta) {
+      State.zoom = Math.max(CONFIG.zoom.min, Math.min(CONFIG.zoom.max, State.zoom + delta));
+      qid('modalContent').style.transform = 'scale(' + State.zoom + ')';
+      updateZoomDisplay();
+    }
+
+    function resetZoom() {
+      State.zoom = 1;
+      qid('modalContent').style.transform = 'scale(1)';
+      updateZoomDisplay();
+    }
+
+    function updateZoomDisplay() {
+      qid('zoomLevel').textContent = Math.round(State.zoom * 100) + '%';
+    }
+
+    function exportAsPNG() {
+      const svg = qid('modalContent').querySelector('svg');
+      if (!svg) return alert('No diagram');
+      try {
+        const clone = svg.cloneNode(true);
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('width', '100%');
+        rect.setAttribute('height', '100%');
+        rect.setAttribute('fill', 'white');
+        clone.insertBefore(rect, clone.firstChild);
+        clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        const bbox = svg.getBBox();
+        const w = Math.max(bbox.width + 40, 800);
+        const h = Math.max(bbox.height + 40, 600);
+        clone.setAttribute('width', w);
+        clone.setAttribute('height', h);
+        const data = new XMLSerializer().serializeToString(clone);
+        const url = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(data)));
+        const canvas = document.createElement('canvas');
+        canvas.width = w * 2;
+        canvas.height = h * 2;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(2, 2);
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, w, h);
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, w, h);
+          const a = document.createElement('a');
+          a.download = 'diagram.png';
+          a.href = canvas.toDataURL('image/png');
+          a.click();
+        };
+        img.src = url;
+      } catch (e) {
+        alert('Export failed');
+      }
+    }
+
+    function exportAsSVG() {
+      const svg = qid('modalContent').querySelector('svg');
+      if (!svg) return alert('No diagram');
+      const clone = svg.cloneNode(true);
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('width', '100%');
+      rect.setAttribute('height', '100%');
+      rect.setAttribute('fill', 'white');
+      clone.insertBefore(rect, clone.firstChild);
+      const blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' });
+      const a = document.createElement('a');
+      a.download = 'diagram.svg';
+      a.href = URL.createObjectURL(blob);
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 100);
+    }
+
+    // === Sidebar ===
+    function toggleSidebar() {
+      State.sidebarOpen = !State.sidebarOpen;
+      qid('app').classList.toggle('sidebar-hidden', !State.sidebarOpen);
+      qid('toggleSidebar').setAttribute('aria-expanded', State.sidebarOpen);
+    }
+
+    // === Search ===
+    let searchTimeout;
+    function handleSearch(term) {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        State.search = term.toLowerCase();
+        qall('.nav-item').forEach(item => {
+          const match = item.textContent.toLowerCase().includes(State.search);
+          item.style.display = match ? '' : 'none';
+        });
+        // Also filter outcome cards in main content
+        qall('.outcome-card').forEach(card => {
+          const text = card.textContent.toLowerCase();
+          card.style.display = (!State.search || text.includes(State.search)) ? '' : 'none';
+        });
+      }, CONFIG.search.debounceMs);
+    }
+
+    // === Filter ===
+    function handleFilter(filter) {
+      State.filter = filter;
+      qall('.filter-chip').forEach(btn => {
+        btn.setAttribute('aria-pressed', btn.dataset.filter === filter);
+      });
+      if (filter === 'all') {
+        qall('.nav-group').forEach(group => group.style.display = '');
+        qall('.nav-item').forEach(item => item.style.display = '');
+      } else if (filter === 'outcome') {
+        qall('.nav-group').forEach(group => {
+          group.style.display = group.dataset.type === 'outcome' ? '' : 'none';
+        });
+        qall('.nav-item').forEach(item => item.style.display = '');
+      }
+    }
+
+    // === Accordion ===
+    function toggleAccordion(trigger) {
+      const panel = trigger.nextElementSibling;
+      const expanded = trigger.getAttribute('aria-expanded') === 'true';
+      trigger.setAttribute('aria-expanded', !expanded);
+      panel.classList.toggle('open', !expanded);
+
+      if (!expanded) {
+        const diagrams = panel.querySelectorAll('.mermaid');
+        if (diagrams.length) setTimeout(renderDiagrams, 50);
+      }
+    }
+
+    // === Navigation ===
+    function scrollToSection(id) {
+      const el = qid(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        qall('.nav-item a').forEach(a => a.classList.remove('active'));
+        if (event && event.target) event.target.classList.add('active');
+      }
+    }
+
+    function switchNavTab(tab) {
+      qall('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+      const tabs = ['Overview', 'Outcomes', 'Scenarios'];
+      tabs.forEach(t => {
+        const el = qid('navTab' + t);
+        if (el) el.style.display = t.toLowerCase() === tab ? '' : 'none';
+      });
+    }
+
+    function scrollToScenario(id) {
+      const el = qid(id);
+      if (!el) return;
+      // Expand parent accordions up to the scenario
+      let parent = el.parentElement;
+      while (parent) {
+        if (parent.classList && parent.classList.contains('accordion-panel')) {
+          const trigger = parent.previousElementSibling;
+          if (trigger && trigger.getAttribute('aria-expanded') === 'false') {
+            toggleAccordion(trigger);
+          }
+        }
+        parent = parent.parentElement;
+      }
+      // Also expand the scenario's own accordion
+      const trigger = el.querySelector('.accordion-trigger');
+      if (trigger && trigger.getAttribute('aria-expanded') === 'false') {
+        toggleAccordion(trigger);
+      }
+      setTimeout(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        qall('.nav-item a').forEach(a => a.classList.remove('active'));
+        if (event && event.target) event.target.classList.add('active');
+      }, 300);
+    }
+
+    // === Render Mermaid Diagrams ===
+    async function renderDiagrams() {
+      if (typeof mermaid === 'undefined') return;
+      const diagrams = qall('.mermaid');
+      for (let i = 0; i < diagrams.length; i++) {
+        const el = diagrams[i];
+        try {
+          const code = decodeURIComponent(el.dataset.diagram || '');
+          if (code) {
+            const { svg } = await mermaid.render('m-' + Date.now() + '-' + i, code);
+            el.innerHTML = svg;
+            const wrapper = el.closest('.diagram-wrapper');
+            if (wrapper && !wrapper.hasAttribute('data-bound')) {
+              wrapper.setAttribute('data-bound', '1');
+              wrapper.addEventListener('click', () => {
+                let title = 'Diagram';
+                const card = wrapper.closest('.outcome-card, .section');
+                if (card) {
+                  const h = card.querySelector('.outcome-header h3, .section-title');
+                  if (h) title = h.textContent;
+                }
+                openDiagramModal(el, title);
+              });
+            }
+          }
+        } catch (e) {
+          el.innerHTML = '<div class="error-state">Failed to render diagram</div>';
+        }
+      }
+    }
+
+    // === Font Size ===
+    function handleFontSize(size) {
+      document.documentElement.setAttribute('data-font', size);
+      qall('.font-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.size === size);
+      });
+      localStorage.setItem('spec-font-size', size);
+    }
+
+    // === Theme ===
+    function handleTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      qall('.theme-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.theme === theme);
+      });
+      localStorage.setItem('spec-theme', theme);
+    }
+
+    // === Load Preferences ===
+    function loadPreferences() {
+      const savedFont = localStorage.getItem('spec-font-size') || 'medium';
+      const savedTheme = localStorage.getItem('spec-theme') || 'light';
+      handleFontSize(savedFont);
+      handleTheme(savedTheme);
+    }
+
+    // === Init ===
+    document.addEventListener('DOMContentLoaded', () => {
+      qid('diagramModal').addEventListener('click', e => { if (e.target === qid('diagramModal')) closeDiagramModal(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDiagramModal(); });
+      loadPreferences();
+      setTimeout(renderDiagrams, 100);
+    });
+  </script>
+</body>
+</html>""")
+
+    return "".join(parts)
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 generate-html.py <input.json> [output.html] [--enrichments enrichments.json] [--template template.html.j2]")
+        sys.exit(1)
+
+    args = sys.argv[1:]
+    input_file = args[0]
+    output_file = "functional-spec.html"
+    enrichments = None
+    custom_template = None
+
+    # Parse arguments
+    i = 1
+    while i < len(args):
+        if args[i] == "--enrichments" and i + 1 < len(args):
+            with open(args[i + 1], "r") as f:
+                enrichments = json.load(f)
+            i += 2
+        elif args[i] == "--template" and i + 1 < len(args):
+            custom_template = args[i + 1]
+            i += 2
+        else:
+            output_file = args[i]
+            i += 1
+
+    # Template-based rendering (when --template is specified)
+    if custom_template:
+        try:
+            from template_engine import load_graph as te_load_graph, build_context, render_template, count_totals as te_count_totals
+        except ImportError:
+            print("Jinja2 is required for custom templates.\n"
+                  "Install it with: pip install jinja2", file=sys.stderr)
+            sys.exit(1)
+
+        graph_data = te_load_graph(input_file)
+        context = build_context(graph_data, enrichments)
+        totals = context["totals"]
+        html_content = render_template(custom_template, context)
+
+        with open(output_file, "w") as f:
+            f.write(html_content)
+
+        enriched = f" (template: {custom_template})"
+        print(f"Written to {output_file}{enriched}")
+        print(f"  {totals['personas']} personas, {totals['outcomes']} outcomes, "
+              f"{totals['scenarios']} scenarios, {totals['steps']} steps, {totals['actions']} actions")
+        return
+
+    # Default: use built-in Python rendering (no Jinja2 dependency)
+    with open(input_file, "r") as f:
+        raw = json.load(f)
+
+    graph = extract_graph(raw)
+    html_content = generate_html(graph, enrichments)
+
+    with open(output_file, "w") as f:
+        f.write(html_content)
+
+    personas = graph.get("personas", [])
+    total_o, total_s, total_st, total_a = count_totals(personas)
+    enriched = " (with AI enrichments)" if enrichments else ""
+    print(f"Written to {output_file}{enriched}")
+    print(f"  {len(personas)} personas, {total_o} outcomes, {total_s} scenarios, {total_st} steps, {total_a} actions")
+
+
+if __name__ == "__main__":
+    main()

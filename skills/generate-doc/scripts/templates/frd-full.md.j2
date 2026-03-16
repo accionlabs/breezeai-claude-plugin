@@ -1,0 +1,179 @@
+# {{ project_name }}
+
+## Functional Requirements Document
+
+| | |
+|---|---|
+| **Version** | 1.0 |
+| **Date** | {{ generated }} |
+| **Source** | Breeze.AI Functional Graph — {{ totals.personas }} personas, {{ totals.outcomes }} outcomes, {{ totals.scenarios }} scenarios, {{ totals.steps }} steps, {{ totals.actions }} actions |
+
+---
+
+## Table of Contents
+
+1. [Document Overview](#1-document-overview)
+2. [Project Context](#2-project-context)
+3. [Persona Summary](#3-persona-summary)
+{% for p in personas %}
+{% set sec = loop.index + 3 %}
+{{ sec }}. [FR-{{ '%03d' % loop.index }} — {{ p.persona }}](#{{ sec }}-fr-{{ '%03d' % loop.index }}--{{ p.persona | slugify }})
+{% for o in p._outcomes %}
+   - {{ sec }}.{{ loop.index }} [{{ o.outcome }}](#{{ (p.persona ~ '-' ~ o.outcome) | slugify }})
+{% endfor %}
+{% endfor %}
+{% set src_sec = personas | length + 4 %}
+{{ src_sec }}. [Source Documents](#{{ src_sec }}-source-documents)
+{% set nfr_sec = personas | length + 5 %}
+{{ nfr_sec }}. [Non-Functional Requirements](#{{ nfr_sec }}-non-functional-requirements)
+{{ nfr_sec + 1 }}. [Glossary](#{{ nfr_sec + 1 }}-glossary)
+
+---
+
+## 1. Document Overview
+
+{% if enrichments.executiveSummary %}
+{{ enrichments.executiveSummary }}
+{% else %}
+This Functional Requirements Document specifies the complete functional behavior of
+{{ project_name }}. It is generated directly from the Breeze.AI semantic knowledge graph.
+
+The document is organized by persona. For each persona, all outcomes are listed with their
+associated scenarios and step-level detail.
+{% endif %}
+
+| | |
+|---|---|
+| **Personas** | {{ totals.personas }} |
+| **Outcomes** | {{ totals.outcomes }} |
+| **Scenarios** | {{ totals.scenarios }} |
+| **Steps** | {{ totals.steps }} |
+| **Actions** | {{ totals.actions }} |
+
+---
+
+## 2. Project Context
+
+{% if enrichments.keyBusinessObjectives %}
+### Key Business Objectives
+
+{% for obj in enrichments.keyBusinessObjectives %}
+{{ loop.index }}. {{ obj }}
+{% endfor %}
+
+{% endif %}
+{% if enrichments.keyStakeholders %}
+### Key Stakeholders
+
+| Role | Interest |
+|------|----------|
+{% for s in enrichments.keyStakeholders %}
+| {{ s.role | escape_pipe }} | {{ s.interest | escape_pipe }} |
+{% endfor %}
+
+{% endif %}
+{% if enrichments.keyCapabilities %}
+### Key Capabilities
+
+{% for cap in enrichments.keyCapabilities %}
+- {{ cap }}
+{% endfor %}
+
+{% endif %}
+
+---
+
+## 3. Persona Summary
+
+| ID | Persona | Outcomes | Primary Responsibilities |
+|----|---------|----------|--------------------------|
+{% for p in personas %}
+{% set pdesc = p.enrichment.description if p.enrichment and p.enrichment.description else "" %}
+| FR-{{ '%03d' % loop.index }} | {{ p.persona | escape_pipe }} | {{ p._outcomes | length }} | {{ pdesc | escape_pipe }} |
+{% endfor %}
+
+---
+
+{% for p in personas %}
+{% set persona_sec = loop.index + 3 %}
+## <a id="{{ persona_sec }}-fr-{{ '%03d' % loop.index }}--{{ p.persona | slugify }}"></a>{{ persona_sec }}. FR-{{ '%03d' % loop.index }} — {{ p.persona }}
+
+{% if p.enrichment and p.enrichment.description %}
+{{ p.enrichment.description }}
+
+{% endif %}
+{% for o in p._outcomes %}
+### <a id="{{ (p.persona ~ '-' ~ o.outcome) | slugify }}"></a>{{ persona_sec }}.{{ loop.index }} {{ o.outcome }}{{ cite_refs(o) }}
+
+{% if o._enrichment and o._enrichment.businessValue %}
+{{ o._enrichment.businessValue }}
+
+{% elif o.description %}
+{{ o.description }}
+
+{% endif %}
+{% if o._enrichment and o._enrichment.mermaidDiagram %}
+```mermaid
+{{ o._enrichment.mermaidDiagram }}
+```
+
+{% endif %}
+{% if not o._scenarios %}
+*No scenarios defined for this outcome.*
+{% else %}
+{% for scenario in o._scenarios %}
+- **SC-{{ '%02d' % loop.index }} {{ scenario.scenario }}**{{ cite_refs(scenario) }}
+{% if scenario.description %}
+
+    {{ scenario.description }}
+{% endif %}
+
+{% for step in scenario._sorted_steps %}
+    - **Step {{ step._index + 1 }}: {{ step.step }}**{{ cite_refs(step) }}
+{% for action in step._actions %}
+        - → {{ action.action }}{{ cite_refs(action) }}
+{% endfor %}
+{% if not step._actions %}
+        - → *(No actions defined)*
+{% endif %}
+{% endfor %}
+{% if not scenario._sorted_steps %}
+    - *No steps defined.*
+{% endif %}
+{% endfor %}
+{% endif %}
+
+---
+
+{% endfor %}
+{% endfor %}
+{% set src_sec = personas | length + 4 %}
+## {{ src_sec }}. Source Documents
+
+{% if source_documents %}
+| # | Document |
+|---|----------|
+{% for doc in source_documents %}
+| <a id="src-{{ loop.index }}"></a>{{ loop.index }} | {{ doc | escape_pipe }} |
+{% endfor %}
+{% else %}
+*No source documents referenced.*
+{% endif %}
+
+---
+
+{% set nfr_sec = personas | length + 5 %}
+## {{ nfr_sec }}. Non-Functional Requirements
+
+*Non-functional requirements should be defined based on the project's specific needs.*
+
+---
+
+{% set glossary_sec = personas | length + 6 %}
+## {{ glossary_sec }}. Glossary
+
+*Glossary terms should be defined based on the project's domain vocabulary.*
+
+---
+
+*Generated on {{ generated }} by Breeze.AI*

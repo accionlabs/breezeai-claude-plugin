@@ -34,6 +34,8 @@ Your credentials are saved to `.breeze.json` in the project root (gitignored).
 | **Search** | `/breeze:search <query>` | Search functional graph or code graph for feature discovery, impact analysis, and cross-cutting queries |
 | **Design** | `/breeze:design <Figma URL>` | Analyze UI/UX designs from Figma frames — extracts functional summary, identifies components, maps to functional graph, flags gaps |
 | **Code Gen** | `/breeze:codegen <feature>` | Generate code and test cases informed by the functional graph and code graph, ensuring implementations align with requirements |
+| **Update Functional Graph** | `/breeze:update-functional-graph` | Create/update nodes in the functional graph |
+| **Generate Doc** | `/breeze:generate-doc` | Generate functional specification documents |
 
 ## Auto-Loading (No Flag Needed)
 
