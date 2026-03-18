@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre-init-check.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__breeze-mcp__Call_Create_Functional_Node_",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/validate-functional-node.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__breeze-mcp__Call_Update_Functional_Node_",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/validate-functional-node.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
