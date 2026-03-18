@@ -61,7 +61,9 @@ The script will:
 
 Wait for the script to complete and note the output summary.
 
-## Step 2 — AI Format Flow Clusters
+## Step 2 — AI Format Flow Clusters (markdown format only)
+
+**Skip this step entirely if `--format raw` was used.**
 
 For EACH flow cluster file (types: UI_TO_BACKEND or BACKEND_ONLY — NOT remaining-cluster-* files):
 
@@ -116,7 +118,7 @@ Ask the user: "Would you like to upload these flow clusters to BreezeAI as docum
 
 **If yes:**
 
-For each markdown file in `./flow-clusters/`:
+For each cluster file in `./flow-clusters/` (`.md` or `.json`):
 1. Upload using multipart form POST:
    ```
    POST https://isometric-backend.accionbreeze.com/documents/upload
@@ -134,6 +136,7 @@ For each markdown file in `./flow-clusters/`:
 
 `$ARGUMENTS` are passed directly to the Python script. Supported options:
 
+- `--format <raw|markdown>` — Output format. `raw` outputs API JSON as-is (no formatting). `markdown` outputs formatted readable markdown (default). AI formatting in Step 2 only applies to `markdown` format.
 - `--entry-point <name>` — Filter to a specific flow (e.g., "knowledge-management")
 - `--output-dir <path>` — Custom output directory (default: ./flow-clusters)
 - `--max-depth <n>` — Maximum call chain depth (default: 4)
@@ -142,6 +145,7 @@ For each markdown file in `./flow-clusters/`:
 Examples:
 ```
 /breeze:user-flows
+/breeze:user-flows --format raw
 /breeze:user-flows --entry-point knowledge-management
 /breeze:user-flows --output-dir ./my-flows
 ```

@@ -758,6 +758,42 @@ def detect_async_boundaries(cluster: FlowCluster) -> list[str]:
 # Markdown output
 # ---------------------------------------------------------------------------
 
+def format_flow_cluster_raw(cluster: FlowCluster) -> str:
+    """Output the raw API data as JSON — no formatting, no transformation."""
+    all_files = cluster.frontend_files + cluster.backend_files
+
+    raw_output = {
+        "name": cluster.name,
+        "entry_point": cluster.entry_point,
+        "flow_type": cluster.flow_type,
+        "total_files": len(all_files),
+        "frontend_files_count": len(cluster.frontend_files),
+        "backend_files_count": len(cluster.backend_files),
+        "files": [],
+    }
+
+    for f in all_files:
+        file_data = {
+            "id": f.id,
+            "path": f.path,
+            "name": f.name,
+            "repositoryName": f.repository_name,
+            "language": f.language,
+            "loc": f.loc,
+            "clusterId": f.cluster_id,
+            "importedByCount": f.imported_by_count,
+            "importCount": f.import_count,
+            "imports": f.imports,
+            "externalImports": f.external_imports,
+            "statements": f.statements,
+            "functions": f.functions,
+            "classes": f.classes,
+        }
+        raw_output["files"].append(file_data)
+
+    return json.dumps(raw_output, indent=2, ensure_ascii=False)
+
+
 def format_flow_cluster(cluster: FlowCluster) -> str:
     """Format a flow cluster as a markdown document."""
     lines = []
@@ -1181,6 +1217,7 @@ def generate_flow_clusters(
     api_base: str = DEFAULT_API_BASE,
     output_dir: str = ".",
     entry_point_filter: Optional[str] = None,
+    output_format: str = "markdown",
 ):
     """Main entry point — generates flow cluster documents for a project."""
 
@@ -1248,13 +1285,20 @@ def generate_flow_clusters(
 
     # Step 5: Write output files
     os.makedirs(output_dir, exist_ok=True)
+    print(f"\n  Output format: {output_format}")
 
     for cluster in clusters:
         safe_name = re.sub(r"[^a-z0-9]+", "-", cluster.name.lower()).strip("-")
-        filename = f"{safe_name}-flow-cluster.md"
-        filepath = os.path.join(output_dir, filename)
 
-        content = format_flow_cluster(cluster)
+        if output_format == "raw":
+            filename = f"{safe_name}-flow-cluster.json"
+            filepath = os.path.join(output_dir, filename)
+            content = format_flow_cluster_raw(cluster)
+        else:
+            filename = f"{safe_name}-flow-cluster.md"
+            filepath = os.path.join(output_dir, filename)
+            content = format_flow_cluster(cluster)
+
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
@@ -1321,6 +1365,12 @@ def main():
         help="Filter to specific entry point (e.g., 'knowledge-management', 'code-ontology')",
     )
     parser.add_argument(
+        "--format",
+        choices=["raw", "markdown"],
+        default="markdown",
+        help="Output format: 'raw' (API JSON as-is), 'markdown' (formatted readable markdown). Default: markdown",
+    )
+    parser.add_argument(
         "--max-depth",
         type=int,
         default=MAX_TRACE_DEPTH,
@@ -1357,6 +1407,7 @@ def main():
         api_base=args.api_base,
         output_dir=args.output_dir,
         entry_point_filter=args.entry_point,
+        output_format=args.format,
     )
 
 
