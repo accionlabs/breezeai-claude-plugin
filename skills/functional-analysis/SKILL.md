@@ -40,7 +40,11 @@ Once confirmed, search existing graph using functional graph search mcp.
 
 ### Step 3: Resolve Persona
 
-Identify persona for the given requirement and check if this exists in the current functional graph using get persona mcp tool. If a new persona is detected then ask user for confirmation if he wants to use a new persona or wants to use an existing persona.
+Identify **all personas** relevant to the requirement and check if they exist in the current functional graph using the get persona MCP tool. If a new persona is detected, ask the user for confirmation whether to use a new persona or reuse an existing one.
+
+**Multi-persona resolution:** If the requirement involves backend processing (API endpoints, credential validation, token generation, email sending, database operations, background jobs, etc.), automatically include the **System persona** alongside the user-facing persona. Build separate scenarios for each:
+- **User-facing persona** — scenarios covering the UI/interaction flow
+- **System persona** — scenarios covering the internal backend processing behavior (not the UI that triggers it)
 
 ### Step 4: Resolve Conflicts
 
