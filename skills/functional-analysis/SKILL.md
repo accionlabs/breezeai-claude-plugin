@@ -17,16 +17,31 @@ Extract `apiKey` and `projectUuid`.
 
 ### Step 1: Gather Requirement Input
 
-Check if the user provided a Jira ticket link/key (e.g., `https://...atlassian.net/browse/PROJ-123` or `PROJ-123`).
+Determine the input type. The user may provide ANY of the following:
 
-**If Jira link/key provided:**
+**A. Jira ticket link/key** (e.g., `https://...atlassian.net/browse/PROJ-123` or `PROJ-123`)
 - Use the Jira MCP tools to fetch the ticket details (summary, description, acceptance criteria, comments)
 - Extract the requirement from the ticket content
 - Remember that a Jira ticket was provided — store the ticket key for later (Step 7)
 
-**If no Jira link:**
+**B. Document or specification text** (pasted text, PDF reference, uploaded doc)
+- Extract functional intents from the document text
+- Use `Documents` MCP to find related source material in the project
+
+**C. Source code** (file paths, code snippets, class/method references)
+- Use `Code_Graph_Search` and `Get_Code_File_Details` to understand the code
+- Translate code to functional language — extract WHAT the code does, not HOW
+- Map: classes → service boundaries, methods → processing phases,
+  conditionals → business rules, queries → data operations
+- Do NOT reproduce raw code in the requirement
+
+**D. Figma design URL**
+- Use Figma MCP `get_design_context` to fetch the design
+- Extract functional intents from the UI components and interactions
+
+**E. Free-text requirement** (no external reference)
 - Ask user to define the requirement properly
-- Remember that no Jira ticket was provided — a new ticket will be created later (Step 7)
+- Remember that no Jira ticket was provided — a new ticket may be created later (Step 7)
 
 Identify functional intents from the input text.
 
@@ -42,9 +57,11 @@ Once confirmed, search existing graph using functional graph search mcp.
 
 Identify **all personas** relevant to the requirement and check if they exist in the current functional graph using the get persona MCP tool. If a new persona is detected, ask the user for confirmation whether to use a new persona or reuse an existing one.
 
+Apply persona resolution rules from `references/guide.md` (priority order, forbidden names, resolution tiebreakers).
+
 **Multi-persona resolution:** If the requirement involves backend processing (API endpoints, credential validation, token generation, email sending, database operations, background jobs, etc.), automatically include the **System persona** alongside the user-facing persona. Build separate scenarios for each:
-- **User-facing persona** — scenarios covering the UI/interaction flow
-- **System persona** — scenarios covering the internal backend processing behavior (not the UI that triggers it)
+- **User-facing persona** — scenarios covering the interaction flow
+- **System persona** — scenarios covering the internal backend processing behavior
 
 ### Step 4: Resolve Conflicts
 
@@ -53,6 +70,12 @@ If any conflict detected in the functional graph (means any scenario/outcome alr
 ### Step 5: Present Functional Graph
 
 Show the functional graph for the requirement user has given in tabular format.
+
+When presenting steps and actions, apply the persona-aware action
+rules from `references/guide.md`:
+- Human personas: platform-agnostic, intent verbs, no UI widgets
+- System persona: description REQUIRED with business logic precision
+- External System: API/integration with endpoint details
 
 ### Step 6: Sync to Jira
 
@@ -78,3 +101,5 @@ If user declines, skip Jira sync.
 ### Step 7: Update Functional Graph
 
 Save all nodes to the functional graph using create functional node mcp tool following the hierarchy order (Persona → Outcome → Scenario → Step → Action). If user chose to update existing nodes in Step 4, use update functional node mcp instead. Refer to `references/guide.md` for data model and required fields.
+
+When creating actions, ensure descriptions follow the persona-aware rules from Step 5.

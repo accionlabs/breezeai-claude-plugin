@@ -5,7 +5,7 @@ format: html
 
 # Breeze MCP Plugin Skills
 
-This document defines 7 skills for the Breeze MCP Claude Code plugin.
+This document defines 8 skills for the Breeze MCP Claude Code plugin.
 Each skill section contains what goes into its `SKILL.md` file.
 
 ---
@@ -58,7 +58,8 @@ breeze-plugin/
 | `Functional_Graph_Search` | search, update-graph, requirements, design |
 | `Code_Graph_Search` | search, codegen, architecture |
 | `Get_Code_File_Details` | search, codegen, architecture |
-| `Documents` | requirements, design, architecture |
+| `Documents` | requirements, design, architecture, validate-graph |
+| `Get_complete_functional_graph` | generate-doc, validate-graph |
 | `Get_all_personas` | search, update-graph, requirements |
 | `Get_all_outcomes_for_a_persona_id` | search, update-graph, requirements |
 | `Get_all_scenarios_for_a_outcome_id` | search, update-graph, requirements |
@@ -864,6 +865,31 @@ Map functional hierarchy to test structure:
 
 ---
 
+## Skill 8: Validate Graph
+
+> **File:** `skills/validate-graph/SKILL.md`
+> **Invoked as:** `/breeze:validate-graph`
+
+### SKILL.md Content
+
+See `skills/validate-graph/SKILL.md` for the full content.
+
+**Purpose:** Validate functional graph quality against source documents.
+
+**Checks performed:**
+- Empty nodes (0 steps/actions)
+- Duplicate scenario and outcome names
+- Citation coverage
+- System action description coverage
+- Platform-agnostic compliance for human persona actions
+- User story coverage vs source documents
+- Persona quality (bloated, thin, forbidden names)
+- Cross-persona overlap
+
+**Tools used:** `Get_complete_functional_graph`, `Documents`, `Call_Update_Functional_Node_`
+
+---
+
 ## Skill Dependency Graph
 
 ```
@@ -890,6 +916,11 @@ Map functional hierarchy to test structure:
                     ┌────────▼────────┐
                     │/breeze:codegen  │
                     └─────────────────┘
+
+  ┌──────────────────┐
+  │/breeze:validate- │  ← standalone QA tool, run anytime
+  │graph             │
+  └──────────────────┘
 ```
 
 ---

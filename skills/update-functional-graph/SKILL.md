@@ -19,7 +19,7 @@ Extract `apiKey` and `projectUuid`.
       └─ Outcome (WHAT -- high-level business capability)
            └─ Scenario (HOW -- specific user/system flow)
                 └─ Step (sequential stage within a scenario)
-                     └─ Action (granular UI interaction or system op)
+                     └─ Action (what user provides/decides OR system processes)
 
 ---
 
@@ -149,13 +149,13 @@ complete the flow.
 - Each Step is a distinct stage in the Scenario's flow
 - Steps are ORDERED -- they represent a sequence
 - A Step name should be a short verb phrase describing the stage
-- Each Step must include a description explaining what happens
+- Steps do NOT require descriptions (the name is sufficient)
 - Steps require a `scenarioId` (the parent Scenario's ID)
 
 **Good Step names:**
-- "Select Date Range"
-- "View KPI Cards"
-- "Apply Filters"
+- "Specify date range"
+- "Review validation results"
+- "Apply filters"
 - "Validate uploaded data"
 
 **Bad Step names:**
@@ -173,47 +173,55 @@ complete the flow.
     label: "Step"
     data: {
       "step": "<short verb phrase>",
-      "description": "<what happens during this stage>",
       "scenarioId": "<parent scenario ID>"
     }
 
 **How to derive Steps from different inputs:**
 
-- **Figma/Design:** Each distinct section or interaction zone on the
-  screen (e.g., "View Header Navigation", "Configure Date Filters",
-  "Review Chart Widgets")
-- **Document/Requirements:** Each numbered step or phase described
-  in the user journey
-- **Frontend Code:** Each major UI state change, page section
-  render, or user interaction handler
-- **Backend Code:** Each processing phase
+- **Figma/Design:** Each distinct section or interaction zone
+- **Document/Requirements:** Each numbered step or phase in the
+  user journey
+- **Source Code:** Methods -> processing phases
   (validate -> transform -> persist -> notify)
 
 ### 7. Create Actions
 
-Actions are the **granular UI interactions or system operations**
-within a Step. They represent the atomic things a user clicks,
-types, or sees -- or the atomic operations a system performs.
+Actions are the **atomic operations or user inputs** within a Step.
 
-**Action rules:**
+**Action rules by persona type:**
 
-- Each Action is a single, atomic interaction or operation
-- Actions are the MOST DETAILED level of the hierarchy
-- An Action name should be specific and concrete
-- Each Action must include a description with expected behavior
-  or result
-- Actions require a `stepId` (the parent Step's ID)
+#### HUMAN PERSONA actions
+- Actions describe what the user PROVIDES, DECIDES, or OBSERVES
+- Actions MUST be platform-agnostic — they must work for web,
+  mobile, CLI, or voice without rewriting
+- FORBIDDEN words in actions: click, tap, swipe, hover, scroll,
+  drag, drop, toggle, button, dropdown, modal, dialog, popup,
+  panel, checkbox, radio, slider, tooltip, menu, sidebar, navbar,
+  tab, icon
+- Instead use intent verbs: Provide, Choose, Confirm, Review,
+  Dismiss, Open, Close, Submit, Cancel, Specify, Indicate,
+  Acknowledge, Request
+- description = null, unless the context specifies a constraint
+  (e.g., "Minimum 20 characters", "Blocked until all files uploaded")
 
-**Good Action names:**
-- "Click 'Submit' button"
-- "Enter email in login field"
-- "System validates JWT token"
-- "Click 'Creer un tableau de bord' button"
+#### SYSTEM PERSONA actions
+- Actions describe single atomic internal operations
+- description is REQUIRED on every System action. Provide one of:
+  - Formula or calculation
+  - Threshold or limit
+  - Field names involved
+  - Condition or branching logic
+  - Error message
+  - Data format or transformation
+  - Input/output shape of the operation
+- When the context lacks a specific value, describe the operation's
+  input -> output contract instead of setting null
+- null is acceptable ONLY for trivial glue actions (e.g., "Log completion")
 
-**Bad Action names:**
-- "Interact with form" (too vague)
-- "Process data" (not specific)
-- "Handle click" (implementation term)
+#### EXTERNAL SYSTEM PERSONA actions
+- Actions describe single atomic API/integration operations
+- description = endpoint, payload shape, or auth mechanism when
+  known; otherwise null
 
 **Quantity guidelines:**
 - A Step typically has 1-5 Actions
@@ -224,38 +232,48 @@ types, or sees -- or the atomic operations a system performs.
     label: "Action"
     data: {
       "action": "<specific interaction or operation>",
-      "description": "<expected behavior or result>",
+      "description": "<precision detail or null per persona rules>",
       "stepId": "<parent step ID>"
     }
 
 **How to derive Actions from different inputs:**
 
-- **Figma/Design:** Each button, input field, toggle, dropdown,
-  link, or interactive element visible in the design
-  (e.g., "Click download icon on widget", "Toggle 'Titre
-  uniquement' switch", "Hover over pie chart segment to see
-  tooltip")
-- **Document/Requirements:** Each specific user action or system
-  response mentioned in acceptance criteria
-- **Frontend Code:** Each event handler (onClick, onChange,
-  onSubmit), form field, or conditional render
-- **Backend Code:** Each API call, database query, validation
-  check, or transformation operation
+- **Document/Requirements:** Each specific user input or system
+  response in acceptance criteria
+- **Source Code:** Translate code to functional language —
+  conditionals -> business rules, queries -> data operations,
+  calculations -> formulas. Never reproduce raw code.
+- **Figma/Design:** Each user decision point or data entry
 
 **Example -- full hierarchy for a dashboard filter:**
 
     Persona: Media Analyst
       └─ Outcome: Manage Dashboard Configuration
            └─ Scenario: Apply Filters and Date Range
-                └─ Step: Configure Date Range
-                     ├─ Action: Click 'Du' date picker input
-                     ├─ Action: Select start date from calendar
-                     ├─ Action: Click 'Au' date picker input
-                     └─ Action: Select end date from calendar
-                └─ Step: Apply Keyword Filter
-                     ├─ Action: Type keyword in 'Filtrer par
-                     │  mot-cles' input
-                     └─ Action: Toggle 'Titre uniquement' switch
+                └─ Step: Specify date range
+                     ├─ Action: Provide start date
+                     │    description: null
+                     ├─ Action: Provide end date
+                     │    description: null
+                └─ Step: Apply keyword filter
+                     ├─ Action: Specify search keyword
+                     │    description: null
+                     ├─ Action: Choose title-only search scope
+                     │    description: null
+
+**Example -- System persona with descriptions:**
+
+    Persona: System
+      └─ Outcome: Manage Validation Process
+           └─ Scenario: Check share class return divergence
+                └─ Step: Calculate daily returns
+                     ├─ Action: Compute daily return per share class
+                     │    description: "Return = (NAV_D1 / NAV_D0) - 1"
+                     ├─ Action: Calculate absolute divergence
+                     │    description: "Divergence = |Return_ClassA - Return_ClassB| × 10,000 (bps)"
+                └─ Step: Flag significant divergences
+                     ├─ Action: Check divergence against threshold
+                     │    description: "> 20 bps = BREACH (Red), > 10 bps = WARNING (Amber)"
 
 ### 8. Create Nodes Top-Down
 
@@ -276,15 +294,27 @@ Use `Call_Update_Functional_Node_` to refine existing nodes.
 
 ---
 
+## Functional Graph Principles
+
+Refer to `../functional-analysis/references/guide.md` for the
+complete shared specification:
+- Persona resolution rules (priority order, forbidden names)
+- Outcome rules (reuse-first, business language)
+- Scenario rules (testable, clear start/end)
+- Step rules (sequential, no description needed)
+- **Action rules (PERSONA-AWARE):**
+  - Human personas: platform-agnostic, intent verbs only
+  - System persona: description REQUIRED with business logic
+  - External System: API/integration operations
+- Context type handling (documents, code, Figma)
+- Data model and MCP tools
+
+These rules are shared across all Breeze skills that create or
+modify functional graph nodes.
+
+---
+
 ## Input-Type Handling
-
-### Figma/Design
-
-- Persona = Human user of the UI
-- Outcome = Group by page/feature area
-- Scenario = Each screen/widget/interaction flow
-- Step = Each section or interaction zone on the screen
-- Action = Each button, input, toggle, chart interaction visible
 
 ### Document/Requirements
 
@@ -292,59 +322,34 @@ Use `Call_Update_Functional_Node_` to refine existing nodes.
 - Outcome = Business capability described
 - Scenario = User journeys described
 - Step = Each phase or numbered step in the journey
-- Action = Each specific user action or system response in
-  acceptance criteria
+- Action = Each specific user input or system response
 
-### Frontend Code
+### Source Code
+
+- Translate code to functional language; never reproduce raw code
+- Map: classes -> service boundaries, methods -> processing phases,
+  conditionals -> business rules, queries -> data operations
+- Frontend code: Persona = Human user, routes -> outcomes,
+  components -> scenarios, sections -> steps
+- Backend code (serves UI): Persona = Human who triggers the API,
+  controllers -> scenarios, service methods -> steps
+- Backend code (internal): Persona = System or External System,
+  processing flows -> scenarios, pipeline stages -> steps
+
+### Figma/Design
 
 - Persona = Human user of the UI
-- Outcome = Group by feature/page
-- Scenario = Map components to user flows
-- Step = Each major UI state change or section render
-- Action = Each event handler, form field, or conditional render
-
-Mapping guide:
-- Components -> Scenarios (each major component maps to a flow)
-- Event handlers -> Actions (onClick, onChange, etc.)
-- Page sections -> Steps (each section is a stage)
-- Routes -> Outcomes (each route group serves a capability)
-
-### Backend Code (serves UI)
-
-- Persona = Human who triggers the API
-- Outcome = Business domain (not endpoint paths)
-- Scenario = Infer user-facing flow
-- Step = Each processing phase (validate, transform, persist)
-- Action = Each API call, DB query, or validation check
-
-Mapping guide:
-- Controllers/Routes -> Scenarios (each endpoint maps to a flow)
-- Middleware -> Steps (validation, auth, rate limiting)
-- Service methods -> Steps (business logic phases)
-- Database queries -> Actions (atomic data operations)
-
-### Backend Code (internal/automated)
-
-- Persona = System or External System
-- Outcome = Processing capability
-- Scenario = Describe processing flow (not user flow)
-- Step = Each processing stage in the pipeline
-- Action = Each atomic operation (parse, compute, store, emit)
-
-Do NOT invent fictional UI interactions for pure backend code.
-If no human triggers the functionality, use "System" as Persona.
+- Outcome = Group by page/feature area
+- Scenario = Each screen/interaction flow
+- Step = Each section or interaction zone
+- Action = Each user decision point or data entry
 
 ### Technical/Infrastructure Content
-
-When encountering purely technical content (config files, build
-scripts, infrastructure code):
 
 - Do NOT create Personas like "Developer" or "DevOps Engineer"
 - Ask: "What user-facing capability does this support?"
 - If it supports no direct user capability, it may not need
   functional graph nodes
-- Infrastructure code -> map to the Outcomes it enables, not to
-  its own Outcome
 
 ---
 
