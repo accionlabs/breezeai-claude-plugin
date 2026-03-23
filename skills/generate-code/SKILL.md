@@ -1,5 +1,5 @@
 ---
-name: codegen
+name: generate-code
 description: >
   Generate code and test cases informed by the functional graph and
   code graph. Ensures implementations align with requirements and
@@ -12,7 +12,7 @@ description: >
 
 ## Guard
 
-Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
+Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
 Extract `apiKey` and `projectUuid`.
 
 ---

@@ -1,5 +1,5 @@
 ---
-name: update-graph
+name: update-functional-graph
 description: >
   Create or update nodes in the functional graph
   (Persona > Outcome > Scenario > Step > Action) from code,
@@ -10,7 +10,7 @@ description: >
 
 ## Guard
 
-Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
+Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
 Extract `apiKey` and `projectUuid`.
 
 ## Hierarchy
@@ -296,7 +296,7 @@ Use `Call_Update_Functional_Node_` to refine existing nodes.
 
 ## Functional Graph Principles
 
-Refer to `../functional-analysis/references/guide.md` for the
+Refer to `../shared/functional-graph-rules.md` for the
 complete shared specification:
 - Persona resolution rules (priority order, forbidden names)
 - Outcome rules (reuse-first, business language)

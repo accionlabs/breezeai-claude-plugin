@@ -1,5 +1,5 @@
 ---
-name: design
+name: analyze-design
 description: >
   Analyze UI/UX designs from Figma frames. Extracts functional
   summary, identifies components, maps to functional graph, flags
@@ -10,7 +10,7 @@ description: >
 
 ## Guard
 
-Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
+Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
 Extract `apiKey` and `projectUuid`.
 
 ## Analysis Flow

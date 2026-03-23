@@ -1,5 +1,5 @@
 ---
-name: init
+name: setup-project
 description: >
   Initialize or validate the Breeze workspace. Sets up .breeze.json
   with API key and project UUID, checks ontology readiness, and
@@ -23,10 +23,11 @@ If `apiKey` is missing from `.breeze.json`:
 2. Prompt: "Paste your Breeze API key."
 3. Save the key to `.breeze.json`
 
-Example `.breeze.json` after this step:
+Also set the `apiBase` field (defaults to `https://isometric-backend.accionbreeze.com`):
 
     {
-      "apiKey": "<USER_API_KEY>"
+      "apiKey": "<USER_API_KEY>",
+      "apiBase": "https://isometric-backend.accionbreeze.com"
     }
 
 **Security:** Never print API keys in output. Store only in

@@ -13,7 +13,7 @@ A Claude Code plugin that integrates with the Breeze AI platform for functional 
 ### 2. Initialize Breeze
 
 ```
-/breeze:init
+/breeze:setup-project
 ```
 
 This will walk you through:
@@ -28,14 +28,16 @@ Your credentials are saved to `.breeze.json` in the project root (gitignored).
 
 | Skill | Command | Description |
 |-------|---------|-------------|
-| **Init** | `/breeze:init` | Set up API key, link project, check ontology status, optionally upload repo or documents |
-| **Functional Analysis** | `/breeze:functional-analysis` | Analyze requirements against the existing functional graph — identifies coverage gaps, conflicts, dependencies, and impact |
-| **Architecture Analysis** | `/breeze:architecture-analysis` | Analyze requirements against the existing architectural graph — identifies impacted layers and components across 8 architecture layers |
+| **Init** | `/breeze:setup-project` | Set up API key, link project, check ontology status, optionally upload repo or documents |
+| **Analyze Functional** | `/breeze:analyze-functional` | Analyze requirements against the existing functional graph — identifies coverage gaps, conflicts, dependencies, and impact |
+| **Analyze Architecture** | `/breeze:analyze-architecture` | Analyze requirements against the existing architectural graph — identifies impacted layers and components across 8 architecture layers |
+| **Analyze Design** | `/breeze:analyze-design <Figma URL>` | Analyze UI/UX designs from Figma frames — extracts functional summary, identifies components, maps to functional graph, flags gaps |
 | **Search** | `/breeze:search <query>` | Search functional graph or code graph for feature discovery, impact analysis, and cross-cutting queries |
-| **Design** | `/breeze:design <Figma URL>` | Analyze UI/UX designs from Figma frames — extracts functional summary, identifies components, maps to functional graph, flags gaps |
-| **Code Gen** | `/breeze:codegen <feature>` | Generate code and test cases informed by the functional graph and code graph, ensuring implementations align with requirements |
-| **Update Functional Graph** | `/breeze:update-functional-graph` | Create/update nodes in the functional graph |
-| **Generate Doc** | `/breeze:generate-doc` | Generate functional specification documents |
+| **Generate Functional from Code** | `/breeze:generate-functional-from-code` | Generate a functional graph from the code graph using a three-pass pipeline — extracts intents, creates structure, generates scenarios |
+| **Generate Code** | `/breeze:generate-code <feature>` | Generate code and test cases informed by the functional graph and code graph |
+| **Generate Spec** | `/breeze:generate-spec` | Generate functional specification documents from the functional graph |
+| **Update Functional Graph** | `/breeze:update-functional-graph` | Create/update nodes in the functional graph from documents, code, or Figma |
+| **Validate Functional Graph** | `/breeze:validate-functional-graph` | Validate the functional graph for duplicates, gaps, quality issues |
 
 ## Auto-Loading (No Flag Needed)
 

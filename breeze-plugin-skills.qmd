@@ -5,7 +5,7 @@ format: html
 
 # Breeze MCP Plugin Skills
 
-This document defines 8 skills for the Breeze MCP Claude Code plugin.
+This document defines 10 skills for the Breeze MCP Claude Code plugin.
 Each skill section contains what goes into its `SKILL.md` file.
 
 ---
@@ -18,21 +18,29 @@ breeze-plugin/
 │   └── plugin.json                          ← Plugin manifest
 ├── .mcp.json                                ← MCP server config (breeze-mcp)
 └── skills/
-    ├── init/
-    │   └── SKILL.md                         ← Skill 1: Initialize Breeze
+    ├── shared/
+    │   └── functional-graph-rules.md        ← Shared rules for all functional graph skills
+    ├── setup-project/
+    │   └── SKILL.md                         ← Skill 1: Setup Breeze Project
     ├── search/
     │   └── SKILL.md                         ← Skill 2: Search Graph
-    ├── update-graph/
-    │   ├── SKILL.md                         ← Skill 3: Update Functional Graph
-    │   └── func-prompt-rules.md             ← Supporting file: generation rules
-    ├── requirements/
-    │   └── SKILL.md                         ← Skill 4: Requirement Analysis
-    ├── design/
-    │   └── SKILL.md                         ← Skill 5: Design Analysis
-    ├── architecture/
-    │   └── SKILL.md                         ← Skill 6: Architecture Analysis
-    └── codegen/
-        └── SKILL.md                         ← Skill 7: Code & Test Generation
+    ├── analyze-functional/
+    │   └── SKILL.md                         ← Skill 3: Analyze Functional Requirements
+    ├── analyze-architecture/
+    │   └── SKILL.md                         ← Skill 4: Analyze Architecture
+    ├── analyze-design/
+    │   └── SKILL.md                         ← Skill 5: Analyze Design (Figma)
+    ├── generate-functional-from-code/
+    │   ├── SKILL.md                         ← Skill 6: Generate Functional Graph from Code
+    │   └── generate.py                      ← Three-pass pipeline script
+    ├── generate-code/
+    │   └── SKILL.md                         ← Skill 7: Generate Code & Tests
+    ├── generate-spec/
+    │   └── SKILL.md                         ← Skill 8: Generate Specification Document
+    ├── update-functional-graph/
+    │   └── SKILL.md                         ← Skill 9: Update Functional Graph
+    └── validate-functional-graph/
+        └── SKILL.md                         ← Skill 10: Validate Functional Graph
 ```
 
 ### File → Content Mapping
@@ -42,7 +50,8 @@ breeze-plugin/
 | `.claude-plugin/plugin.json` | Name, version, description, author |
 | `.mcp.json` | breeze-mcp server command + env config |
 | `skills/*/SKILL.md` | Frontmatter (name, description, triggers) + full instruction prompt |
-| `skills/update-graph/func-prompt-rules.md` | Persona/Outcome/Scenario generation rules (referenced by SKILL.md) |
+| `skills/shared/functional-graph-rules.md` | Shared Persona/Outcome/Scenario/Step/Action rules (referenced by functional-analysis, update-functional-graph, validate-graph, code-graph-to-functional) |
+| `skills/code-graph-to-functional/generate.py` | Three-pass LangGraph pipeline for code-to-functional generation |
 
 ---
 

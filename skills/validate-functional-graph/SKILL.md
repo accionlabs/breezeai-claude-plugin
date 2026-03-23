@@ -1,5 +1,5 @@
 ---
-name: validate-graph
+name: validate-functional-graph
 description: >
   Validate the functional graph against source documents.
   Checks coverage, duplicates, persona quality, description completeness,
@@ -10,7 +10,7 @@ description: >
 
 ## Guard
 
-Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:init`.
+Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:setup-project`.
 Extract `apiKey` and `projectUuid`.
 
 ---
@@ -162,3 +162,11 @@ If yes, for each fix type:
 - **Forbidden personas:** Propose merge target, then update
 
 Always confirm each batch of changes with the user before executing.
+
+---
+
+## Functional Graph Rules Reference
+
+Refer to `../shared/functional-graph-rules.md` for the complete specification
+of persona rules, outcome rules, scenario rules, step/action rules, and
+forbidden names used during validation checks.

@@ -1,5 +1,5 @@
 ---
-name: generate-doc
+name: generate-spec
 description: >
   Generate a functional specification document from the functional graph.
   Outputs structured Markdown grouped by persona with citations.
@@ -9,7 +9,7 @@ description: >
 
 ## Guard
 
-Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:init`.
+Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:setup-project`.
 Extract `apiKey` and `projectUuid`.
 
 ---
@@ -38,14 +38,14 @@ Instead, present the user with a guide:
 - Scope: full project (default), single persona, or single outcome
 
 **Examples:**
-- `/breeze:generate-doc --plain` — plain FRD markdown
-- `/breeze:generate-doc --full --mermaid` — rich FRD with diagrams
-- `/breeze:generate-doc --html --full --mermaid` — rich HTML with diagrams
-- `/breeze:generate-doc --full "Financial Institution User"` — single persona
+- `/breeze:generate-spec --plain` — plain FRD markdown
+- `/breeze:generate-spec --full --mermaid` — rich FRD with diagrams
+- `/breeze:generate-spec --html --full --mermaid` — rich HTML with diagrams
+- `/breeze:generate-spec --full "Financial Institution User"` — single persona
 
 **Export to other formats** (after generating markdown):
-- Word: `/breeze:generate-doc --export docx`
-- PDF:  `/breeze:generate-doc --export pdf`
+- Word: `/breeze:generate-spec --export docx`
+- PDF:  `/breeze:generate-spec --export pdf`
 
 **After generation**, you can review and give feedback to improve any section — I'll update and regenerate instantly.
 

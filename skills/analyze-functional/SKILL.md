@@ -1,5 +1,5 @@
 ---
-name: functional-analysis
+name: analyze-functional
 description: >
   analyze the functional against the existing functional graph which can be access using breezeAi mcp tools.
   Identifies coverage gaps, conflicts, dependencies, and impact.
@@ -8,7 +8,7 @@ description: >
 ---
 ## Guard
 
-Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
+Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
 Extract `apiKey` and `projectUuid`.
 
 # requirement-analysis:
@@ -57,7 +57,7 @@ Once confirmed, search existing graph using functional graph search mcp.
 
 Identify **all personas** relevant to the requirement and check if they exist in the current functional graph using the get persona MCP tool. If a new persona is detected, ask the user for confirmation whether to use a new persona or reuse an existing one.
 
-Apply persona resolution rules from `references/guide.md` (priority order, forbidden names, resolution tiebreakers).
+Apply persona resolution rules from `../shared/functional-graph-rules.md` (priority order, forbidden names, resolution tiebreakers).
 
 **Multi-persona resolution:** If the requirement involves backend processing (API endpoints, credential validation, token generation, email sending, database operations, background jobs, etc.), automatically include the **System persona** alongside the user-facing persona. Build separate scenarios for each:
 - **User-facing persona** — scenarios covering the interaction flow
@@ -72,7 +72,7 @@ If any conflict detected in the functional graph (means any scenario/outcome alr
 Show the functional graph for the requirement user has given in tabular format.
 
 When presenting steps and actions, apply the persona-aware action
-rules from `references/guide.md`:
+rules from `../shared/functional-graph-rules.md`:
 - Human personas: platform-agnostic, intent verbs, no UI widgets
 - System persona: description REQUIRED with business logic precision
 - External System: API/integration with endpoint details
@@ -100,6 +100,6 @@ If user declines, skip Jira sync.
 
 ### Step 7: Update Functional Graph
 
-Save all nodes to the functional graph using create functional node mcp tool following the hierarchy order (Persona → Outcome → Scenario → Step → Action). If user chose to update existing nodes in Step 4, use update functional node mcp instead. Refer to `references/guide.md` for data model and required fields.
+Save all nodes to the functional graph using create functional node mcp tool following the hierarchy order (Persona → Outcome → Scenario → Step → Action). If user chose to update existing nodes in Step 4, use update functional node mcp instead. Refer to `../shared/functional-graph-rules.md` for data model and required fields.
 
 When creating actions, ensure descriptions follow the persona-aware rules from Step 5.

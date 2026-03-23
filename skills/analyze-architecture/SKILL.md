@@ -1,10 +1,10 @@
 ---
-name: architecture-analysis
+name: analyze-architecture
 description: analyze the requirement against the existing architectural graph which can be accessed using breezeAi mcp tools.
 ---
 ## Guard
 
-Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
+Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
 Extract `apiKey` and `projectUuid`.
 
 # architecture-analysis
