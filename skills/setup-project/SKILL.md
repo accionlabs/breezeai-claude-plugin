@@ -55,3 +55,26 @@ Ask: "Would you like to:
 
 Confirm: "Project linked successfully."
 
+## Step 2b — AWS Credentials (Optional)
+
+If `awsAccessKey` and `awsSecretKey` are missing from `.breeze.json`:
+
+Ask: "Do you have AWS credentials for Bedrock? (needed for code-to-functional graph generation)"
+
+If yes:
+1. Prompt for AWS Access Key ID and AWS Secret Access Key
+2. Save to `.breeze.json`:
+
+```json
+{
+  "awsAccessKey": "<ACCESS_KEY>",
+  "awsSecretKey": "<SECRET_KEY>"
+}
+```
+
+**Security:** Never print AWS credentials in output. Store only in
+`.breeze.json`.
+
+If no, skip — these can be added later when running
+`/breeze:generate-functional-from-code`.
+

@@ -58,12 +58,35 @@ Once done, re-run the pipeline — clusters will now be available.
 
 ## Step 1 — Run the Pipeline
 
-Run the three-pass generator script:
+Run the three-pass generator script. **Always** pass `--auto-approve` since
+Claude Code runs commands non-interactively (no TTY). The script also
+auto-detects non-TTY environments and auto-approves, but the flag makes
+intent explicit.
+
+Read all credentials from `.breeze.json` and pass them explicitly:
 
 ```bash
 python3 {SKILL_DIR}/generate.py \
   --project-uuid {projectUuid} \
-  --api-key {apiKey}
+  --api-key {apiKey} \
+  --api-base {apiBase} \
+  --aws-access-key {awsAccessKey} \
+  --aws-secret-key {awsSecretKey} \
+  --auto-approve
+```
+
+Where `{awsAccessKey}` and `{awsSecretKey}` are read from `.breeze.json`
+fields `awsAccessKey` / `awsSecretKey`. If these fields are missing from
+`.breeze.json`, ask the user for their AWS credentials and save them to
+`.breeze.json` before running.
+
+**Important:** The pipeline requires AWS Bedrock access. If the user has not
+configured AWS credentials yet, prompt them and save to `.breeze.json`:
+```json
+{
+  "awsAccessKey": "<ACCESS_KEY>",
+  "awsSecretKey": "<SECRET_KEY>"
+}
 ```
 
 ### Arguments
@@ -72,17 +95,17 @@ python3 {SKILL_DIR}/generate.py \
 |------|-------------|
 | `--project-uuid` | Project UUID (defaults to `.breeze.json`) |
 | `--api-key` | API key (defaults to `.breeze.json`) |
+| `--api-base` | API base URL (defaults to `.breeze.json` or `https://isometric-backend.accionbreeze.com`) |
+| `--aws-access-key` | AWS access key for Bedrock (defaults to `.breeze.json` or env) |
+| `--aws-secret-key` | AWS secret key for Bedrock (defaults to `.breeze.json` or env) |
 | `--cluster <id>` | Process only this cluster ID (for testing) |
 | `--auto-approve` | Skip all approval prompts, auto-approve everything |
 
 ### Examples
 
 ```bash
-# Interactive — review and approve each step
+# Standard run (auto-approve for non-interactive use)
 /breeze:generate-functional-from-code
-
-# Auto-approve everything (no prompts)
-/breeze:generate-functional-from-code --auto-approve
 
 # Test with a single cluster first
 /breeze:generate-functional-from-code --cluster 45
@@ -164,10 +187,13 @@ The pipeline follows the BreezeAI functional graph specification defined in
 ## Dependencies
 
 ```bash
-pip install langgraph langchain-aws langchain-core boto3 requests
+pip install boto3 requests
 ```
 
 Requires AWS Bedrock access with Claude 3.5 Sonnet and Haiku models.
+
+**Note:** If `pip install` fails with an externally-managed-environment error
+(PEP 668), use `pip install --break-system-packages boto3 requests`.
 
 ## Models Used
 

@@ -147,7 +147,7 @@ class LLM:
         log_file = os.path.join(log_dir, f"call_{call_id:03d}.txt")
         with open(log_file, "w", encoding="utf-8") as f:
             f.write(f"=== LLM CALL #{call_id} ===\n")
-            f.write(f"Model: {model or BEDROCK_MODEL_ID}\n")
+            f.write(f"Model: {model or self.default_model}\n")
             f.write(f"Max tokens: {max_tokens}\n")
             f.write(f"System prompt tokens (est): ~{sys_tokens}\n")
             f.write(f"User prompt tokens (est): ~{usr_tokens}\n")
@@ -337,21 +337,35 @@ def chunk_text(text, max_chars=60000):
 
 _auto_approve = False
 
+def _is_interactive():
+    """Check if stdin is a TTY (interactive terminal)."""
+    try:
+        return os.isatty(sys.stdin.fileno())
+    except Exception:
+        return False
+
 def ask_user(prompt_text):
-    """Interactive feedback. Auto-approves if --auto-approve flag is set."""
-    if _auto_approve:
+    """Interactive feedback. Auto-approves if --auto-approve flag is set or stdin is not a TTY."""
+    if _auto_approve or not _is_interactive():
         print(f"\n{prompt_text}")
         print("  [AUTO-APPROVED]")
         return "approve", None
     print(f"\n{prompt_text}")
     print("[A]pprove / [E]dit / [S]kip / [Q]uit")
     while True:
-        choice = input("> ").strip().lower()
+        try:
+            choice = input("> ").strip().lower()
+        except EOFError:
+            print("  [AUTO-APPROVED — no interactive input available]")
+            return "approve", None
         if choice in ("a", "approve"): return "approve", None
         if choice in ("s", "skip"): return "skip", None
         if choice in ("q", "quit"): return "quit", None
         if choice in ("e", "edit"):
-            feedback = input("Enter corrections: > ").strip()
+            try:
+                feedback = input("Enter corrections: > ").strip()
+            except EOFError:
+                return "approve", None
             return "edit", feedback
         print("Invalid. Enter A/E/S/Q")
 
