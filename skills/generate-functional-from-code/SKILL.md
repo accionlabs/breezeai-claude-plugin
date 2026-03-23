@@ -100,6 +100,7 @@ configured AWS credentials yet, prompt them and save to `.breeze.json`:
 | `--aws-secret-key` | AWS secret key for Bedrock (defaults to `.breeze.json` or env) |
 | `--cluster <id>` | Process only this cluster ID (for testing) |
 | `--auto-approve` | Skip all approval prompts, auto-approve everything |
+| `--skip-single-file-clusters` | Skip clusters with only 1 file (by default all clusters are processed) |
 
 ### Examples
 
@@ -118,11 +119,16 @@ configured AWS credentials yet, prompt them and save to `.breeze.json`:
 
 ### Pass 1 — Intent Extraction (automated)
 
-For each code cluster:
+All clusters are processed — small clusters (including single-file) are
+aggregated into batches of up to 15 files so no cluster is missed. Large
+clusters (≥15 files) get their own batch. Use `--skip-single-file-clusters`
+to revert to the old behavior of skipping single-file clusters.
+
+For each batch:
 - Fetches files with full hierarchy (classes, methods, route decorators,
   injected services, call targets)
 - Sends compact summary to LLM (Haiku)
-- Extracts 1-8 functional intents per cluster
+- Extracts 1-8 functional intents per batch
 - Format: `"Persona: Capability phrase"`
 
 **No user interaction needed.** Progress is printed to console.

@@ -692,6 +692,7 @@ def main():
     parser.add_argument("--sonnet-model")
     parser.add_argument("--cluster", type=int, help="Process only this cluster ID (for testing)")
     parser.add_argument("--auto-approve", action="store_true", help="Skip all approval prompts, auto-approve everything")
+    parser.add_argument("--skip-single-file-clusters", action="store_true", help="Skip clusters with only 1 file (old behavior)")
     args = parser.parse_args()
 
     # Load config: CLI args > .breeze.json > env vars > defaults
@@ -742,56 +743,94 @@ def main():
             c["_ontName"] = ont.get("name", "?")
         all_clusters.extend(clusters)
 
-    # Filter: skip single-file clusters, optionally filter to specific cluster
-    clusters_to_process = [c for c in all_clusters if c.get("fileCount", 0) >= 2]
+    # Optionally filter clusters
+    clusters_to_process = list(all_clusters)
+    if args.skip_single_file_clusters:
+        clusters_to_process = [c for c in clusters_to_process if int(c.get("fileCount", 0)) >= 2]
+        print(f"  --skip-single-file-clusters: skipped {len(all_clusters) - len(clusters_to_process)} single-file clusters")
     if args.cluster:
         clusters_to_process = [c for c in clusters_to_process if c.get("clusterId") == args.cluster]
 
     print(f"Total clusters: {len(all_clusters)}, processing: {len(clusters_to_process)}")
 
+    # Aggregate clusters into batches of max 15 files so no cluster is skipped.
+    # Large clusters (>=15 files) get their own batch; small ones are combined.
+    MAX_BATCH_FILES = 15
+    batches = []  # each batch: {"cluster_ids": [...], "files": [...]}
+    current_batch = {"cluster_ids": [], "files": []}
+
+    for cluster in clusters_to_process:
+        cid = cluster.get("clusterId")
+        fc = int(cluster.get("fileCount", 0))
+
+        files = api.get_cluster_files(project_uuid, cid)
+        if not files:
+            print(f"  Cluster {cid}: empty (0 files from API), skipping")
+            continue
+
+        if fc >= MAX_BATCH_FILES:
+            # Large cluster gets its own batch
+            if current_batch["files"]:
+                batches.append(current_batch)
+                current_batch = {"cluster_ids": [], "files": []}
+            batches.append({"cluster_ids": [cid], "files": files})
+        else:
+            # Would adding this cluster exceed the batch limit?
+            if len(current_batch["files"]) + len(files) > MAX_BATCH_FILES and current_batch["files"]:
+                batches.append(current_batch)
+                current_batch = {"cluster_ids": [], "files": []}
+            current_batch["cluster_ids"].append(cid)
+            current_batch["files"].extend(files)
+
+    # Flush remaining batch
+    if current_batch["files"]:
+        batches.append(current_batch)
+
+    total_files = sum(len(b["files"]) for b in batches)
+    total_clusters_covered = sum(len(b["cluster_ids"]) for b in batches)
+    print(f"  Aggregated into {len(batches)} batches ({total_files} files across {total_clusters_covered} clusters)")
+
     all_intents = {}  # cluster_id → [intents]
     flat_intents = []  # all intents flattened
 
-    for i, cluster in enumerate(clusters_to_process):
-        cid = cluster.get("clusterId")
-        fc = cluster.get("fileCount", 0)
-        print(f"  [{i+1}/{len(clusters_to_process)}] Cluster {cid} ({fc} files, {cluster['_ontName']})...", end=" ")
+    for i, batch in enumerate(batches):
+        cids = batch["cluster_ids"]
+        files = batch["files"]
+        cid_label = ", ".join(str(c) for c in cids)
+        print(f"  [{i+1}/{len(batches)}] Batch (clusters: {cid_label}, {len(files)} files)...", end=" ")
 
         try:
-            files = api.get_cluster_files(project_uuid, cid)
-            if not files:
-                print("empty")
-                continue
             summary = format_summary(files)
             chunks = chunk_text(summary, max_chars=60000)
 
             if len(chunks) > 1:
                 print(f"{len(files)} files, {len(summary)} chars → {len(chunks)} chunks")
 
-            cluster_intents = []
+            batch_intents = []
             for ci, chunk in enumerate(chunks):
                 if len(chunks) > 1:
                     print(f"    Chunk {ci+1}/{len(chunks)} ({len(chunk)} chars)...", end=" ")
                 chunk_intents = llm.call_json(INTENT_SYSTEM, f"Extract intents:\n\n{chunk}")
                 if chunk_intents:
-                    cluster_intents.extend(chunk_intents)
+                    batch_intents.extend(chunk_intents)
                     if len(chunks) > 1:
                         print(f"{len(chunk_intents)} intents")
                 elif len(chunks) > 1:
                     print("no-op")
 
-            # Deduplicate intents within cluster
-            cluster_intents = list(set(cluster_intents))
-            if cluster_intents:
-                all_intents[cid] = cluster_intents
-                flat_intents.extend(cluster_intents)
-                print(f"{len(cluster_intents)} intents")
+            # Deduplicate intents within batch
+            batch_intents = list(set(batch_intents))
+            if batch_intents:
+                for cid in cids:
+                    all_intents[cid] = batch_intents
+                flat_intents.extend(batch_intents)
+                print(f"{len(batch_intents)} intents")
             else:
                 print("no-op")
         except Exception as e:
             print(f"error: {e}")
 
-    print(f"\nTotal: {len(flat_intents)} intents from {len(all_intents)} clusters")
+    print(f"\nTotal: {len(flat_intents)} intents from {len(batches)} batches ({len(all_intents)} clusters)")
 
     if not flat_intents:
         print("\nNo intents extracted. Nothing to process.")
