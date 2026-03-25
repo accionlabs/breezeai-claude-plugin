@@ -162,7 +162,15 @@ If the design contains multiple screens or complex flows:
 - Show dependencies between stories
 - Prioritize stories (Must Have, Should Have, Could Have)
 
-### 7. Optional: Link to Functional Graph
+
+### 7. Save Output to File
+
+After presenting the user stories, ALWAYS save the complete output to a `.md` file using the Write tool:
+
+- **Location:** Project root (current working directory)
+- **Filename format:** `user-stories-[screen-name].md` (e.g., `user-stories-login-page.md`)
+- Derive `[screen-name]` from the design title, file name, or page heading — use lowercase, hyphen-separated words
+- Confirm to the user: "Saved to `user-stories-[screen-name].md`"
 
 ## Output Format
 
