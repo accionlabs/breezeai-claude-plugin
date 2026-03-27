@@ -2,9 +2,10 @@
 name: generate-functional-from-code
 description: >
   Generate a functional graph (Persona → Outcome → Scenario → Step → Action)
-  from the code graph. Uses a three-pass pipeline: extract intents from code
-  clusters, create global structure with user approval, then generate scenarios
-  per outcome using Code Graph Search for file discovery.
+  from the code graph. Uses a multi-pass pipeline: extract intents from code
+  clusters, deduplicate via embeddings + DBSCAN clustering, filter/merge/assign
+  outcomes with Sonnet, then generate scenarios per outcome using intent-driven
+  Code Graph Search for file discovery with citation tracking.
   Use when: "generate functional graph from code", "derive functional graph",
   "code to functional", "build functional graph from clusters",
   "generate functional graph from code graph".
@@ -16,10 +17,11 @@ Transforms a codebase's code graph (files, functions, classes, clusters) into
 a functional graph (Persona → Outcome → Scenario → Step → Action). This is
 the brownfield path — when code exists but the functional graph is empty.
 
-The pipeline uses three passes:
-1. **Extract intents** from each code cluster (what does this code enable?)
-2. **Create global structure** — Persona → Outcome skeleton (user reviews)
-3. **Generate scenarios** per outcome using Code Graph Search for file discovery
+The pipeline uses multiple passes:
+1. **Extract intents** from each code cluster (descriptive, 5-15 words)
+2. **Deduplicate intents** via keyword filter + normalization + embeddings + DBSCAN clustering
+3. **Filter, merge, and assign outcomes** using cluster-based batching with Sonnet (filters non-functional intents, merges overlapping ones, assigns to outcomes)
+4. **Generate scenarios** per outcome using intent-driven Code Graph Search for file discovery, with citation tracking at all graph levels
 
 ## Guard
 
@@ -50,6 +52,7 @@ Where `{apiBase}` is read from `.breeze.json` field `apiBase`
 
 **Requirements:**
 - Node.js 22+ must be available (`node --version` to check)
+- Python 3.10+ with numpy and scikit-learn (`pip install numpy scikit-learn`)
 - The `--capture-statements` flag ensures method-level statements are
   captured, which the pipeline needs for accurate steps/actions generation
 
@@ -58,10 +61,9 @@ Once done, re-run the pipeline — clusters will now be available.
 
 ## Step 1 — Run the Pipeline
 
-Run the three-pass generator script. **Always** pass `--auto-approve` since
-Claude Code runs commands non-interactively (no TTY). The script also
-auto-detects non-TTY environments and auto-approves, but the flag makes
-intent explicit.
+Run the generator script. **Always** pass `--auto-approve` since Claude Code
+runs commands non-interactively (no TTY). The script also auto-detects
+non-TTY environments and auto-approves, but the flag makes intent explicit.
 
 Read all credentials from `.breeze.json` and pass them explicitly:
 
@@ -72,20 +74,24 @@ python3 {SKILL_DIR}/generate.py \
   --api-base {apiBase} \
   --aws-access-key {awsAccessKey} \
   --aws-secret-key {awsSecretKey} \
+  --aws-region {awsRegion} \
   --auto-approve
 ```
 
-Where `{awsAccessKey}` and `{awsSecretKey}` are read from `.breeze.json`
-fields `awsAccessKey` / `awsSecretKey`. If these fields are missing from
-`.breeze.json`, ask the user for their AWS credentials and save them to
-`.breeze.json` before running.
+Where credentials and config are read from `.breeze.json` fields:
+- `awsAccessKey` / `awsSecretKey` — AWS credentials
+- `awsRegion` — AWS region (defaults to `us-west-2`)
+- `bedrockHaikuModel` — custom Haiku model ID (optional)
+- `bedrockSonnetModel` — custom Sonnet model ID (optional)
 
-**Important:** The pipeline requires AWS Bedrock access. If the user has not
-configured AWS credentials yet, prompt them and save to `.breeze.json`:
+Config loading priority: CLI args > `.breeze.json` > env vars (`AWS_ACCESS_KEYID`, `AWS_SECRET_KEY`, `AWS_REGION`) > defaults.
+
+If AWS credentials are missing from `.breeze.json`, ask the user and save them:
 ```json
 {
   "awsAccessKey": "<ACCESS_KEY>",
-  "awsSecretKey": "<SECRET_KEY>"
+  "awsSecretKey": "<SECRET_KEY>",
+  "awsRegion": "us-west-2"
 }
 ```
 
@@ -98,9 +104,16 @@ configured AWS credentials yet, prompt them and save to `.breeze.json`:
 | `--api-base` | API base URL (defaults to `.breeze.json` or `https://isometric-backend.accionbreeze.com`) |
 | `--aws-access-key` | AWS access key for Bedrock (defaults to `.breeze.json` or env) |
 | `--aws-secret-key` | AWS secret key for Bedrock (defaults to `.breeze.json` or env) |
+| `--aws-region` | AWS region for Bedrock (defaults to `.breeze.json` field `awsRegion`, env `AWS_REGION`, or `us-west-2`) |
+| `--haiku-model` | Custom Haiku model ID (defaults to `.breeze.json` field `bedrockHaikuModel`) |
+| `--sonnet-model` | Custom Sonnet model ID (defaults to `.breeze.json` field `bedrockSonnetModel`) |
+| `--eps` | DBSCAN epsilon for intent clustering. 0.15=strict, 0.20=moderate, 0.30=loose (default: 0.20) |
+| `--batch-clusters <N>` | Batch small clusters together (max N files per batch). Default 0 = process each cluster separately |
 | `--cluster <id>` | Process only this cluster ID (for testing) |
 | `--auto-approve` | Skip all approval prompts, auto-approve everything |
-| `--skip-single-file-clusters` | Skip clusters with only 1 file (by default all clusters are processed) |
+| `--skip-single-file-clusters` | Skip clusters with only 1 file |
+| `--resume` | Auto-detect and resume from latest cached pass |
+| `--resume-from <N>` | Resume from specific pass (1, 2, or 3) |
 
 ### Examples
 
@@ -108,61 +121,95 @@ configured AWS credentials yet, prompt them and save to `.breeze.json`:
 # Standard run (auto-approve for non-interactive use)
 /breeze:generate-functional-from-code
 
+# With custom DBSCAN threshold (looser clustering)
+/breeze:generate-functional-from-code --eps 0.30
+
+# Resume from Pass 3 (skip intent extraction and outcome assignment)
+/breeze:generate-functional-from-code --resume-from 3
+
 # Test with a single cluster first
 /breeze:generate-functional-from-code --cluster 45
-
-# Different project
-/breeze:generate-functional-from-code --project-uuid abc-123
 ```
 
 ## What Happens
 
 ### Pass 1 — Intent Extraction (automated)
 
-All clusters are processed — small clusters (including single-file) are
-aggregated into batches of up to 15 files so no cluster is missed. Large
-clusters (≥15 files) get their own batch. Use `--skip-single-file-clusters`
-to revert to the old behavior of skipping single-file clusters.
+Each cluster is processed individually by default. Large clusters (30+ files)
+are split into file batches of 30. Use `--batch-clusters 15` to batch small
+clusters together for faster processing (at the cost of less specific intents).
 
-For each batch:
+For each cluster:
 - Fetches files with full hierarchy (classes, methods, route decorators,
   injected services, call targets)
 - Sends compact summary to LLM (Haiku)
-- Extracts 1-8 functional intents per batch
-- Format: `"Persona: Capability phrase"`
+- Extracts descriptive functional intents (5-15 words with context)
+- Format: `"Persona: Descriptive capability phrase with purpose and context"`
+- No upper limit on intents per cluster — extracts as many as the code warrants
 
 **No user interaction needed.** Progress is printed to console.
 
-### Pass 2 — Global Structure (user approval)
+### Pass 1.5 — Intent Deduplication (automated)
 
-Aggregates ALL intents from ALL clusters and sends to LLM (Sonnet) to create
-the Persona → Outcome hierarchy.
+Reduces raw intents to unique capabilities through a multi-step pipeline:
+1. **Keyword filter** — removes test/mock/infrastructure intents
+2. **Exact dedup** — removes identical strings
+3. **Normalization dedup** — merges intents that differ only by case, articles, punctuation
+4. **Embedding generation** — generates vector embeddings via AWS Bedrock Titan (cached)
+5. **DBSCAN clustering** — groups semantically similar intents (configurable via `--eps`)
 
-The pipeline will:
-1. Print the proposed structure (personas and outcomes)
-2. Prompt: `[A]pprove / [E]dit / [S]kip / [Q]uit`
-3. If `E` (edit): provide corrections, LLM revises and re-proposes
-4. If `A` (approve): upserts personas + outcomes to BreezeAI API
-5. Waits 15s for embedding generation
+Displays clustering results and waits for user approval before proceeding.
+Review the clusters to verify related intents are grouped together.
 
-**This is the most important step.** Review carefully — the outcome structure
-defines how the entire functional graph is organized. Use edit feedback to:
-- Split over-merged outcomes
-- Fix persona assignments (User vs System vs External System)
-- Add missing capabilities
-- Provide product domain context if the LLM misgroups
+### Pass 2 — Outcome Assignment (user approval)
+
+Processes intent clusters through Sonnet for deduplication and outcome assignment:
+
+1. **Large DBSCAN clusters** (>= 13 intents) processed individually — chunked into
+   batches of ~25 intents per Sonnet call if needed.
+2. **Small DBSCAN clusters** (< 13 intents) batched together up to ~25 intents per call.
+3. **Singletons** sorted by embedding similarity (greedy nearest-neighbor) so related
+   ones batch together, then sent in groups of ~25.
+4. Sonnet performs three tasks per batch: **filters** non-functional intents (infra, schemas,
+   configs), **merges** overlapping intents into richer phrases, and **assigns outcomes**.
+5. Each batch sees existing outcomes with sample intents (first 3 + last 2) to
+   prevent duplicate outcomes and intents across batches.
+
+Displays full outcome → intent mapping and supports an **edit loop**: user can provide
+feedback to restructure outcomes via Sonnet before approving.
+Review carefully — the outcome structure defines how the functional graph is organized.
 
 ### Pass 3 — Scenarios per Outcome (user approval)
 
-For each outcome:
-1. **Code Graph Search** — finds relevant files across ALL clusters using
-   the outcome name and mapped intents as search queries
-2. **Fetches file details** — full code structure for discovered files
-3. **Extracts scenarios** (Sonnet) — exhaustive, all distinct flows
-4. **Generates steps + actions** (Haiku) — using only relevant files per scenario
-5. **Adds citations** — each node cites its source code files
-6. Prompts: `[A]pprove / [E]dit / [S]kip / [Q]uit`
-7. If approved: upserts to BreezeAI API with 15s embedding wait
+For each outcome, a three-phase pipeline runs:
+
+**Phase 1 — File Discovery:**
+1. **Code Graph Search** — searches per intent for relevant files (File, Function, Class nodes, score >= 0.3)
+2. **Fetches file details** once with children (deduplicated across all intents in the outcome)
+3. **Generates enriched summaries** using `format_summary()` (classes, methods, params, call chains)
+
+**Phase 2 — Scenario Extraction:**
+4. Processes intents in batches of 5 (`INTENT_BATCH_SIZE`)
+5. **Extracts scenarios** (Sonnet) — from enriched file context matched to each batch's intents
+6. Cumulative dedup across batches (existing scenario names passed to each call)
+7. Merges and deduplicates scenarios across all batches by scenario name
+
+**Phase 3 — Steps & Actions:**
+8. **Generates steps + actions** (Haiku) — processes 2 scenarios at a time using full code detail from relevant files
+9. **Attaches citations** — maps file paths to code citations (type: "code") at outcome, scenario, step, and action levels
+10. Prompts: `[A]pprove / [E]dit / [S]kip / [Q]uit` per outcome
+11. If approved: upserts to BreezeAI API with 15s embedding wait
+
+### Caching and Resume
+
+Results are cached at each pass boundary:
+- `llm_logs/cache_pass1.json` — extracted intents
+- `llm_logs/cache_pass1.5.json` — dedup clustering results
+- `llm_logs/cache_pass2.json` — outcome structure
+- `llm_logs/intent_embeddings_v2.json` — embedding vectors (reused across runs)
+
+Use `--resume` to auto-detect and resume from the latest cached pass, or
+`--resume-from 2` to skip Pass 1, `--resume-from 3` to skip Pass 1+2.
 
 ### LLM Logging
 
@@ -189,29 +236,44 @@ The pipeline follows the BreezeAI functional graph specification defined in
 - Pure backend (jobs, workers) → Persona = "System"
 - Route decorators → business capabilities, not endpoint paths
 - Never reproduce raw code in actions
+- Do NOT invent Admin/Moderator unless code explicitly checks roles
 
 ## Dependencies
 
 ```bash
-pip install boto3 requests
+pip install boto3 requests numpy scikit-learn
 ```
 
-Requires AWS Bedrock access with Claude 3.5 Sonnet and Haiku models.
+Requires AWS Bedrock access with:
+- Claude 3.5 Sonnet and Haiku models (LLM)
+- Amazon Titan Embed Text v2 (embeddings)
 
 **Note:** If `pip install` fails with an externally-managed-environment error
-(PEP 668), use `pip install --break-system-packages boto3 requests`.
+(PEP 668), use `pip install --break-system-packages boto3 requests numpy scikit-learn`.
 
 ## Models Used
 
 | Pass | Model | Purpose |
 |------|-------|---------|
-| Pass 1 | Haiku 3.5 | Intent extraction (cheap, fast) |
-| Pass 2 | Sonnet 3.5 | Structure creation (needs judgment) |
-| Pass 3a | Sonnet 3.5 | Scenario extraction (needs judgment) |
-| Pass 3b | Haiku 3.5 | Steps/actions generation (structured extraction) |
+| Pass 1 | Haiku 3.5 (configurable via `bedrockHaikuModel`) | Intent extraction (descriptive, per-cluster) |
+| Pass 1.5 | Amazon Titan Embed Text v2 | Intent embedding for DBSCAN clustering |
+| Pass 2 | Sonnet 3.5 (configurable via `bedrockSonnetModel`) | Intent filter + merge + dedup + outcome assignment |
+| Pass 3a | Sonnet 3.5 (configurable via `bedrockSonnetModel`) | Scenario extraction (enriched file context, batches of 5 intents) |
+| Pass 3b | Haiku 3.5 (configurable via `bedrockHaikuModel`) | Steps/actions generation (2 scenarios at a time, full code detail) |
+
+## Estimated Cost (200K LOC codebase)
+
+| Pass | Estimated Cost |
+|------|---------------|
+| Pass 1 (Haiku, ~130 calls) | ~$1.15 |
+| Pass 1.5 (Embeddings, ~400 calls) | ~$0.04 |
+| Pass 2 (Sonnet, ~20 calls) | ~$0.80 |
+| Pass 3 (Sonnet + Haiku, ~130 calls) | ~$3.90 |
+| **Total** | **~$5.90** |
 
 ## Post-Generation
 
 After the pipeline completes, consider running:
 - `/breeze:validate-functional-graph` — check for duplicates, gaps, quality issues
 - `/breeze:analyze-functional` — analyze specific requirements against the generated graph
+- `/breeze:generate-spec` — generate a functional specification document from the graph

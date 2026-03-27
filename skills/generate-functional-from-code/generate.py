@@ -1,13 +1,15 @@
 """
-LangGraph Functional Graph Generator v2 — Three-Pass Pipeline
+LangGraph Functional Graph Generator v3 — Three-Pass Pipeline
 ==============================================================
-Pass 1: Extract intents from all clusters (Haiku, automated)
-Pass 2: Create global structure (Sonnet, user approval)
-Pass 3: Create scenarios per cluster (Sonnet, user approval per cluster)
+Pass 1:   Extract intents from all clusters (Haiku, automated)
+Pass 1.5: Dedup intents (filter + normalize + embed + DBSCAN clustering)
+Pass 2:   Create outcomes via cluster-based assignment (Sonnet, dedup + assign)
+Pass 3:   Create scenarios per outcome (Sonnet + Haiku)
 
 Usage:
-    python langgraph_fg_v2.py
-    python langgraph_fg_v2.py --project-uuid <uuid> --api-key <key>
+    python generate_v2.py
+    python generate_v2.py --project-uuid <uuid> --api-key <key>
+    python generate_v2.py --resume-from 2 --auto-approve
 """
 
 import json
@@ -18,9 +20,13 @@ import time
 import argparse
 import logging
 from pathlib import Path
+from collections import defaultdict
 
 import boto3
 import requests
+import numpy as np
+from sklearn.cluster import DBSCAN
+from sklearn.metrics.pairwise import cosine_distances
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -34,6 +40,8 @@ BREEZE_CONFIG_FILE = ".breeze.json"
 DEFAULT_AWS_REGION = "us-west-2"
 DEFAULT_HAIKU_MODEL = "anthropic.claude-3-5-haiku-20241022-v1:0"
 DEFAULT_SONNET_MODEL = "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0"
+EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
+DEFAULT_DBSCAN_EPS = 0.20
 MAX_TOKENS = 8192
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -126,8 +134,11 @@ class BreezeAPI:
 
 class LLM:
     def __init__(self, access_key, secret_key, region=DEFAULT_AWS_REGION):
+        from botocore.config import Config
+        bedrock_config = Config(read_timeout=300, connect_timeout=10, retries={"max_attempts": 3})
         self.client = boto3.client("bedrock-runtime", region_name=region,
-            aws_access_key_id=access_key, aws_secret_access_key=secret_key)
+            aws_access_key_id=access_key, aws_secret_access_key=secret_key,
+            config=bedrock_config)
         self.default_model = DEFAULT_HAIKU_MODEL
 
     _call_count = 0
@@ -164,9 +175,18 @@ class LLM:
             "system": system, "messages": [{"role": "user", "content": user}]})
         for attempt in range(3):
             try:
-                r = self.client.invoke_model(modelId=model or self.default_model, body=body,
+                r = self.client.invoke_model_with_response_stream(
+                    modelId=model or self.default_model, body=body,
                     contentType="application/json", accept="application/json")
-                response_text = json.loads(r["body"].read())["content"][0]["text"]
+                # Collect streamed chunks
+                chunks = []
+                for event in r["body"]:
+                    chunk = event.get("chunk")
+                    if chunk:
+                        chunk_data = json.loads(chunk["bytes"])
+                        if chunk_data.get("type") == "content_block_delta":
+                            chunks.append(chunk_data.get("delta", {}).get("text", ""))
+                response_text = "".join(chunks)
 
                 # Log response
                 with open(log_file, "a", encoding="utf-8") as f:
@@ -176,6 +196,7 @@ class LLM:
                     f.write(response_text)
 
                 log.info(f"  [LLM Call #{call_id}] Response: ~{len(response_text) // 4} tokens | Logged to: {log_file}")
+                time.sleep(3)  # throttle to avoid Bedrock rate limits
                 return response_text
             except Exception as e:
                 if attempt < 2: log.warning(f"LLM retry {attempt+1}: {e}"); time.sleep(5)
@@ -185,9 +206,95 @@ class LLM:
         raw = self.call(system, user, max_tokens, model)
         m = re.search(r'\[[\s\S]*\]|\{[\s\S]*\}', raw)
         if m:
-            return json.loads(m.group())
+            text = m.group()
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError as e:
+                log.warning(f"  JSON parse error: {e}. Attempting repair...")
+                repaired = text
+
+                # Fix 1: Remove trailing commas before } or ]
+                repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
+
+                # Fix 2: Handle truncated strings (cut off mid-value)
+                # Find last unclosed quote and truncate there
+                in_string = False
+                last_quote_pos = -1
+                for ci, ch in enumerate(repaired):
+                    if ch == '"' and (ci == 0 or repaired[ci-1] != '\\'):
+                        in_string = not in_string
+                        last_quote_pos = ci
+                if in_string and last_quote_pos > 0:
+                    # Truncated inside a string — close it and trim
+                    repaired = repaired[:last_quote_pos] + '"'
+                    log.info(f"  Closed truncated string at position {last_quote_pos}")
+
+                # Fix 3: Remove trailing commas again (after string fix)
+                repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
+
+                # Fix 4: Close unbalanced brackets/braces
+                # Find last complete JSON object/array boundary
+                open_brackets = repaired.count('[') - repaired.count(']')
+                open_braces = repaired.count('{') - repaired.count('}')
+                if open_brackets > 0 or open_braces > 0:
+                    # Truncate to last complete object
+                    last_complete = max(repaired.rfind('}'), repaired.rfind(']'))
+                    if last_complete > 0:
+                        repaired = repaired[:last_complete + 1]
+                        # Re-count after truncation
+                        open_brackets = repaired.count('[') - repaired.count(']')
+                        open_braces = repaired.count('{') - repaired.count('}')
+                        # Close remaining open brackets/braces in correct order
+                        # Scan from end to determine proper closing order
+                        closers = []
+                        for ci in range(len(repaired) - 1, -1, -1):
+                            if open_braces <= 0 and open_brackets <= 0:
+                                break
+                            if repaired[ci] == '{' and open_braces > 0:
+                                closers.append('}')
+                                open_braces -= 1
+                            elif repaired[ci] == '[' and open_brackets > 0:
+                                closers.append(']')
+                                open_brackets -= 1
+                        repaired += ''.join(closers)
+
+                try:
+                    result = json.loads(repaired)
+                    log.info(f"  JSON repair successful (recovered {len(json.dumps(result))} chars)")
+                    return result
+                except json.JSONDecodeError as e2:
+                    log.warning(f"  JSON repair failed: {e2}. Raw response length: {len(raw)}")
+                    return []
         log.warning(f"  Failed to parse JSON from LLM response: {raw[:200]}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# Pass cache — saves/loads intermediate results between passes
+# ---------------------------------------------------------------------------
+
+CACHE_DIR = os.path.join(os.getcwd(), "llm_logs")
+
+def _cache_path(pass_num):
+    return os.path.join(CACHE_DIR, f"cache_pass{pass_num}.json")
+
+def save_pass_cache(pass_num, data):
+    """Save pass results to cache file."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = _cache_path(pass_num)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    print(f"  [Cache] Pass {pass_num} results saved to {path}", flush=True)
+
+def load_pass_cache(pass_num):
+    """Load cached pass results. Returns None if not found."""
+    path = _cache_path(pass_num)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        print(f"  [Cache] Loaded Pass {pass_num} results from {path}", flush=True)
+        return data
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +418,27 @@ def get_hook_entity(path):
     return entity
 
 
+def format_search_results(intent, results):
+    """Format code graph search results for an intent as lightweight context.
+    Returns a compact summary suitable for scenario identification
+    (no full file fetch needed)."""
+    lines = [f"Intent: {intent}"]
+    for r in results:
+        score = r.get("score", 0)
+        label = r.get("label", "")
+        data = r.get("data", {})
+        path = data.get("path", "")
+        name = data.get("name", "")
+        emb = data.get("embeddingText", "")
+        # Truncate embedding text to first 300 chars for context
+        if emb and len(emb) > 300:
+            emb = emb[:300] + "..."
+        lines.append(f"  [{label}] {path} | {name} (score: {score:.2f})")
+        if emb:
+            lines.append(f"    {emb}")
+    return "\n".join(lines)
+
+
 def chunk_text(text, max_chars=60000):
     """Split text into chunks at file boundaries to stay under max_chars.
     Never splits mid-file."""
@@ -333,6 +461,110 @@ def chunk_text(text, max_chars=60000):
         chunks.append(current)
 
     return chunks if chunks else [text]
+
+
+# ---------------------------------------------------------------------------
+# Intent Dedup Helpers (Pass 1.5)
+# ---------------------------------------------------------------------------
+
+def normalize_intent(text):
+    """Normalize intent text for dedup comparison."""
+    if ": " in text:
+        text = text.split(": ", 1)[1]
+    text = text.lower()
+    text = re.sub(r"\(.*?\)", "", text)
+    text = re.sub(r"[^a-z0-9\s]", "", text)
+    text = " ".join(text.split())
+    return text
+
+
+def normalization_dedup(intents):
+    """Merge intents that become identical after normalization."""
+    norm_map = defaultdict(list)
+    for intent in intents:
+        norm_map[normalize_intent(intent)].append(intent)
+
+    survivors = []
+    merged_count = 0
+    for norm, group in norm_map.items():
+        rep = max(group, key=len)  # keep longest (most descriptive)
+        survivors.append(rep)
+        if len(group) > 1:
+            merged_count += len(group) - 1
+            log.info(f"  [Norm] Merged {len(group)} → 1: \"{rep}\"")
+
+    return survivors, merged_count
+
+
+def generate_intent_embeddings(bedrock_client, intents, cache_file):
+    """Generate or load cached embeddings for intents."""
+    cached = {}
+    if os.path.exists(cache_file):
+        try:
+            cached = json.load(open(cache_file))
+            log.info(f"  Loaded {len(cached)} cached embeddings")
+        except:
+            pass
+
+    embeddings = {}
+    to_embed = []
+
+    for intent in intents:
+        norm = normalize_intent(intent)
+        if norm in cached and cached[norm] is not None:
+            embeddings[intent] = cached[norm]
+        else:
+            to_embed.append(intent)
+
+    if to_embed:
+        log.info(f"  Generating {len(to_embed)} new embeddings ({len(embeddings)} cached)...")
+        for i, intent in enumerate(to_embed):
+            if i > 0 and i % 50 == 0:
+                print(f"    Embedded {i}/{len(to_embed)}...", flush=True)
+            try:
+                norm = normalize_intent(intent)
+                response = bedrock_client.invoke_model(
+                    modelId=EMBEDDING_MODEL,
+                    body=json.dumps({"inputText": norm}),
+                    contentType="application/json",
+                    accept="application/json"
+                )
+                result = json.loads(response["body"].read())
+                embeddings[intent] = result["embedding"]
+                cached[norm] = result["embedding"]
+                time.sleep(0.05)
+            except Exception as e:
+                log.warning(f"  Embedding failed for '{intent[:50]}': {e}")
+
+        with open(cache_file, "w") as f:
+            json.dump(cached, f)
+
+    return embeddings
+
+
+def dbscan_cluster_intents(intents, embeddings, eps=DEFAULT_DBSCAN_EPS):
+    """Cluster intents using DBSCAN on cosine distance. Returns {label: [intents]}."""
+    valid = [(i, intent) for i, intent in enumerate(intents) if intent in embeddings]
+    if not valid:
+        return {-1: intents}
+
+    indices, valid_intents = zip(*valid)
+    emb_matrix = np.array([embeddings[intent] for intent in valid_intents])
+    dist_matrix = cosine_distances(emb_matrix)
+
+    labels = DBSCAN(eps=eps, min_samples=2, metric="precomputed").fit_predict(dist_matrix)
+
+    clusters = defaultdict(list)
+    for i, label in enumerate(labels):
+        clusters[label].append(valid_intents[i])
+
+    # Add intents without embeddings to noise
+    valid_set = set(valid_intents)
+    for intent in intents:
+        if intent not in valid_set:
+            clusters[-1].append(intent)
+
+    return dict(clusters)
 
 
 _auto_approve = False
@@ -376,7 +608,8 @@ def ask_user(prompt_text):
 
 INTENT_SYSTEM = """You are a Functional Intent Extraction Agent. Extract HIGH-LEVEL FUNCTIONAL INTENTS from the given input.
 
-A functional intent is a short business capability phrase — what a user or system can DO, not how the code works internally.
+A functional intent is a descriptive business capability phrase — what a user or system
+can DO, with enough context to understand the purpose.
 
 ## PERSONA RESOLUTION
 Prefix each intent with the persona. Resolve using precedence:
@@ -391,18 +624,37 @@ Prefix each intent with the persona. Resolve using precedence:
 
 If the triggering actor is ambiguous, default to "User", not "System".
 
+**Do NOT invent roles from domain vocabulary:**
+- Do NOT assign "Admin" or "Moderator" unless the code explicitly checks
+  user roles or permissions (e.g., role-based middleware, admin guards,
+  isAdmin checks, permission decorators).
+- A backend service that processes moderation requests is "System", not "Moderator".
+- A service that uploads/validates content is "System", not "Admin".
+- If no role-based access control exists in the code, use "User" (for
+  user-triggered) or "System" (for automated).
+
 **Forbidden persona names — NEVER use:**
 Developer, Engineer, Programmer, Architect, API, Service, Component,
 Module, Worker, Backend, Frontend, Database, Controller, Handler, Repository
 
-## RULES
+## INTENT RULES
 1. Extract ONE intent per DISTINCT business capability found in the code.
    - Do NOT split one capability into multiple intents
    - Do NOT merge unrelated capabilities into one intent
-   - Typical range: 2-6 intents per cluster
+   - There is NO upper limit — extract as many as the code warrants
+   - A single file with 10 distinct functions may produce 5-10 intents
+   - A cluster with 20 files may produce 10-20 intents
    - If only one capability exists, return just 1
-   - If the cluster covers many distinct concerns, return up to 8
-2. Each intent = "Persona: Capability phrase" (3-7 words, starts with verb)
+2. Each intent = "Persona: Descriptive capability phrase" (5-15 words, starts with verb)
+   Intent MUST include context — what is being done, for what purpose, to/from where.
+   BAD:  "Transform Data" (too vague — transform what? for what purpose?)
+   GOOD: "Transform order data for invoice generation with tax calculation"
+   BAD:  "Process Events" (too vague — which events? what processing?)
+   GOOD: "Process payment events to update account balances and ledger entries"
+   BAD:  "Manage Profile" (too vague — which profile? what management?)
+   GOOD: "Update user billing profile with payment methods and addresses"
+   BAD:  "Send Notifications" (too vague — what kind? triggered by what?)
+   GOOD: "Send email notifications to customers when order status changes"
 3. If multiple functions/methods contribute to the SAME business capability,
    merge into ONE intent.
 4. For code input: ask "What does this code enable a user or operator to do?"
@@ -413,7 +665,7 @@ Module, Worker, Backend, Frontend, Database, Controller, Handler, Repository
 7. If input contains ONLY data models, schemas, configs, type definitions,
    or internal utilities with no user-facing behavior → return []
 
-Return ONLY a JSON array: ["Persona: Intent phrase", ...]
+Return ONLY a JSON array: ["Persona: Descriptive intent phrase", ...]
 """
 
 STRUCTURE_SYSTEM = """You are a Functional Graph Structure Agent.
@@ -485,6 +737,29 @@ functions, API endpoints, or implementation details.
 
 ---
 
+## OUTCOME DISTRIBUTION RULES
+
+- NEVER create a single catch-all Outcome for a persona (e.g., "Process Backend
+  Operations" or "Handle All System Tasks"). This makes downstream scenario
+  generation fail because file discovery cannot target a vague outcome.
+- If a persona has 10+ intents mapped to it, it MUST have at least 3 outcomes.
+- If a persona has 20+ intents, it MUST have at least 5 outcomes.
+- System persona outcomes should be grouped by domain concern, not lumped together.
+
+**Good System outcomes (domain-focused):**
+- "Process Event Queues"
+- "Manage Search and Embeddings"
+- "Process Content Moderation"
+- "Handle Email Notifications"
+- "Process Resume and Skills"
+
+**Bad System outcomes (catch-all anti-patterns):**
+- "Process Backend Operations" (too broad — covers everything)
+- "Handle System Tasks" (meaningless grouping)
+- "Manage Infrastructure" (implementation, not capability)
+
+---
+
 ## CODE CONTEXT RULES
 
 When intents come from code analysis:
@@ -501,6 +776,80 @@ When intents come from code analysis:
 [{"persona": "<name>", "outcomes": [{"outcome": "<high-level capability>", "intents": ["<which intents map here>"]}]}]
 
 Output outcomes WITHOUT scenarios — scenarios will be added in a subsequent pass.
+"""
+
+OUTCOME_ASSIGN_SYSTEM = """You are an Outcome Assignment Agent.
+
+Given a cluster of RELATED functional intents for a single persona, do FOUR things:
+
+1. FILTER NON-FUNCTIONAL: Drop intents that describe infrastructure, not business capabilities.
+   These are NOT functional intents — drop them immediately:
+   - Validation schemas, DTO definitions, type definitions (e.g., "Define validation schemas for X")
+   - Database index creation, vector index setup, text search configuration
+   - Database connection management, session handling, transaction plumbing
+   - JSON serialization/deserialization, circular reference handling, object graph reconstruction
+   - HTTP client wrappers, generic API request helpers
+   - Route/controller decorator definitions, authentication guards/middleware
+   - Error boundaries, lazy loading, retry mechanisms
+   - Theme switching, dark mode toggling
+   - Pagination mechanics, sidebar/panel layout, dropdown mechanics
+   - Unsaved changes detection, loading states, progress indicators
+   - Auth token refresh, session sync across tabs
+   - Font parsing, glyph metrics, typography internals
+   - Geometric calculations, point interpolations (unless the product IS a geometry tool)
+
+   HOWEVER: If a non-functional intent contains SOME business logic, ABSORB it into the
+   related business intent rather than dropping it entirely.
+   Example: "Define validation schemas for user story management" → absorb into
+   "Create and manage user stories" (the validation supports the business capability)
+
+2. MERGE SIMILAR: If multiple intents describe overlapping aspects of the SAME capability,
+   merge them into ONE intent with a richer, more descriptive phrase that captures the
+   combined meaning. The merged intent should be 5-15 words and cover all merged inputs.
+   Example:
+     Input:  ["Create functional nodes with metadata", "Update functional graph node properties"]
+     Merged: "Create and update functional graph nodes with detailed metadata and properties"
+
+3. DEDUPLICATE: After merging, if any remaining intents are exact or near-exact duplicates,
+   drop the less descriptive one.
+
+4. ASSIGN OUTCOMES: Map each final intent (merged or kept as-is) to an Outcome.
+
+MERGE RULES:
+- Merge intents that describe the SAME business entity with different operations or details
+- The merged intent MUST preserve all distinct information from the inputs
+- Do NOT merge intents with different VERBS that represent different capabilities:
+  Create vs Clone, Update vs Delete, Search vs Filter, Import vs Export
+  "Create X" and "Clone X" are NOT the same — creating from scratch ≠ copying existing
+- Do NOT merge intents about different entities or different data sources
+
+DEDUP RULES (applied AFTER merging):
+- Near-identical wording after merge: DROP the less descriptive one
+- Singular vs plural: DROP one
+- Generic + specific version of same action: KEEP specific, DROP generic
+- Different filter/criteria (by Skills vs by City): KEEP BOTH (different capabilities)
+- Action vs viewing result (Follow vs Get Followed): KEEP BOTH (different flows)
+- Same operation on different data sources: KEEP BOTH (different pipelines)
+- When in doubt, KEEP BOTH. False negatives (missing intents) are worse than false positives (extra intents)
+
+OUTCOME RULES:
+- Outcomes = high-level business capabilities (not technical functions)
+- REUSE existing outcomes when provided
+- Only create new outcomes if no existing one fits
+- Target 3-8 outcomes per persona total
+
+OUTPUT FORMAT (strict JSON):
+{
+  "unique_intents": [
+    {"intent": "<final intent text>", "outcome": "<outcome name>", "merged_from": ["<original 1>", "<original 2>"]}
+  ],
+  "dropped_intents": [
+    {"intent": "<dropped>", "reason": "<why dropped — non-functional | duplicate | absorbed into X>", "kept_as": "<the representative, or null if pure infrastructure>"}
+  ]
+}
+
+NOTE: "merged_from" is optional — include it only when the intent was merged from multiple inputs.
+If the intent was kept as-is, omit "merged_from".
 """
 
 SCENARIO_SYSTEM = """You are a Functional Graph Expansion Agent.
@@ -693,6 +1042,12 @@ def main():
     parser.add_argument("--cluster", type=int, help="Process only this cluster ID (for testing)")
     parser.add_argument("--auto-approve", action="store_true", help="Skip all approval prompts, auto-approve everything")
     parser.add_argument("--skip-single-file-clusters", action="store_true", help="Skip clusters with only 1 file (old behavior)")
+    parser.add_argument("--batch-clusters", type=int, default=0, metavar="MAX_FILES",
+                        help="Batch small clusters together (max files per batch). Default 0 = process each cluster separately.")
+    parser.add_argument("--eps", type=float, default=DEFAULT_DBSCAN_EPS,
+                        help=f"DBSCAN eps (cosine distance). 0.15=strict, 0.20=moderate, 0.30=loose. Default: {DEFAULT_DBSCAN_EPS}")
+    parser.add_argument("--resume", action="store_true", help="Resume from cached pass results (skip completed passes)")
+    parser.add_argument("--resume-from", type=int, choices=[1, 2, 3], help="Resume from a specific pass number (1, 2, or 3)")
     args = parser.parse_args()
 
     # Load config: CLI args > .breeze.json > env vars > defaults
@@ -727,6 +1082,22 @@ def main():
     llm = LLM(aws_access_key, aws_secret_key, region=aws_region)
     llm.default_model = haiku_model
 
+    # Determine resume point
+    resume_from = 1  # default: start fresh
+    if args.resume_from:
+        resume_from = args.resume_from
+        print(f"\n  [Cache] Resuming from Pass {resume_from} (as requested)")
+    elif args.resume:
+        # Auto-detect: find the latest completed pass
+        if load_pass_cache(2):
+            resume_from = 3
+            print(f"\n  [Cache] Found Pass 2 cache — resuming from Pass 3")
+        elif load_pass_cache(1):
+            resume_from = 2
+            print(f"\n  [Cache] Found Pass 1 cache — resuming from Pass 2")
+        else:
+            print(f"\n  [Cache] No cache found — starting fresh")
+
     # ======================================================================
     # PASS 1: Extract intents from all clusters
     # ======================================================================
@@ -734,205 +1105,782 @@ def main():
     print("PASS 1: Extracting intents from all clusters")
     print(f"{'='*60}\n")
 
-    ontologies = api.get_ontologies(project_uuid)
-    all_clusters = []
-    for ont in ontologies:
-        oid = ont.get("_id") or ont.get("id")
-        clusters = api.get_clusters(project_uuid, str(oid))
-        for c in clusters:
-            c["_ontName"] = ont.get("name", "?")
-        all_clusters.extend(clusters)
-
-    # Optionally filter clusters
-    clusters_to_process = list(all_clusters)
-    if args.skip_single_file_clusters:
-        clusters_to_process = [c for c in clusters_to_process if int(c.get("fileCount", 0)) >= 2]
-        print(f"  --skip-single-file-clusters: skipped {len(all_clusters) - len(clusters_to_process)} single-file clusters")
-    if args.cluster:
-        clusters_to_process = [c for c in clusters_to_process if c.get("clusterId") == args.cluster]
-
-    print(f"Total clusters: {len(all_clusters)}, processing: {len(clusters_to_process)}")
-
-    # Aggregate clusters into batches of max 15 files so no cluster is skipped.
-    # Large clusters (>=15 files) get their own batch; small ones are combined.
-    MAX_BATCH_FILES = 15
-    batches = []  # each batch: {"cluster_ids": [...], "files": [...]}
-    current_batch = {"cluster_ids": [], "files": []}
-
-    for cluster in clusters_to_process:
-        cid = cluster.get("clusterId")
-        fc = int(cluster.get("fileCount", 0))
-
-        files = api.get_cluster_files(project_uuid, cid)
-        if not files:
-            print(f"  Cluster {cid}: empty (0 files from API), skipping")
-            continue
-
-        if fc >= MAX_BATCH_FILES:
-            # Large cluster gets its own batch
-            if current_batch["files"]:
-                batches.append(current_batch)
-                current_batch = {"cluster_ids": [], "files": []}
-            batches.append({"cluster_ids": [cid], "files": files})
-        else:
-            # Would adding this cluster exceed the batch limit?
-            if len(current_batch["files"]) + len(files) > MAX_BATCH_FILES and current_batch["files"]:
-                batches.append(current_batch)
-                current_batch = {"cluster_ids": [], "files": []}
-            current_batch["cluster_ids"].append(cid)
-            current_batch["files"].extend(files)
-
-    # Flush remaining batch
-    if current_batch["files"]:
-        batches.append(current_batch)
-
-    total_files = sum(len(b["files"]) for b in batches)
-    total_clusters_covered = sum(len(b["cluster_ids"]) for b in batches)
-    print(f"  Aggregated into {len(batches)} batches ({total_files} files across {total_clusters_covered} clusters)")
-
     all_intents = {}  # cluster_id → [intents]
     flat_intents = []  # all intents flattened
 
-    for i, batch in enumerate(batches):
-        cids = batch["cluster_ids"]
-        files = batch["files"]
-        cid_label = ", ".join(str(c) for c in cids)
-        print(f"  [{i+1}/{len(batches)}] Batch (clusters: {cid_label}, {len(files)} files)...", end=" ")
+    if resume_from > 1:
+        cached = load_pass_cache(1)
+        if cached:
+            all_intents = cached.get("all_intents", {})
+            flat_intents = cached.get("flat_intents", [])
+            print(f"  [Cache] Skipping Pass 1 — loaded {len(flat_intents)} intents from {len(all_intents)} clusters")
+        else:
+            print("  [Cache] ERROR: No Pass 1 cache found, cannot skip. Starting fresh.")
+            resume_from = 1
 
-        try:
-            summary = format_summary(files)
-            chunks = chunk_text(summary, max_chars=60000)
+    if resume_from <= 1:
+        ontologies = api.get_ontologies(project_uuid)
+        all_clusters = []
+        for ont in ontologies:
+            oid = ont.get("_id") or ont.get("id")
+            clusters = api.get_clusters(project_uuid, str(oid))
+            for c in clusters:
+                c["_ontName"] = ont.get("name", "?")
+            all_clusters.extend(clusters)
 
-            if len(chunks) > 1:
-                print(f"{len(files)} files, {len(summary)} chars → {len(chunks)} chunks")
+        # Optionally filter clusters
+        clusters_to_process = list(all_clusters)
+        if args.skip_single_file_clusters:
+            clusters_to_process = [c for c in clusters_to_process if int(c.get("fileCount", 0)) >= 2]
+            print(f"  --skip-single-file-clusters: skipped {len(all_clusters) - len(clusters_to_process)} single-file clusters")
+        if args.cluster:
+            clusters_to_process = [c for c in clusters_to_process if c.get("clusterId") == args.cluster]
 
-            batch_intents = []
-            for ci, chunk in enumerate(chunks):
-                if len(chunks) > 1:
-                    print(f"    Chunk {ci+1}/{len(chunks)} ({len(chunk)} chars)...", end=" ")
-                chunk_intents = llm.call_json(INTENT_SYSTEM, f"Extract intents:\n\n{chunk}")
-                if chunk_intents:
-                    batch_intents.extend(chunk_intents)
+        print(f"Total clusters: {len(all_clusters)}, processing: {len(clusters_to_process)}")
+
+        MAX_BATCH_FILES = args.batch_clusters  # 0 = process each cluster separately
+
+        if MAX_BATCH_FILES > 0:
+            # Batched mode: group small clusters together (legacy behavior)
+            print(f"  Cluster batching ENABLED (max {MAX_BATCH_FILES} files per batch)")
+            batches = []
+            current_batch = {"cluster_ids": [], "files": []}
+
+            for ci, cluster in enumerate(clusters_to_process):
+                cid = cluster.get("clusterId")
+                fc = int(cluster.get("fileCount", 0))
+                print(f"  Fetching cluster {ci+1}/{len(clusters_to_process)} (id={cid}, ~{fc} files)...", flush=True)
+                files = api.get_cluster_files(project_uuid, cid)
+                if not files:
+                    print(f"  Cluster {cid}: empty, skipping", flush=True)
+                    continue
+
+                if fc >= MAX_BATCH_FILES:
+                    if current_batch["files"]:
+                        batches.append(current_batch)
+                        current_batch = {"cluster_ids": [], "files": []}
+                    batches.append({"cluster_ids": [cid], "files": files})
+                else:
+                    if len(current_batch["files"]) + len(files) > MAX_BATCH_FILES and current_batch["files"]:
+                        batches.append(current_batch)
+                        current_batch = {"cluster_ids": [], "files": []}
+                    current_batch["cluster_ids"].append(cid)
+                    current_batch["files"].extend(files)
+
+            if current_batch["files"]:
+                batches.append(current_batch)
+
+            print(f"  Aggregated into {len(batches)} batches")
+
+            for i, batch in enumerate(batches):
+                cids = batch["cluster_ids"]
+                files = batch["files"]
+                cid_label = ", ".join(str(c) for c in cids)
+                print(f"  [{i+1}/{len(batches)}] Batch (clusters: {cid_label}, {len(files)} files)...", end=" ", flush=True)
+
+                try:
+                    summary = format_summary(files)
+                    chunks = chunk_text(summary, max_chars=60000)
                     if len(chunks) > 1:
-                        print(f"{len(chunk_intents)} intents")
-                elif len(chunks) > 1:
-                    print("no-op")
+                        print(f"{len(files)} files → {len(chunks)} chunks")
 
-            # Deduplicate intents within batch
-            batch_intents = list(set(batch_intents))
-            if batch_intents:
-                for cid in cids:
-                    all_intents[cid] = batch_intents
-                flat_intents.extend(batch_intents)
-                print(f"{len(batch_intents)} intents")
-            else:
-                print("no-op")
-        except Exception as e:
-            print(f"error: {e}")
+                    batch_intents = []
+                    for chi, chunk in enumerate(chunks):
+                        if len(chunks) > 1:
+                            print(f"    Chunk {chi+1}/{len(chunks)} ({len(chunk)} chars)...", end=" ")
+                        chunk_intents = None
+                        for retry in range(3):
+                            try:
+                                chunk_intents = llm.call_json(INTENT_SYSTEM, f"Extract intents:\n\n{chunk}")
+                                if chunk_intents:
+                                    break
+                            except Exception as retry_e:
+                                if retry < 2:
+                                    print(f"retry {retry+1}/2 ({retry_e})...", end=" ")
+                                    time.sleep(3)
+                                else:
+                                    print(f"failed after 3 attempts: {retry_e}")
+                        if chunk_intents:
+                            batch_intents.extend(chunk_intents)
+                            if len(chunks) > 1:
+                                print(f"{len(chunk_intents)} intents")
+                        elif len(chunks) > 1:
+                            print("no-op")
 
-    print(f"\nTotal: {len(flat_intents)} intents from {len(batches)} batches ({len(all_intents)} clusters)")
+                    batch_intents = list(set(batch_intents))
+                    if batch_intents:
+                        for cid in cids:
+                            all_intents[cid] = batch_intents
+                        flat_intents.extend(batch_intents)
+                        print(f"{len(batch_intents)} intents")
+                    else:
+                        print("no-op")
+                except Exception as e:
+                    print(f"error: {e}")
 
-    if not flat_intents:
-        print("\nNo intents extracted. Nothing to process.")
-        print("\nThe repository has not been uploaded to the code graph yet.")
-        print("Upload it by running:\n")
-        print(f"  npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \\")
-        print(f"    --repo <path-to-your-repo> \\")
-        print(f"    --out breezeai \\")
-        print(f"    --upload \\")
-        print(f"    --capture-statements \\")
-        print(f"    --user-api-key {api_key} \\")
-        print(f"    --uuid {project_uuid} \\")
-        print(f"    --baseurl {args.api_base}")
-        print(f"\nRequires Node.js 22+. Once uploaded, re-run this script.")
-        return
+            print(f"\nTotal: {len(flat_intents)} intents from {len(batches)} batches ({len(all_intents)} clusters)")
+
+        else:
+            # Default: process each cluster individually (no cross-cluster intent duplication)
+            # Large clusters (>30 files) are split into file batches
+            MAX_FILES_PER_CALL = 30
+            print(f"  Cluster batching DISABLED (each cluster processed separately, max {MAX_FILES_PER_CALL} files per LLM call)")
+
+            for ci, cluster in enumerate(clusters_to_process):
+                cid = cluster.get("clusterId")
+                fc = int(cluster.get("fileCount", 0))
+                print(f"  [{ci+1}/{len(clusters_to_process)}] Cluster {cid} (~{fc} files)...", end=" ", flush=True)
+                files = api.get_cluster_files(project_uuid, cid)
+                if not files:
+                    print(f"empty, skipping", flush=True)
+                    continue
+
+                try:
+                    # Split files into batches if cluster is large
+                    file_batches = [files[j:j+MAX_FILES_PER_CALL]
+                                    for j in range(0, len(files), MAX_FILES_PER_CALL)]
+
+                    if len(file_batches) > 1:
+                        print(f"{len(files)} files → {len(file_batches)} file batches")
+
+                    cluster_intents = []
+                    for fbi, file_batch in enumerate(file_batches):
+                        if len(file_batches) > 1:
+                            print(f"    File batch {fbi+1}/{len(file_batches)} ({len(file_batch)} files)...", end=" ", flush=True)
+
+                        summary = format_summary(file_batch)
+                        chunks = chunk_text(summary, max_chars=60000)
+
+                        for chi, chunk in enumerate(chunks):
+                            if len(chunks) > 1:
+                                print(f"chunk {chi+1}/{len(chunks)}...", end=" ")
+                            batch_intents = None
+                            for retry in range(3):
+                                try:
+                                    batch_intents = llm.call_json(INTENT_SYSTEM, f"Extract intents:\n\n{chunk}")
+                                    if batch_intents:
+                                        break
+                                except Exception as retry_e:
+                                    if retry < 2:
+                                        print(f"retry {retry+1}/2 ({retry_e})...", end=" ")
+                                        time.sleep(3)
+                                    else:
+                                        print(f"failed after 3 attempts: {retry_e}")
+                            if batch_intents:
+                                cluster_intents.extend(batch_intents)
+                                if len(file_batches) > 1 or len(chunks) > 1:
+                                    print(f"{len(batch_intents)} intents", end=" ")
+
+                        if len(file_batches) > 1:
+                            print()
+
+                    cluster_intents = list(set(cluster_intents))
+                    if cluster_intents:
+                        all_intents[cid] = cluster_intents
+                        flat_intents.extend(cluster_intents)
+                        print(f"{len(cluster_intents)} intents")
+                    else:
+                        print("no-op")
+                except Exception as e:
+                    print(f"error: {e}")
+
+            print(f"\nTotal: {len(flat_intents)} intents from {len(clusters_to_process)} clusters ({len(all_intents)} with intents)")
+
+        if not flat_intents:
+            print("\nNo intents extracted. Nothing to process.")
+            print("\nThe repository has not been uploaded to the code graph yet.")
+            print("Upload it by running:\n")
+            print(f"  npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \\")
+            print(f"    --repo <path-to-your-repo> \\")
+            print(f"    --out breezeai \\")
+            print(f"    --upload \\")
+            print(f"    --capture-statements \\")
+            print(f"    --user-api-key {api_key} \\")
+            print(f"    --uuid {project_uuid} \\")
+            print(f"    --baseurl {args.api_base}")
+            print(f"\nRequires Node.js 22+. Once uploaded, re-run this script.")
+            return
+
+        # Cache Pass 1 results
+        save_pass_cache(1, {"all_intents": all_intents, "flat_intents": flat_intents})
 
     # ======================================================================
-    # PASS 2: Create global structure (with user approval)
+    # PASS 1.5: Intent dedup (filter + normalize + embed + DBSCAN)
+    # ======================================================================
+    persona_clusters = None
+
+    # Check if Pass 1.5 results are cached
+    embeddings = {}  # Initialize — will be populated from cache or generated fresh
+    cached_1_5 = load_pass_cache("1.5")
+    if cached_1_5 and resume_from >= 2:
+        persona_clusters = {}
+        for persona, clusters_dict in cached_1_5.get("persona_clusters", {}).items():
+            persona_clusters[persona] = {int(k) if k.lstrip('-').isdigit() else k: v
+                                          for k, v in clusters_dict.items()}
+        total_cached = sum(len(v) for c in persona_clusters.values() for v in c.values())
+        print(f"\n  [Cache] Loaded Pass 1.5 — {len(persona_clusters)} personas, {total_cached} intents. Skipping dedup pipeline.")
+
+        # Load embeddings from cache (needed for singleton similarity sorting in Pass 2)
+        embedding_cache = os.path.join(os.getcwd(), "llm_logs", "intent_embeddings_v2.json")
+        if os.path.exists(embedding_cache):
+            try:
+                emb_raw = json.load(open(embedding_cache))
+                all_intents_flat = [i for clusters in persona_clusters.values() for v in clusters.values() for i in v]
+                for intent in all_intents_flat:
+                    norm = normalize_intent(intent)
+                    if norm in emb_raw and emb_raw[norm] is not None:
+                        embeddings[intent] = emb_raw[norm]
+                print(f"  [Cache] Loaded {len(embeddings)} embeddings for singleton sorting")
+            except Exception as e:
+                log.warning(f"  Could not load embeddings cache: {e}")
+    else:
+        print(f"\n{'='*60}")
+        print("PASS 1.5: Intent deduplication pipeline")
+        print(f"{'='*60}\n")
+
+    if persona_clusters is None:
+        FILTER_KEYWORDS = [
+            "Test ", "Mock ", "Benchmark",
+            "Initialize ", "Establish ", "Run Service Initialization",
+            "Register API Handlers",
+            "Database Migration", "Database Connection", "Connect to ",
+            "Vite", "Frontend Build", "Development Environment",
+            "Configure Frontend Environment",
+            "Configure GRPC", "Configure gRPC",
+            "Configure Application Router",
+            "Configure Server Router", "Configure Service Router",
+            "Configure Logging",
+            "Start Application", "Start Web Server",
+            "Start Moderation Service",
+        ]
+
+        def _is_non_functional(intent):
+            text = intent.split(": ", 1)[-1] if ": " in intent else intent
+            return any(kw in text for kw in FILTER_KEYWORDS)
+
+        pre_filter_count = len(flat_intents)
+        flat_intents = [i for i in flat_intents if not _is_non_functional(i)]
+        print(f"  Step 1 - Keyword filter: {pre_filter_count} → {len(flat_intents)} (-{pre_filter_count - len(flat_intents)})")
+
+        # Step 2: Exact dedup
+        unique_intents = sorted(set(flat_intents))
+        print(f"  Step 2 - Exact dedup: {len(flat_intents)} → {len(unique_intents)} (-{len(flat_intents) - len(unique_intents)})")
+
+        # Step 3: Normalization dedup
+        unique_intents, norm_merged = normalization_dedup(unique_intents)
+        print(f"  Step 3 - Normalization dedup: → {len(unique_intents)} (-{norm_merged})")
+
+        # Step 4: Group by persona
+        persona_intents = defaultdict(list)
+        for intent in unique_intents:
+            persona = intent.split(": ", 1)[0] if ": " in intent else "User"
+            persona_intents[persona].append(intent)
+
+        for pname, intents in sorted(persona_intents.items()):
+            print(f"    {pname}: {len(intents)} intents")
+
+        # Step 5: Embeddings + DBSCAN clustering per persona
+        dbscan_eps = args.eps
+        sim_threshold = 1 - dbscan_eps
+        print(f"\n  Step 5 - Embedding + DBSCAN clustering (eps={dbscan_eps}, similarity >= {sim_threshold:.2f})...")
+        embedding_cache = os.path.join(os.getcwd(), "llm_logs", "intent_embeddings_v2.json")
+        all_flat = [i for intents in persona_intents.values() for i in intents]
+        embeddings = generate_intent_embeddings(llm.client, all_flat, embedding_cache)
+
+        persona_clusters = {}
+        for persona, intents in sorted(persona_intents.items()):
+            clusters = dbscan_cluster_intents(intents, embeddings, eps=dbscan_eps)
+            persona_clusters[persona] = clusters
+            named = sum(1 for k in clusters if k != -1)
+            noise = len(clusters.get(-1, []))
+            print(f"    {persona}: {len(intents)} intents → {named} clusters + {noise} singletons")
+
+    # ---- Display clustering results for review ----
+    print(f"\n{'='*60}")
+    print("CLUSTERING RESULTS")
+    print(f"{'='*60}")
+    print("""
+  Intents were grouped by semantic similarity using embeddings + DBSCAN.
+  Intents within the same cluster describe similar capabilities and will
+  be sent together to Sonnet for deduplication and outcome assignment.
+
+  Singletons are intents with no close semantic match — they will be
+  processed separately and assigned to outcomes individually.
+
+  Review the clusters below to verify:
+    - Related intents are grouped together (good clustering)
+    - Unrelated intents are NOT in the same cluster (no false grouping)
+    - Important intents are not missing (nothing filtered incorrectly)
+""")
+
+    for persona, clusters in sorted(persona_clusters.items()):
+        named_clusters = [(cid, members) for cid, members in clusters.items() if cid != -1]
+        noise = clusters.get(-1, [])
+        total = sum(len(v) for v in clusters.values())
+        print(f"  {persona} ({total} intents: {len(named_clusters)} clusters + {len(noise)} singletons)")
+        print(f"  {'-'*56}")
+
+        for cid, members in sorted(named_clusters, key=lambda x: -len(x[1])):
+            print(f"\n    Cluster {cid} ({len(members)} intents — will be sent together to Sonnet):")
+            for m in sorted(members):
+                print(f"      - {m.split(': ', 1)[-1]}")
+
+        if noise:
+            print(f"\n    Singletons ({len(noise)} — will be batched separately):")
+            for m in sorted(noise):
+                print(f"      - {m.split(': ', 1)[-1]}")
+
+    action, _ = ask_user("\nReview clustering above. [A]pprove to proceed to outcome assignment, [S]kip to abort:")
+    if action in ("skip", "quit"):
+        print("Aborting.")
+        return
+
+    # Cache Pass 1.5 results (dedup + clustering)
+    save_pass_cache("1.5", {
+        "persona_clusters": {
+            persona: {str(k): v for k, v in clusters.items()}
+            for persona, clusters in persona_clusters.items()
+        }
+    })
+
+    # ======================================================================
+    # PASS 2: Create outcomes via cluster-based assignment (Sonnet)
     # ======================================================================
     print(f"\n{'='*60}")
-    print("PASS 2: Creating global Persona → Outcome structure")
+    print("PASS 2: Cluster-based outcome assignment (Sonnet dedup + assign)")
     print(f"{'='*60}\n")
 
-    # Fetch existing graph
-    existing_personas = api.get_personas(project_uuid)
-    existing_context = ""
-    if existing_personas:
-        existing_context = f"\nExisting Personas (REUSE): {json.dumps([p.get('persona') for p in existing_personas])}"
+    structure = None
 
-    # Deduplicate intents
-    unique_intents = list(set(flat_intents))
-    print(f"Unique intents: {len(unique_intents)}")
-    for intent in sorted(unique_intents):
-        print(f"  - {intent}")
+    if resume_from > 2:
+        cached = load_pass_cache(2)
+        if cached:
+            structure = cached.get("structure")
+            print(f"  [Cache] Skipping Pass 2 — loaded {len(structure)} personas from cache")
+        else:
+            print("  [Cache] ERROR: No Pass 2 cache found, cannot skip. Running Pass 2.")
+            resume_from = 2
 
-    # Ask LLM to create global structure
-    structure_prompt = f"""Create the global Persona → Outcome structure for this codebase.
+    if resume_from <= 2:
+        # Check if functional graph is empty
+        try:
+            existing_personas = api.get_personas(project_uuid)
+        except Exception as e:
+            log.warning(f"  Could not check existing personas: {e}. Proceeding anyway.")
+            existing_personas = []
+        if existing_personas:
+            persona_names = [p.get('persona') for p in existing_personas]
+            print(f"\n  WARNING: Graph already has {len(existing_personas)} personas: {persona_names}")
+            action, _ = ask_user("Graph is not empty. [A]pprove to continue (will merge), [S]kip to abort:")
+            if action in ("skip", "quit"):
+                print("Aborting. Delete existing graph data or use a new project.")
+                return
 
-ALL intents extracted from the codebase:
-{json.dumps(unique_intents, indent=2)}
+        structure = []
+        total_dropped = 0
 
-{existing_context}
+        for persona, clusters in sorted(persona_clusters.items()):
+            print(f"\n  --- {persona} ---")
+            existing_outcomes = []
+            persona_outcome_intents = {}  # outcome → [intents]
 
-Group related intents under broad outcomes. A typical project should have 5-8 outcomes max.
+            # Process named clusters — batch small clusters together, large ones alone
+            CLUSTER_BATCH_TARGET = 25  # target intents per Sonnet call
+            sorted_clusters = sorted(
+                [(cid, members) for cid, members in clusters.items() if cid != -1],
+                key=lambda x: -len(x[1])
+            )
+            noise = clusters.get(-1, [])
+
+            # Split into large clusters (process alone) and small clusters (batch together)
+            large_clusters = [(cid, m) for cid, m in sorted_clusters if len(m) >= CLUSTER_BATCH_TARGET // 2]
+            small_clusters = [(cid, m) for cid, m in sorted_clusters if len(m) < CLUSTER_BATCH_TARGET // 2]
+
+            MAX_INTENTS_PER_OUTCOME_IN_CONTEXT = 5  # show last N intents per outcome in prompt
+
+            def _build_existing_context():
+                """Build existing outcomes with recent intents for Sonnet context."""
+                if not persona_outcome_intents:
+                    return "[]"
+                context = {}
+                for outcome, intents in persona_outcome_intents.items():
+                    # Strip persona prefix, show last N
+                    stripped = [i.split(": ", 1)[-1] for i in intents]
+                    if len(stripped) <= MAX_INTENTS_PER_OUTCOME_IN_CONTEXT:
+                        recent = stripped
+                    else:
+                        # First 3 (define scope) + last 2 (most recent, likely to overlap)
+                        recent = stripped[:3] + ["..."] + stripped[-2:]
+                    extra = max(0, len(intents) - MAX_INTENTS_PER_OUTCOME_IN_CONTEXT)
+                    if extra > 0:
+                        recent.append(f"... +{extra} more")
+                    context[outcome] = recent
+                return json.dumps(context, indent=2)
+
+            # Batch small clusters into groups up to CLUSTER_BATCH_TARGET
+            cluster_batches = []  # each: [{"cid": id, "members": [...]}]
+            current_batch = []
+            current_size = 0
+            for cid, members in small_clusters:
+                if current_size + len(members) > CLUSTER_BATCH_TARGET and current_batch:
+                    cluster_batches.append(current_batch)
+                    current_batch = []
+                    current_size = 0
+                current_batch.append({"cid": cid, "members": members})
+                current_size += len(members)
+            if current_batch:
+                cluster_batches.append(current_batch)
+
+            # Process large clusters — chunk if exceeds CLUSTER_BATCH_TARGET
+            MAX_PER_CALL = CLUSTER_BATCH_TARGET  # max intents per Sonnet call
+
+            for cid, members in large_clusters:
+                chunks = [members[i:i+MAX_PER_CALL] for i in range(0, len(members), MAX_PER_CALL)]
+
+                for chi, chunk in enumerate(chunks):
+                    existing_str = _build_existing_context()
+                    stripped = [m.split(": ", 1)[-1] for m in chunk]
+
+                    chunk_label = f" part {chi+1}/{len(chunks)}" if len(chunks) > 1 else ""
+                    prompt = f"""Persona: {persona}
+
+Existing outcomes with their assigned intents (REUSE outcomes, drop intents that duplicate already-assigned ones):
+{existing_str}
+
+Cluster of related intents to process:
+{json.dumps(stripped, indent=2)}
+
+IMPORTANT:
+1. First identify and DROP duplicate intents (same capability, different wording)
+2. Then assign each UNIQUE remaining intent to an outcome
+3. Reuse existing outcomes when possible"""
+
+                    print(f"    Cluster {cid}{chunk_label} ({len(chunk)} intents)...", end=" ", flush=True)
+                    result = llm.call_json(OUTCOME_ASSIGN_SYSTEM, prompt,
+                                           max_tokens=8192, model=sonnet_model)
+
+                    if result and isinstance(result, dict):
+                        for item in result.get("unique_intents", []):
+                            outcome = item.get("outcome", "Uncategorized")
+                            intent = f"{persona}: {item['intent']}"
+                            persona_outcome_intents.setdefault(outcome, []).append(intent)
+                            if outcome not in existing_outcomes:
+                                existing_outcomes.append(outcome)
+                        dropped = result.get("dropped_intents", [])
+                        total_dropped += len(dropped)
+                        kept = len(result.get("unique_intents", []))
+                        print(f"→ {kept} kept, {len(dropped)} dropped, {len(existing_outcomes)} outcomes")
+                    else:
+                        for m in chunk:
+                            persona_outcome_intents.setdefault("Uncategorized", []).append(m)
+                        print(f"→ fallback, kept all {len(chunk)}")
+                    time.sleep(3)
+
+            # Process batched small clusters
+            for bi, batch in enumerate(cluster_batches):
+                batch_cids = [c["cid"] for c in batch]
+                all_members = []
+                for c in batch:
+                    all_members.extend(c["members"])
+
+                existing_str = _build_existing_context()
+
+                # Format with cluster labels so Sonnet knows which intents are related
+                cluster_sections = []
+                for c in batch:
+                    stripped = [m.split(": ", 1)[-1] for m in c["members"]]
+                    cluster_sections.append(f"  Related group (cluster {c['cid']}): {json.dumps(stripped)}")
+                clusters_text = "\n".join(cluster_sections)
+
+                prompt = f"""Persona: {persona}
+
+Existing outcomes with their assigned intents (REUSE outcomes, drop intents that duplicate already-assigned ones):
+{existing_str}
+
+Multiple clusters of related intents to process:
+{clusters_text}
+
+IMPORTANT:
+1. First identify and DROP duplicate intents — both within and across clusters
+2. Then assign each UNIQUE remaining intent to an outcome
+3. Reuse existing outcomes when possible"""
+
+                cid_label = ", ".join(str(c) for c in batch_cids)
+                print(f"    Clusters [{cid_label}] ({len(all_members)} intents)...", end=" ", flush=True)
+                result = llm.call_json(OUTCOME_ASSIGN_SYSTEM, prompt,
+                                       max_tokens=8192, model=sonnet_model)
+
+                if result and isinstance(result, dict):
+                    for item in result.get("unique_intents", []):
+                        outcome = item.get("outcome", "Uncategorized")
+                        intent = f"{persona}: {item['intent']}"
+                        persona_outcome_intents.setdefault(outcome, []).append(intent)
+                        if outcome not in existing_outcomes:
+                            existing_outcomes.append(outcome)
+                    dropped = result.get("dropped_intents", [])
+                    total_dropped += len(dropped)
+                    kept = len(result.get("unique_intents", []))
+                    print(f"→ {kept} kept, {len(dropped)} dropped, {len(existing_outcomes)} outcomes")
+                else:
+                    for m in all_members:
+                        persona_outcome_intents.setdefault("Uncategorized", []).append(m)
+                    print(f"→ fallback, kept all {len(all_members)}")
+                time.sleep(3)
+
+            # Process noise (singletons) — sort by embedding similarity for topic-coherent batches
+            if noise:
+                # Sort singletons so related intents are adjacent
+                noise_with_emb = [(m, embeddings.get(m)) for m in noise]
+                noise_with_emb_valid = [(m, e) for m, e in noise_with_emb if e is not None]
+                noise_no_emb = [m for m, e in noise_with_emb if e is None]
+
+                if noise_with_emb_valid:
+                    # Use greedy nearest-neighbor ordering
+                    sorted_noise = []
+                    remaining = list(noise_with_emb_valid)
+                    current = remaining.pop(0)
+                    sorted_noise.append(current[0])
+
+                    while remaining:
+                        current_emb = np.array(current[1])
+                        best_idx = 0
+                        best_sim = -1
+                        for idx, (m, e) in enumerate(remaining):
+                            sim = float(np.dot(current_emb, np.array(e)) /
+                                       (np.linalg.norm(current_emb) * np.linalg.norm(np.array(e))))
+                            if sim > best_sim:
+                                best_sim = sim
+                                best_idx = idx
+                        current = remaining.pop(best_idx)
+                        sorted_noise.append(current[0])
+
+                    sorted_noise.extend(noise_no_emb)
+                else:
+                    sorted_noise = noise
+
+                print(f"    Singletons sorted by topic similarity for coherent batching")
+
+                for batch_start in range(0, len(sorted_noise), MAX_PER_CALL):
+                    batch = sorted_noise[batch_start:batch_start + MAX_PER_CALL]
+                    existing_str = _build_existing_context()
+                    stripped = [m.split(": ", 1)[-1] for m in batch]
+
+                    prompt = f"""Persona: {persona}
+
+Existing outcomes with their assigned intents (REUSE outcomes, drop intents that duplicate already-assigned ones):
+{existing_str}
+
+Remaining intents to process (grouped by topic similarity):
+{json.dumps(stripped, indent=2)}
+
+IMPORTANT:
+1. Drop any intents that duplicate capabilities already covered by existing outcomes
+2. Assign unique intents to existing outcomes or create new ones ONLY if needed"""
+
+                    print(f"    Singleton batch {batch_start//30 + 1} ({len(batch)} intents)...", end=" ", flush=True)
+                    result = llm.call_json(OUTCOME_ASSIGN_SYSTEM, prompt,
+                                           max_tokens=8192, model=sonnet_model)
+
+                    if result and isinstance(result, dict):
+                        for item in result.get("unique_intents", []):
+                            outcome = item.get("outcome", "Uncategorized")
+                            intent = f"{persona}: {item['intent']}"
+                            persona_outcome_intents.setdefault(outcome, []).append(intent)
+                            if outcome not in existing_outcomes:
+                                existing_outcomes.append(outcome)
+
+                        dropped = result.get("dropped_intents", [])
+                        total_dropped += len(dropped)
+                        kept = len(result.get("unique_intents", []))
+                        print(f"→ {kept} kept, {len(dropped)} dropped")
+                    else:
+                        for m in batch:
+                            persona_outcome_intents.setdefault("Uncategorized", []).append(m)
+                        print(f"→ fallback, kept all")
+
+                    time.sleep(3)
+
+            # Build persona structure
+            total_unique = sum(len(v) for v in persona_outcome_intents.values())
+            total_input = sum(len(v) for v in clusters.values())
+            print(f"\n  {persona}: {total_input} → {total_unique} unique across {len(persona_outcome_intents)} outcomes")
+
+            structure.append({
+                "persona": persona,
+                "outcomes": [
+                    {"outcome": oname, "intents": ointents}
+                    for oname, ointents in persona_outcome_intents.items()
+                ]
+            })
+
+        # Present full outcome → intent mapping for review
+        print(f"\n{'='*60}")
+        print(f"OUTCOME → INTENT MAPPING")
+        print(f"{'='*60}")
+        print(f"""
+  Sonnet processed each cluster and performed two tasks:
+    1. DEDUP: Dropped {total_dropped} intents that duplicate other intents
+    2. ASSIGN: Mapped each unique intent to a high-level outcome
+
+  Review the mapping below to verify:
+    - Outcomes are meaningful business capabilities (not technical)
+    - Each outcome has 3-8 outcomes per persona (not too many, not too few)
+    - Intents are assigned to the correct outcome
+    - No important intents were incorrectly dropped
+
+  After approval, this structure will be upserted to the functional graph
+  and Pass 3 will generate scenarios for each outcome.
+""")
+
+        total_final = sum(
+            len(o.get("intents", []))
+            for p in structure for o in p.get("outcomes", [])
+        )
+        print(f"  Total: {len(structure)} personas, "
+              f"{sum(len(p.get('outcomes',[])) for p in structure)} outcomes, "
+              f"{total_final} unique intents\n")
+
+        for p in structure:
+            persona = p.get("persona", "?")
+            outcomes = p.get("outcomes", [])
+            p_intents = sum(len(o.get("intents", [])) for o in outcomes)
+            print(f"  {'='*56}")
+            print(f"  {persona} ({len(outcomes)} outcomes, {p_intents} intents)")
+            print(f"  {'='*56}")
+
+            for o in sorted(outcomes, key=lambda x: -len(x.get("intents", []))):
+                intents = o.get("intents", [])
+                print(f"\n    [{o.get('outcome', '?')}] ({len(intents)} intents)")
+                for i in sorted(intents):
+                    clean = i.split(": ", 1)[-1] if ": " in i else i
+                    print(f"      - {clean}")
+
+        # Feedback loop
+        while True:
+            action, feedback = ask_user("\nReview the outcome mapping above. [A]pprove to upsert, [E]dit to revise, [S]kip to abort:")
+            if action == "approve":
+                break
+            elif action == "edit":
+                print(f"\n  Applying feedback: {feedback}")
+                # Build current structure summary for Sonnet
+                for p in structure:
+                    persona = p.get("persona", "?")
+                    outcome_summary = {}
+                    for o in p.get("outcomes", []):
+                        intents = o.get("intents", [])
+                        stripped = [i.split(": ", 1)[-1] for i in intents]
+                        sample = stripped[:3]
+                        if len(stripped) > 3:
+                            sample.append(f"... +{len(stripped) - 3} more")
+                        outcome_summary[o["outcome"]] = sample
+
+                    edit_prompt = f"""Persona: {persona}
+
+Current outcome structure:
+{json.dumps(outcome_summary, indent=2)}
+
+User feedback:
+{feedback}
+
+Apply the user's feedback to restructure the outcomes. You may:
+- Remove outcomes (reassign their intents to other outcomes, or drop them)
+- Merge outcomes together
+- Rename outcomes
+- Move intents between outcomes
+
+Return the COMPLETE revised structure (not just the changes).
+Every intent must appear in exactly one outcome.
+
+OUTPUT FORMAT (strict JSON):
+[{{"outcome": "<name>", "intents": ["intent1", "intent2", ...]}}]
 """
+                    print(f"  Revising {persona} outcomes...", end=" ", flush=True)
+                    revised = llm.call_json(OUTCOME_ASSIGN_SYSTEM, edit_prompt,
+                                            max_tokens=16384, model=sonnet_model)
 
-    structure = llm.call_json(STRUCTURE_SYSTEM, structure_prompt, max_tokens=8192, model=sonnet_model)
+                    if revised and isinstance(revised, list):
+                        # Replace outcomes for this persona
+                        p["outcomes"] = [
+                            {"outcome": o.get("outcome", ""), "intents": [f"{persona}: {i}" for i in o.get("intents", [])]}
+                            for o in revised
+                        ]
+                        new_count = len(p["outcomes"])
+                        new_intents = sum(len(o.get("intents", [])) for o in p["outcomes"])
+                        print(f"→ {new_count} outcomes, {new_intents} intents")
+                    elif revised and isinstance(revised, dict):
+                        # Handle if Sonnet returns {unique_intents, dropped_intents} format
+                        new_outcomes = {}
+                        for item in revised.get("unique_intents", []):
+                            outcome = item.get("outcome", "Uncategorized")
+                            intent = f"{persona}: {item['intent']}"
+                            new_outcomes.setdefault(outcome, []).append(intent)
+                        p["outcomes"] = [
+                            {"outcome": oname, "intents": ointents}
+                            for oname, ointents in new_outcomes.items()
+                        ]
+                        print(f"→ {len(p['outcomes'])} outcomes")
+                    else:
+                        print("→ revision failed, keeping current structure")
 
-    # Present to user
-    print(f"\nProposed structure:")
-    for p in structure:
-        print(f"\n  Persona: {p.get('persona', '?')}")
-        for o in p.get("outcomes", []):
-            print(f"    Outcome: {o.get('outcome', '?')}")
-            for intent in o.get("intents", []):
-                print(f"      ← {intent}")
+                # Re-display revised structure
+                print(f"\n{'='*60}")
+                print(f"REVISED OUTCOME MAPPING")
+                print(f"{'='*60}")
+                total_final = sum(
+                    len(o.get("intents", []))
+                    for p in structure for o in p.get("outcomes", [])
+                )
+                print(f"\n  Total: {len(structure)} personas, "
+                      f"{sum(len(p.get('outcomes',[])) for p in structure)} outcomes, "
+                      f"{total_final} unique intents\n")
+                for p in structure:
+                    persona = p.get("persona", "?")
+                    outcomes = p.get("outcomes", [])
+                    p_intents = sum(len(o.get("intents", [])) for o in outcomes)
+                    print(f"  {'='*56}")
+                    print(f"  {persona} ({len(outcomes)} outcomes, {p_intents} intents)")
+                    print(f"  {'='*56}")
+                    for o in sorted(outcomes, key=lambda x: -len(x.get("intents", []))):
+                        intents = o.get("intents", [])
+                        print(f"\n    [{o.get('outcome', '?')}] ({len(intents)} intents)")
+                        for i in sorted(intents)[:5]:
+                            clean = i.split(": ", 1)[-1] if ": " in i else i
+                            print(f"      - {clean}")
+                        if len(intents) > 5:
+                            print(f"      ... +{len(intents) - 5} more")
 
-    # Feedback loop
-    while True:
-        action, feedback = ask_user("Review the proposed structure:")
-        if action == "approve":
-            break
-        elif action == "edit":
-            # Re-run with feedback
-            structure = llm.call_json(STRUCTURE_SYSTEM,
-                f"{structure_prompt}\n\nUser feedback on previous proposal:\n{feedback}\n\nRevise accordingly.",
-                max_tokens=8192)
-            print(f"\nRevised structure:")
-            for p in structure:
-                print(f"\n  Persona: {p.get('persona', '?')}")
-                for o in p.get("outcomes", []):
-                    print(f"    Outcome: {o.get('outcome', '?')}")
-        elif action == "skip":
-            print("Skipping structure creation.")
+            elif action == "skip":
+                print("Skipping structure creation.")
+                return
+            elif action == "quit":
+                print("Quitting.")
+                return
+
+        # Upsert structure (personas + outcomes only)
+        upsert_personas = []
+        for p in structure:
+            persona_obj = {"persona": p["persona"], "outcomes": []}
+            for o in p.get("outcomes", []):
+                persona_obj["outcomes"].append({"outcome": o["outcome"], "scenarios": []})
+            upsert_personas.append(persona_obj)
+
+        upsert_log = os.path.join(os.getcwd(), "llm_logs", "upsert_pass2.json")
+        os.makedirs(os.path.dirname(upsert_log), exist_ok=True)
+        with open(upsert_log, "w") as f:
+            json.dump({"payload": {"personas": upsert_personas}, "project": {"uuid": project_uuid, "name": "projectA"}, "skipStepAndAction": True}, f, indent=2)
+        print(f"\n  Payload logged to: {upsert_log}")
+
+        print("Upserting structure to API...")
+        try:
+            api.upsert(project_uuid, upsert_personas)
+            print("  Done! Waiting 15s for embeddings...")
+            time.sleep(15)
+        except Exception as e:
+            print(f"  Error: {e}")
             return
-        elif action == "quit":
-            print("Quitting.")
-            return
 
-    # Upsert structure (personas + outcomes only)
-    upsert_personas = []
-    for p in structure:
-        persona_obj = {"persona": p["persona"], "outcomes": []}
-        for o in p.get("outcomes", []):
-            persona_obj["outcomes"].append({"outcome": o["outcome"], "scenarios": []})
-        upsert_personas.append(persona_obj)
-
-    # Log payload for debugging
-    upsert_log = os.path.join(os.getcwd(), "llm_logs", "upsert_pass2.json")
-    os.makedirs(os.path.dirname(upsert_log), exist_ok=True)
-    with open(upsert_log, "w") as f:
-        json.dump({"payload": {"personas": upsert_personas}, "project": {"uuid": project_uuid, "name": "projectA"}, "skipStepAndAction": True}, f, indent=2)
-    print(f"\n  Payload logged to: {upsert_log}")
-
-    print("Upserting structure to API...")
-    try:
-        api.upsert(project_uuid, upsert_personas)
-        print("  Done! Waiting 15s for embeddings...")
-        time.sleep(15)
-    except Exception as e:
-        print(f"  Error: {e}")
-        return
+        # Cache Pass 2 results
+        save_pass_cache(2, {"structure": structure})
 
     # Build locked structure for Pass 3
     locked_personas = [p["persona"] for p in structure]
@@ -945,8 +1893,10 @@ Group related intents under broad outcomes. A typical project should have 5-8 ou
     # PASS 3: Create scenarios per OUTCOME (with user approval)
     # ======================================================================
     print(f"\n{'='*60}")
-    print("PASS 3: Creating scenarios per outcome")
+    print("PASS 3: Creating scenarios per outcome (intent-driven discovery)")
     print(f"{'='*60}\n")
+
+    INTENT_BATCH_SIZE = 5  # intents per batch for scenario generation
 
     # Build outcome list with their personas and mapped intents
     outcome_list = []
@@ -969,23 +1919,20 @@ Group related intents under broad outcomes. A typical project should have 5-8 ou
         outcome_intents = outcome_info["intents"]
 
         print(f"\n{'='*60}")
-        print(f"[{i+1}/{len(outcome_list)}] {persona} > {outcome_name}")
+        print(f"[{i+1}/{len(outcome_list)}] {persona} > {outcome_name} ({len(outcome_intents)} intents)")
         print(f"{'='*60}")
 
         try:
-            # ---- Step 3a: Find relevant files via Code Graph Search ----
-            print(f"  Searching for relevant files...")
+            # ---- Step 3a: Search per intent, collect search results ----
+            print(f"  Phase 1: Discovering files per intent...")
 
-            # Search using persona + outcome name + each mapped intent
-            # Include persona to differentiate "User: Manage Documents" from "System: Manage Documents"
-            search_queries = [f"{persona} {outcome_name}"] + [
-                intent for intent in outcome_intents[:5]
-            ]
+            intent_search_results = {}  # intent → [search results]
+            all_found_paths = {}  # path → {score, data, label} (for file fetching later)
 
-            found_files = {}  # path → {score, data}
-            for query in search_queries:
+            for ii, intent in enumerate(outcome_intents):
                 try:
-                    results = api.code_graph_search(project_uuid, query, limit=10)
+                    results = api.code_graph_search(project_uuid, intent, limit=5)
+                    valid_results = []
                     for r in results:
                         score = r.get("score", 0)
                         data = r.get("data", {})
@@ -993,39 +1940,33 @@ Group related intents under broad outcomes. A typical project should have 5-8 ou
                         label = r.get("label", "")
                         if not path or score < 0.3:
                             continue
-                        # File nodes: add directly
-                        # Function/Class nodes: extract parent file path and add
                         if label in ("File", "Function", "Class"):
-                            file_id = data.get("id", "") if label == "File" else ""
-                            if path not in found_files or score > found_files[path]["score"]:
-                                found_files[path] = {"score": score, "data": data, "label": label}
+                            valid_results.append(r)
+                            # Track for later file fetching
+                            if path not in all_found_paths or score > all_found_paths[path]["score"]:
+                                all_found_paths[path] = {"score": score, "data": data, "label": label}
+                    intent_search_results[intent] = valid_results
+                    result_count = len(valid_results)
+                    print(f"    [{ii+1}/{len(outcome_intents)}] {intent} → {result_count} results")
                 except Exception as e:
-                    log.warning(f"  Search failed for '{query}': {e}")
+                    intent_search_results[intent] = []
+                    log.warning(f"    [{ii+1}/{len(outcome_intents)}] {intent} → error: {e}")
 
-            # Sort by relevance score
-            sorted_files = sorted(found_files.items(), key=lambda x: -x[1]["score"])
-            top_files = sorted_files[:15]  # max 15 files per outcome
+            total_unique_paths = len(all_found_paths)
+            print(f"  Discovery complete: {total_unique_paths} unique file paths across {len(outcome_intents)} intents")
 
-            if not top_files:
-                print(f"  No relevant files found, skipping")
+            if total_unique_paths == 0:
+                print(f"  No relevant files found for any intent, skipping")
                 continue
 
-            print(f"  Found {len(top_files)} relevant files:")
-            for path, info in top_files:
-                print(f"    {info['score']:.2f} [{info.get('label','?')}] {path}")
+            # ---- Step 3a.2: Fetch file details for matched paths (deduplicated, with children) ----
+            print(f"\n  Phase 1b: Fetching file details for {total_unique_paths} unique matched files...")
+            outcome_file_details = {}  # path → file detail (fetched once, reused everywhere)
 
-            # ---- Step 3b: Fetch full file details ----
-            # Deduplicate paths (Function/Class nodes share path with their parent File)
-            unique_paths = list({path for path, _ in top_files})
-            print(f"  Fetching details for {len(unique_paths)} unique files...")
-            file_details = []
-            fetched_paths = set()
-            for path, info in top_files:
-                if path in fetched_paths:
+            for path, info in all_found_paths.items():
+                if path in outcome_file_details:
                     continue
-                fetched_paths.add(path)
                 try:
-                    # For File nodes, use id directly. For Function/Class, search by path.
                     if info.get("label") == "File":
                         file_id = info["data"].get("id", "")
                         details = api._get(f"/code-ontology/{project_uuid}/File", {
@@ -1040,89 +1981,140 @@ Group related intents under broad outcomes. A typical project should have 5-8 ou
                         })
                     items = details.get("data", [])
                     if items:
-                        file_details.append(items[0])
+                        outcome_file_details[path] = items[0]
                 except Exception as e:
-                    log.warning(f"  Failed to fetch {path}: {e}")
+                    log.warning(f"    Failed to fetch {path}: {e}")
 
-            if not file_details:
-                print(f"  Could not fetch file details, skipping")
-                continue
+            print(f"  Fetched details for {len(outcome_file_details)} files (with children)")
 
-            print(f"  Got details for {len(file_details)} files")
+            # Build enriched summary for scenario generation
+            # Group files by which intents matched them for context
+            def _get_batch_file_summary(intent_batch):
+                """Get format_summary for files matched by intents in this batch."""
+                batch_paths = set()
+                for intent in intent_batch:
+                    for r in intent_search_results.get(intent, []):
+                        p = r.get("data", {}).get("path", "")
+                        if p:
+                            batch_paths.add(p)
+                batch_files = [outcome_file_details[p] for p in batch_paths if p in outcome_file_details]
+                return format_summary(batch_files) if batch_files else ""
 
-            # ---- Step 3c: Extract scenarios (Sonnet) ----
-            summary_text = format_summary(file_details)
-            summary_chunks = chunk_text(summary_text, max_chars=80000)
+            # ---- Step 3b: Generate scenarios in intent batches ----
+            print(f"\n  Phase 2: Generating scenarios in batches of {INTENT_BATCH_SIZE} intents...")
 
-            if len(summary_chunks) > 1:
-                print(f"  Code summary: {len(summary_text)} chars → {len(summary_chunks)} chunks")
+            existing_scenario_names = []  # cumulative — prevents duplicates across batches
+            all_batch_scenarios = []  # all scenarios across batches
 
-            scenario_prompt = SCENARIO_SYSTEM.format(existing_scenarios="[]")
-            scenario_prompt_with_files = scenario_prompt.replace(
-                '"description": "<brief>"',
-                '"description": "<brief>", "relevant_files": ["<path1>", "<path2>"]'
-            )
+            intent_batches = [outcome_intents[j:j + INTENT_BATCH_SIZE]
+                              for j in range(0, len(outcome_intents), INTENT_BATCH_SIZE)]
 
-            # Process each chunk and merge results
-            all_chunk_results = []
-            for ci, chunk in enumerate(summary_chunks):
-                if len(summary_chunks) > 1:
-                    print(f"    Chunk {ci+1}/{len(summary_chunks)} ({len(chunk)} chars)...")
+            for bi, intent_batch in enumerate(intent_batches):
+                print(f"\n    Batch {bi+1}/{len(intent_batches)}: {intent_batch}")
 
-                user_prompt = f"""Create ALL scenarios for the outcome "{outcome_name}" under persona "{persona}".
+                # Get enriched file summary for this batch's matched files
+                batch_file_summary = _get_batch_file_summary(intent_batch)
 
-Be EXHAUSTIVE — capture every distinct user or system flow you can identify from this code.
+                if not batch_file_summary:
+                    # Fallback to lightweight search results if no file details available
+                    batch_context_parts = []
+                    for intent in intent_batch:
+                        results = intent_search_results.get(intent, [])
+                        if results:
+                            batch_context_parts.append(format_search_results(intent, results))
+                    if not batch_context_parts:
+                        print(f"    No search results for this batch, skipping")
+                        continue
+                    batch_file_summary = "\n\n".join(batch_context_parts)
+
+                # Chunk if summary is too large
+                summary_chunks = chunk_text(batch_file_summary, max_chars=80000)
+
+                # Build existing scenarios string for dedup
+                existing_scenarios_str = json.dumps(existing_scenario_names) if existing_scenario_names else "[]"
+
+                scenario_prompt = SCENARIO_SYSTEM.format(existing_scenarios=existing_scenarios_str)
+                scenario_prompt_with_files = scenario_prompt.replace(
+                    '"description": "<brief>"',
+                    '"description": "<brief>", "relevant_files": ["<path1>", "<path2>"]'
+                )
+
+                # Process each chunk (usually just one unless files are very large)
+                for ci, chunk in enumerate(summary_chunks):
+                    if len(summary_chunks) > 1:
+                        print(f"      Chunk {ci+1}/{len(summary_chunks)} ({len(chunk)} chars)")
+
+                    user_prompt = f"""Create scenarios for the outcome "{outcome_name}" under persona "{persona}".
+
+Capture every distinct user or system flow you can identify from the code below.
+Pay attention to each function — if a function represents a distinct user workflow
+(e.g., scheduling, drafting, publishing are separate flows), create separate scenarios.
 
 LOCKED Persona: {persona}
 LOCKED Outcome: {outcome_name}
 
-Related intents:
-{json.dumps(outcome_intents, indent=2)}
+Intents in this batch:
+{json.dumps(intent_batch, indent=2)}
 
-CODE (files relevant to this outcome, chunk {ci+1}/{len(summary_chunks)}):
+Code structure (classes, methods, functions with call chains):
 {chunk}
 
 For each scenario, include a "relevant_files" array listing the file paths
 most relevant to that scenario (for detailed code analysis in the next step).
 """
 
-                print(f"  Extracting scenarios...")
-                chunk_result = llm.call_json(scenario_prompt_with_files, user_prompt, max_tokens=8192, model=sonnet_model)
-                if chunk_result:
-                    all_chunk_results.extend(chunk_result)
+                print(f"    Extracting scenarios...")
+                batch_result = llm.call_json(scenario_prompt_with_files, user_prompt,
+                                             max_tokens=8192, model=sonnet_model)
 
-            # Merge chunk results — deduplicate scenarios by name
-            if not all_chunk_results:
-                result = []
-            else:
-                # Merge into single persona→outcome structure
-                merged = {}
-                for po in all_chunk_results:
-                    pname = po.get("persona", "")
-                    if pname not in merged:
-                        merged[pname] = {"persona": pname, "outcomes": {}}
-                    for oo in po.get("outcomes", []):
-                        oname = oo.get("outcome", "")
-                        if oname not in merged[pname]["outcomes"]:
-                            merged[pname]["outcomes"][oname] = {"outcome": oname, "scenarios": {}}
-                        for so in oo.get("scenarios", []):
-                            sname = so.get("scenario", "")
-                            if sname not in merged[pname]["outcomes"][oname]["scenarios"]:
-                                merged[pname]["outcomes"][oname]["scenarios"][sname] = so
-                # Convert back to list format
-                result = []
-                for pname, pdata in merged.items():
-                    persona_obj = {"persona": pname, "outcomes": []}
-                    for oname, odata in pdata["outcomes"].items():
-                        outcome_obj = {"outcome": oname, "scenarios": list(odata["scenarios"].values())}
-                        persona_obj["outcomes"].append(outcome_obj)
-                    result.append(persona_obj)
+                if batch_result:
+                    # Extract scenario names for cumulative dedup
+                    for po in batch_result:
+                        for oo in po.get("outcomes", []):
+                            for so in oo.get("scenarios", []):
+                                sname = so.get("scenario", "")
+                                if sname and sname not in existing_scenario_names:
+                                    existing_scenario_names.append(sname)
+                    all_batch_scenarios.extend(batch_result)
+                    new_count = sum(len(oo.get("scenarios", []))
+                                    for po in batch_result for oo in po.get("outcomes", []))
+                    print(f"    → {new_count} scenarios (total unique: {len(existing_scenario_names)})")
+                else:
+                    print(f"    → no scenarios")
 
-            if not result or result == []:
-                print(f"  No scenarios found")
+            # Merge all batch results — deduplicate by scenario name
+            if not all_batch_scenarios:
+                print(f"  No scenarios found across all batches")
                 continue
 
-            # ---- Step 3d: Generate steps/actions per scenario (Haiku, focused files) ----
+            merged = {}
+            for po in all_batch_scenarios:
+                pname = po.get("persona", "")
+                if pname not in merged:
+                    merged[pname] = {"persona": pname, "outcomes": {}}
+                for oo in po.get("outcomes", []):
+                    oname = oo.get("outcome", "")
+                    if oname not in merged[pname]["outcomes"]:
+                        merged[pname]["outcomes"][oname] = {"outcome": oname, "scenarios": {}}
+                    for so in oo.get("scenarios", []):
+                        sname = so.get("scenario", "")
+                        if sname not in merged[pname]["outcomes"][oname]["scenarios"]:
+                            merged[pname]["outcomes"][oname]["scenarios"][sname] = so
+
+            # Convert back to list format
+            result = []
+            for pname, pdata in merged.items():
+                persona_obj = {"persona": pname, "outcomes": []}
+                for oname, odata in pdata["outcomes"].items():
+                    outcome_obj = {"outcome": oname, "scenarios": list(odata["scenarios"].values())}
+                    persona_obj["outcomes"].append(outcome_obj)
+                result.append(persona_obj)
+
+            if not result:
+                print(f"  No scenarios after merge")
+                continue
+
+            # ---- Step 3c: Generate steps/actions per scenario (Haiku, full file details) ----
             all_sc = []
             for po in result:
                 for oo in po.get("outcomes", []):
@@ -1134,10 +2126,36 @@ most relevant to that scenario (for detailed code analysis in the next step).
                             "relevant_files": so.get("relevant_files", []),
                         })
 
+            print(f"\n  Phase 3: Generating steps/actions for {len(all_sc)} scenarios...")
+
+            # Reuse file details already fetched in Phase 1b — no duplicate API calls
+            # For any scenario files not yet fetched, fetch them now
+            scenario_file_paths = set()
+            for sc in all_sc:
+                for fp in sc.get("relevant_files", []):
+                    scenario_file_paths.add(fp)
+
+            new_paths = scenario_file_paths - set(outcome_file_details.keys())
+            if new_paths:
+                print(f"  Fetching {len(new_paths)} additional files not in Phase 1b cache...")
+                for path in new_paths:
+                    try:
+                        details = api._get(f"/code-ontology/{project_uuid}/File", {
+                            "filters[path][$eq]": path,
+                            "children": "true",
+                        })
+                        items = details.get("data", [])
+                        if items:
+                            outcome_file_details[path] = items[0]
+                    except Exception as e:
+                        log.warning(f"  Failed to fetch {path}: {e}")
+
+            file_details = [outcome_file_details[p] for p in scenario_file_paths if p in outcome_file_details]
+            print(f"  Using {len(file_details)} files for step/action generation ({len(outcome_file_details)} total cached)")
+
             # Build file index for lookup
             details_by_path = {f.get("path", ""): f for f in file_details}
 
-            print(f"  Generating steps/actions for {len(all_sc)} scenarios...")
             for batch_start in range(0, len(all_sc), 2):
                 batch = all_sc[batch_start:batch_start + 2]
 
@@ -1152,6 +2170,10 @@ most relevant to that scenario (for detailed code analysis in the next step).
                     relevant_file_data = [details_by_path[p] for p in relevant_paths if p in details_by_path]
                 else:
                     relevant_file_data = file_details[:5]  # fallback
+
+                if not relevant_file_data:
+                    log.warning(f"  No file details available for scenarios: {[s['scenario'] for s in batch]}")
+                    continue
 
                 focused_code = format_code(relevant_file_data)
                 if len(focused_code) > 50000:
@@ -1178,26 +2200,27 @@ most relevant to that scenario (for detailed code analysis in the next step).
                 except Exception as e:
                     log.warning(f"  Steps failed for batch: {e}")
 
-            # Convert relevant_files to citations and clean up
+            # Attach citations as array of objects (not stringified)
+            # CitationInputDto: type (enum: document|exDoc|figma|jira|confluence|code|prompt), name, reference
+            def _path_to_citation(path):
+                info = all_found_paths.get(path, {})
+                file_id = info.get("data", {}).get("id", path)
+                return {"reference": file_id, "name": path, "type": "code"}
+
+            all_outcome_paths = list(all_found_paths.keys())
+            outcome_citations = [_path_to_citation(p) for p in all_outcome_paths]
+
             for po in result:
                 for oo in po.get("outcomes", []):
-                    # Outcome-level citations: all files found for this outcome
-                    oo["citations"] = [
-                        {"reference": path, "name": path, "type": "code"}
-                        for path, _ in top_files
-                    ]
+                    oo["citations"] = outcome_citations
                     for so in oo.get("scenarios", []):
-                        # Scenario-level citations: from relevant_files
                         rel_files = so.pop("relevant_files", [])
-                        so["citations"] = [
-                            {"reference": fp, "name": fp, "type": "code"}
-                            for fp in rel_files
-                        ]
-                        # Steps/Actions citations: from the files used in 3d context
+                        scenario_citations = [_path_to_citation(fp) for fp in rel_files] if rel_files else outcome_citations
+                        so["citations"] = scenario_citations
                         for step in so.get("steps", []):
-                            step["citations"] = so["citations"]  # same files as scenario
+                            step["citations"] = scenario_citations
                             for action in step.get("actions", []):
-                                action["citations"] = so["citations"]
+                                action["citations"] = scenario_citations
 
             # Present to user
             print(f"\n  Proposed scenarios for '{outcome_name}':")
@@ -1215,9 +2238,40 @@ most relevant to that scenario (for detailed code analysis in the next step).
                 print(f"  Upserted {len(all_sc)} scenarios. Waiting 15s for embeddings...")
                 time.sleep(15)
             elif action == "edit":
-                result2 = llm.call_json(scenario_prompt_with_files,
-                    f"{user_prompt}\n\nUser feedback:\n{feedback}\n\nRevise accordingly.",
-                    max_tokens=8192, model=sonnet_model)
+                # Re-run last batch with feedback (simplified — uses all intents)
+                scenario_prompt_edit = SCENARIO_SYSTEM.format(existing_scenarios="[]")
+                scenario_prompt_edit = scenario_prompt_edit.replace(
+                    '"description": "<brief>"',
+                    '"description": "<brief>", "relevant_files": ["<path1>", "<path2>"]'
+                )
+                # Gather all search context
+                all_context_parts = []
+                for intent in outcome_intents:
+                    results = intent_search_results.get(intent, [])
+                    if results:
+                        all_context_parts.append(format_search_results(intent, results))
+                all_context = "\n\n".join(all_context_parts)
+                if len(all_context) > 80000:
+                    all_context = all_context[:80000] + "\n... (truncated)"
+
+                edit_prompt = f"""Revise scenarios for the outcome "{outcome_name}" under persona "{persona}".
+
+LOCKED Persona: {persona}
+LOCKED Outcome: {outcome_name}
+
+All intents:
+{json.dumps(outcome_intents, indent=2)}
+
+Code search results:
+{all_context}
+
+User feedback on previous proposal:
+{feedback}
+
+Revise accordingly. Include "relevant_files" arrays.
+"""
+                result2 = llm.call_json(scenario_prompt_edit, edit_prompt,
+                                        max_tokens=8192, model=sonnet_model)
                 if result2:
                     print(f"  Revised:")
                     for po in result2:
@@ -1226,7 +2280,6 @@ most relevant to that scenario (for detailed code analysis in the next step).
                                 print(f"    {so['scenario']}")
                     a2, _ = ask_user("Approve revised?")
                     if a2 == "approve":
-                        # Clean relevant_files
                         for po in result2:
                             for oo in po.get("outcomes", []):
                                 for so in oo.get("scenarios", []):
