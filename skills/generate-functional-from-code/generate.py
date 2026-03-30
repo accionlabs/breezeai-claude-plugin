@@ -1,15 +1,23 @@
 """
-LangGraph Functional Graph Generator v3 — Three-Pass Pipeline
-==============================================================
-Pass 1:   Extract intents from all clusters (Haiku, automated)
+LangGraph Functional Graph Generator v4 — Method-Level Pipeline
+================================================================
+v4 improvements over v3:
+  - Pass 1: Method-level extraction with conditional branch visibility
+  - Pass 1: Large files (>500 LOC) get per-method detail including branching logic
+  - Pass 1: Decorator/route metadata extracted per method (view_config, request_method)
+  - Pass 1: Statement-level context (flag checks, parameter conditionals) visible to LLM
+  - Pass 1: Frontend route configs and workflow tabs extracted as structured metadata
+  - All v3 improvements retained (flag-aware prompts, max-6 outcomes, multi-query search)
+
+Pass 1:   Extract intents from all clusters (Sonnet, method-level detail)
 Pass 1.5: Dedup intents (filter + normalize + embed + DBSCAN clustering)
 Pass 2:   Create outcomes via cluster-based assignment (Sonnet, dedup + assign)
-Pass 3:   Create scenarios per outcome (Sonnet + Haiku)
+Pass 3:   Create scenarios per outcome (Sonnet)
 
 Usage:
-    python generate_v2.py
-    python generate_v2.py --project-uuid <uuid> --api-key <key>
-    python generate_v2.py --resume-from 2 --auto-approve
+    python generate_v4.py
+    python generate_v4.py --project-uuid <uuid> --api-key <key>
+    python generate_v4.py --resume-from 2 --auto-approve
 """
 
 import json
@@ -38,7 +46,7 @@ BREEZE_CONFIG_FILE = ".breeze.json"
 
 # Defaults — overridden by .breeze.json, env vars, or CLI args
 DEFAULT_AWS_REGION = "us-west-2"
-DEFAULT_HAIKU_MODEL = "anthropic.claude-3-5-haiku-20241022-v1:0"
+DEFAULT_HAIKU_MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0"
 DEFAULT_SONNET_MODEL = "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0"
 EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
 DEFAULT_DBSCAN_EPS = 0.20
@@ -153,7 +161,7 @@ class LLM:
         log.info(f"  [LLM Call #{call_id}] System: ~{sys_tokens} tokens | User: ~{usr_tokens} tokens | Total: ~{sys_tokens + usr_tokens} tokens")
 
         # Write full context to log file for inspection
-        log_dir = os.path.join(os.getcwd(), "llm_logs")
+        log_dir = os.path.join(os.getcwd(), "llm_logs_v4")
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"call_{call_id:03d}.txt")
         with open(log_file, "w", encoding="utf-8") as f:
@@ -273,10 +281,10 @@ class LLM:
 # Pass cache — saves/loads intermediate results between passes
 # ---------------------------------------------------------------------------
 
-CACHE_DIR = os.path.join(os.getcwd(), "llm_logs")
+CACHE_DIR = os.path.join(os.getcwd(), "llm_logs_v4")
 
 def _cache_path(pass_num):
-    return os.path.join(CACHE_DIR, f"cache_pass{pass_num}.json")
+    return os.path.join(CACHE_DIR, f"cache_v4_pass{pass_num}.json")
 
 def save_pass_cache(pass_num, data):
     """Save pass results to cache file."""
@@ -302,15 +310,31 @@ def load_pass_cache(pass_num):
 # ---------------------------------------------------------------------------
 
 def format_summary(files):
-    """Format cluster files with enough detail for intent extraction.
-    Includes: path, classes with methods, standalone functions,
-    route decorators, injected services, key calls."""
+    """Format cluster files with METHOD-LEVEL detail for intent extraction.
+
+    v4 enhancement: For large files (>500 LOC), extracts per-method detail
+    including conditional branches, flag checks, and decorator metadata.
+    This allows the LLM to see workflow variants (e.g., icflag=9 vs icflag=3)
+    that were invisible in v2/v3 file-level summaries.
+
+    Includes: path, classes with methods + decorators + branch analysis,
+    standalone functions with branch analysis, route decorators, key statements.
+    """
     lines = []
     for f in files:
         p = f.get("path", "?")
         loc = f.get("loc", 0)
         repo = f.get("repositoryName", "?")
         parts = [f"{p} ({loc} LOC, {repo})"]
+
+        # Determine detail level based on file size
+        # Large files get full method-level branch analysis
+        detailed_mode = loc > 300
+
+        # External imports (important for understanding framework)
+        ext = f.get("externalImports", [])
+        if ext:
+            parts.append(f"  Imports: {', '.join(ext[:15])}")
 
         # Classes with methods
         for cls in f.get("classes", []):
@@ -319,57 +343,178 @@ def format_summary(files):
             if ctype == "interface":
                 parts.append(f"  Interface: {cname}")
                 continue
-            parts.append(f"  Class: {cname}")
 
-            # Injected services (from class statements with @Inject)
+            # Class-level decorators (route_name, view_defaults, etc.)
+            decorators = cls.get("decorators", [])
+            if decorators:
+                for dec in decorators:
+                    dec_text = dec if isinstance(dec, str) else str(dec)
+                    parts.append(f"  Class: {cname} {dec_text[:200]}")
+                    break
+            else:
+                parts.append(f"  Class: {cname}")
+
+            # Class-level statements (route decorators, injections)
             for st in cls.get("statements", []):
                 if isinstance(st, dict):
                     text = st.get("text", "")
                     stype = st.get("type", "")
-                    # Route decorators
-                    if stype == "decorator" and any(d in text for d in ["@Get", "@Post", "@Put", "@Delete", "@Patch"]):
-                        route = text.replace("\r\n", " ").replace("\n", " ")[:150]
+                    if stype == "decorator" and any(d in text for d in
+                        ["@Get", "@Post", "@Put", "@Delete", "@Patch",
+                         "@view_config", "@view_defaults", "route_name"]):
+                        route = text.replace("\r\n", " ").replace("\n", " ")[:200]
                         parts.append(f"    {route}")
-                    # Injected services
                     elif "Inject" in text:
                         inject = text.replace("\r\n", " ").replace("\n", " ")[:100]
                         parts.append(f"    {inject}")
 
-            # Methods
+            # Methods — with branch analysis for large files
             for m in cls.get("methods", []):
                 mname = m.get("name", "?")
+                if mname in ("__init__", "constructor"):
+                    continue  # skip constructors, they rarely contain business logic
                 params = ", ".join(m.get("params", []))
+                method_loc = (m.get("endLine", 0) or 0) - (m.get("startLine", 0) or 0)
+
                 # Extract call targets
                 try:
                     calls = json.loads(m.get("calls", "[]")) if isinstance(m.get("calls"), str) else m.get("calls", [])
-                    call_names = [c.get("name", "") for c in calls if isinstance(c, dict) and c.get("name")][:8]
+                    call_names = [c.get("name", "") for c in calls if isinstance(c, dict) and c.get("name")][:10]
                 except:
                     call_names = []
                 call_str = f" → calls {', '.join(call_names)}" if call_names else ""
-                parts.append(f"    - {mname}({params}){call_str}")
 
-        # Standalone functions
+                # Method decorators (view_config, request_method, etc.)
+                method_decorators = m.get("decorators", [])
+                dec_str = ""
+                for md in method_decorators:
+                    md_text = md if isinstance(md, str) else str(md)
+                    if any(kw in md_text for kw in ["view_config", "request_method", "route_name",
+                                                      "Get", "Post", "Put", "Delete", "Patch"]):
+                        dec_str = f" [{md_text[:120]}]"
+                        break
+
+                parts.append(f"    - {mname}({params}){dec_str}{call_str} ({method_loc} lines)")
+
+                # Branch analysis for methods in large files
+                if detailed_mode and method_loc > 15:
+                    branches = _extract_branches(m)
+                    for branch in branches:
+                        parts.append(f"      {branch}")
+
+        # Standalone functions — with branch analysis for large files
         for fn in f.get("functions", []):
             fname = fn.get("name", "?")
             params = ", ".join(fn.get("params", []))
+            fn_loc = (fn.get("endLine", 0) or 0) - (fn.get("startLine", 0) or 0)
             try:
                 calls = json.loads(fn.get("calls", "[]")) if isinstance(fn.get("calls"), str) else fn.get("calls", [])
-                call_names = [c.get("name", "") for c in calls if isinstance(c, dict) and c.get("name")][:8]
+                call_names = [c.get("name", "") for c in calls if isinstance(c, dict) and c.get("name")][:10]
             except:
                 call_names = []
             call_str = f" → calls {', '.join(call_names)}" if call_names else ""
-            parts.append(f"  - {fname}({params}){call_str}")
 
-        # File-level statements (route definitions, key configs)
+            # Function decorators
+            fn_decorators = fn.get("decorators", [])
+            dec_str = ""
+            for fd in fn_decorators:
+                fd_text = fd if isinstance(fd, str) else str(fd)
+                if any(kw in fd_text for kw in ["view_config", "request_method", "route_name",
+                                                  "Get", "Post", "Put", "Delete", "Patch"]):
+                    dec_str = f" [{fd_text[:120]}]"
+                    break
+
+            parts.append(f"  - {fname}({params}){dec_str}{call_str} ({fn_loc} lines)")
+
+            if detailed_mode and fn_loc > 15:
+                branches = _extract_branches(fn)
+                for branch in branches:
+                    parts.append(f"    {branch}")
+
+        # File-level statements (route definitions, key configs, workflow configs)
         for st in f.get("statements", []):
             if isinstance(st, dict):
                 text = st.get("text", "")
                 stype = st.get("type", "")
                 if stype in ("decorator", "query_statement") or "Cron" in text or "Schedule" in text:
                     parts.append(f"  [{stype}] {text[:150]}")
+                # Catch frontend config objects (workflow tabs, route configs, createNewPath etc.)
+                elif stype == "lexical_declaration" and any(kw in text for kw in
+                    ["createNewPath", "route", "config", "tabs", "workflow", "icon:", "color:"]):
+                    # Truncate but keep enough to see the structure
+                    clean = text.replace("\r\n", " ").replace("\n", " ")[:300]
+                    parts.append(f"  [config] {clean}")
 
         lines.append("\n".join(parts))
     return "\n\n".join(lines)
+
+
+def _extract_branches(method_or_fn):
+    """Extract conditional branches and flag checks from a method/function's statements.
+
+    Looks for patterns like:
+    - if/elif with flag checks (icflag, type, mode, status)
+    - request parameter checks (request.params, request.matchdict)
+    - request_param decorators
+    - switch/case or match statements
+
+    Returns a list of branch description strings.
+    """
+    branches = []
+    statements = method_or_fn.get("statements", [])
+
+    for st in statements:
+        if not isinstance(st, dict):
+            continue
+        text = st.get("text", "")
+        stype = st.get("type", "")
+
+        # Skip empty or very short statements
+        if len(text) < 10:
+            continue
+
+        clean = text.replace("\r\n", " ").replace("\n", " ").strip()
+
+        # Conditional branches with flags/types/modes
+        if stype in ("if_statement", "elif_clause", "else_clause", "conditional_expression"):
+            # Look for meaningful business conditionals (not null checks or error handling)
+            if any(kw in clean.lower() for kw in [
+                "flag", "type", "mode", "status", "role", "kind", "category",
+                "inout", "csflag", "gsflag", "icflag", "avflag", "maflag",
+                "request_param", "request.params", "request.matchdict",
+                "query.type", "query.mode", "wftype", "wf_type",
+                "== 9", "== 3", "== 15", "== 19", "== 4", "== 16",
+                "'sale'", "'purchase'", "'receipt'", "'payment'",
+                "\"sale\"", "\"purchase\"", "\"receipt\"", "\"payment\"",
+            ]):
+                branches.append(f"BRANCH: {clean[:180]}")
+
+        # Decorator-based routing (view_config with request_param)
+        elif stype == "decorator":
+            if "request_param" in clean or "request_method" in clean:
+                branches.append(f"ROUTE: {clean[:180]}")
+
+        # Query statements that reveal entity relationships
+        elif stype == "query_statement":
+            # Only include if it references key business tables/entities
+            if any(kw in clean.lower() for kw in [
+                "invoice", "voucher", "delchal", "purchaseorder", "transfernote",
+                "rejectionnote", "customerandsupplier", "product", "godown",
+                "stock", "tax", "bankrecon", "drcr", "budget", "project",
+                # Generic table references for non-GNUKhata projects
+                "insert", "update", "delete", "create", "where",
+            ]):
+                # Truncate but keep table/entity names visible
+                branches.append(f"DB: {clean[:150]}")
+
+    # Limit to most informative branches (avoid noise)
+    if len(branches) > 8:
+        # Prioritize BRANCH and ROUTE over DB
+        priority = [b for b in branches if b.startswith("BRANCH:") or b.startswith("ROUTE:")]
+        db = [b for b in branches if b.startswith("DB:")]
+        branches = priority[:6] + db[:2]
+
+    return branches
 
 
 def format_code(files):
@@ -439,7 +584,7 @@ def format_search_results(intent, results):
     return "\n".join(lines)
 
 
-def chunk_text(text, max_chars=60000):
+def chunk_text(text, max_chars=80000):
     """Split text into chunks at file boundaries to stay under max_chars.
     Never splits mid-file."""
     if len(text) <= max_chars:
@@ -665,6 +810,43 @@ Module, Worker, Backend, Frontend, Database, Controller, Handler, Repository
 7. If input contains ONLY data models, schemas, configs, type definitions,
    or internal utilities with no user-facing behavior → return []
 
+8. When a single function or API endpoint handles MULTIPLE DISTINCT BUSINESS WORKFLOWS
+   distinguished by flags, parameters, type arguments, or conditional branches, extract
+   SEPARATE intents for each workflow variant. Do NOT merge them into one generic intent.
+   Examples of flag-based workflow splitting:
+   - A function that creates both inbound and outbound records based on a direction flag
+     → TWO intents: one for inbound, one for outbound
+   - A function that handles both creating and cancelling records based on an action parameter
+     → TWO intents: one for create, one for cancel
+   - An API that serves different entity types based on a type query parameter
+     → SEPARATE intents per entity type
+   - A form component that renders differently based on a mode prop (create vs edit vs view)
+     → ONE intent (same entity, CRUD is one capability)
+
+9. When extracting intents from BACKEND API code, look for these patterns that indicate
+   DISTINCT user workflows (extract separate intents for each):
+   - Different HTTP methods on the same route (GET vs POST vs PUT vs DELETE)
+   - Request parameter switches (e.g., ?type=sale vs ?type=purchase)
+   - Flag-based branching in handler logic (e.g., if flag == 9 vs flag == 3)
+   - Separate list/detail/create/cancel endpoints for the same entity
+   - Different view_config decorators on the same class
+
+10. When extracting intents from FRONTEND code, look for these patterns:
+    - Route definitions with type/mode query parameters (e.g., /invoice?type=sale)
+    - Workflow configuration objects that define different tabs or sections
+    - Components that render different forms based on props
+    - Navigation menu items that map to distinct business workflows
+    Each distinct navigation path or workflow tab = a separate intent.
+
+11. When the input includes BRANCH, ROUTE, or DB annotations on methods, these reveal
+    the INTERNAL WORKFLOW VARIANTS within that method. Each distinct branch path that
+    serves a different business purpose = a separate intent.
+    - BRANCH annotations show conditional logic (flags, types, modes)
+    - ROUTE annotations show HTTP method or parameter-based routing
+    - DB annotations show which data entities are affected
+    Use these to identify workflow variants that would otherwise be hidden inside
+    a single method signature.
+
 Return ONLY a JSON array: ["Persona: Descriptive intent phrase", ...]
 """
 
@@ -745,6 +927,15 @@ functions, API endpoints, or implementation details.
 - If a persona has 10+ intents mapped to it, it MUST have at least 3 outcomes.
 - If a persona has 20+ intents, it MUST have at least 5 outcomes.
 - System persona outcomes should be grouped by domain concern, not lumped together.
+- Each outcome should contain AT MOST 6 intents. If an outcome accumulates more than 6,
+  it is too broad and MUST be split into more specific outcomes.
+  Example of a too-broad outcome:
+    "Transaction Management" with 9 intents covering vouchers, invoices, bank reconciliation,
+    and bill adjustments → split into "Voucher Management", "Invoice Management",
+    "Bank Reconciliation"
+- When splitting, group by the primary ENTITY being managed (the noun), not by the
+  action (the verb). "Create Order" and "Cancel Order" belong together under
+  "Order Management", but "Create Order" and "Create Invoice" do NOT.
 
 **Good System outcomes (domain-focused):**
 - "Process Event Queues"
@@ -837,6 +1028,13 @@ OUTCOME RULES:
 - REUSE existing outcomes when provided
 - Only create new outcomes if no existing one fits
 - Target 3-8 outcomes per persona total
+
+OUTCOME SIZE RULES:
+- An outcome should have AT MOST 6 intents. If you are about to assign a 7th intent
+  to an existing outcome, STOP and create a new, more specific outcome instead.
+- Split by the primary entity (noun), not the action (verb).
+- When an outcome grows too large, look at the intents already assigned and identify
+  natural sub-groupings by entity or domain area.
 
 OUTPUT FORMAT (strict JSON):
 {
@@ -1180,7 +1378,7 @@ def main():
 
                 try:
                     summary = format_summary(files)
-                    chunks = chunk_text(summary, max_chars=60000)
+                    chunks = chunk_text(summary, max_chars=80000)
                     if len(chunks) > 1:
                         print(f"{len(files)} files → {len(chunks)} chunks")
 
@@ -1222,8 +1420,8 @@ def main():
 
         else:
             # Default: process each cluster individually (no cross-cluster intent duplication)
-            # Large clusters (>30 files) are split into file batches
-            MAX_FILES_PER_CALL = 30
+            # Large clusters (>20 files) are split into file batches
+            MAX_FILES_PER_CALL = 20  # v4: reduced from 30 to accommodate method-level detail
             print(f"  Cluster batching DISABLED (each cluster processed separately, max {MAX_FILES_PER_CALL} files per LLM call)")
 
             for ci, cluster in enumerate(clusters_to_process):
@@ -1249,7 +1447,7 @@ def main():
                             print(f"    File batch {fbi+1}/{len(file_batches)} ({len(file_batch)} files)...", end=" ", flush=True)
 
                         summary = format_summary(file_batch)
-                        chunks = chunk_text(summary, max_chars=60000)
+                        chunks = chunk_text(summary, max_chars=80000)
 
                         for chi, chunk in enumerate(chunks):
                             if len(chunks) > 1:
@@ -1321,7 +1519,7 @@ def main():
         print(f"\n  [Cache] Loaded Pass 1.5 — {len(persona_clusters)} personas, {total_cached} intents. Skipping dedup pipeline.")
 
         # Load embeddings from cache (needed for singleton similarity sorting in Pass 2)
-        embedding_cache = os.path.join(os.getcwd(), "llm_logs", "intent_embeddings_v2.json")
+        embedding_cache = os.path.join(os.getcwd(), "llm_logs_v4", "intent_embeddings_v4.json")
         if os.path.exists(embedding_cache):
             try:
                 emb_raw = json.load(open(embedding_cache))
@@ -1383,7 +1581,7 @@ def main():
         dbscan_eps = args.eps
         sim_threshold = 1 - dbscan_eps
         print(f"\n  Step 5 - Embedding + DBSCAN clustering (eps={dbscan_eps}, similarity >= {sim_threshold:.2f})...")
-        embedding_cache = os.path.join(os.getcwd(), "llm_logs", "intent_embeddings_v2.json")
+        embedding_cache = os.path.join(os.getcwd(), "llm_logs_v4", "intent_embeddings_v4.json")
         all_flat = [i for intents in persona_intents.values() for i in intents]
         embeddings = generate_intent_embeddings(llm.client, all_flat, embedding_cache)
 
@@ -1856,15 +2054,16 @@ OUTPUT FORMAT (strict JSON):
                 print("Quitting.")
                 return
 
-        # Upsert structure (personas + outcomes only)
+        # Upsert structure (personas + outcomes only); skip personas with no outcomes
         upsert_personas = []
         for p in structure:
-            persona_obj = {"persona": p["persona"], "outcomes": []}
-            for o in p.get("outcomes", []):
-                persona_obj["outcomes"].append({"outcome": o["outcome"], "scenarios": []})
-            upsert_personas.append(persona_obj)
+            outcomes = [{"outcome": o["outcome"], "scenarios": []} for o in p.get("outcomes", [])]
+            if not outcomes:
+                log.info(f"  Skipping persona '{p['persona']}' (no outcomes)")
+                continue
+            upsert_personas.append({"persona": p["persona"], "outcomes": outcomes})
 
-        upsert_log = os.path.join(os.getcwd(), "llm_logs", "upsert_pass2.json")
+        upsert_log = os.path.join(os.getcwd(), "llm_logs_v4", "upsert_pass2.json")
         os.makedirs(os.path.dirname(upsert_log), exist_ok=True)
         with open(upsert_log, "w") as f:
             json.dump({"payload": {"personas": upsert_personas}, "project": {"uuid": project_uuid, "name": "projectA"}, "skipStepAndAction": True}, f, indent=2)
@@ -1931,20 +2130,49 @@ OUTPUT FORMAT (strict JSON):
 
             for ii, intent in enumerate(outcome_intents):
                 try:
-                    results = api.code_graph_search(project_uuid, intent, limit=5)
+                    # Multi-query search: intent text + extracted entity keywords
+                    all_results = []
+
+                    # Query 1: Full intent text (semantic match)
+                    results1 = api.code_graph_search(project_uuid, intent, limit=10)
+                    all_results.extend(results1)
+
+                    # Query 2: Extract key nouns/entities from intent for targeted search
+                    intent_text = intent.split(": ", 1)[-1] if ": " in intent else intent
+                    # Remove common verbs to get entity-focused query
+                    entity_query = intent_text
+                    for verb in ["Create", "Update", "Delete", "Manage", "Edit", "View",
+                                 "Generate", "Process", "Handle", "Retrieve", "Search",
+                                 "Configure", "Perform", "Track", "Export", "Import",
+                                 "create", "update", "delete", "manage", "edit", "view",
+                                 "generate", "process", "handle", "retrieve", "search",
+                                 "configure", "perform", "track", "export", "import",
+                                 "and", "with", "for", "the", "a", "an", "or", "in",
+                                 "to", "from", "by", "on", "at", "of", "comprehensive",
+                                 "various", "detailed", "specific", "financial"]:
+                        entity_query = entity_query.replace(verb + " ", " ").replace(" " + verb, " ")
+                    entity_query = " ".join(entity_query.split()).strip()
+                    if entity_query and len(entity_query) > 3:
+                        results2 = api.code_graph_search(project_uuid, entity_query, limit=5)
+                        all_results.extend(results2)
+
+                    # Deduplicate by path, keep highest score
                     valid_results = []
-                    for r in results:
+                    seen_paths = {}
+                    for r in all_results:
                         score = r.get("score", 0)
                         data = r.get("data", {})
                         path = data.get("path", "")
                         label = r.get("label", "")
-                        if not path or score < 0.3:
+                        if not path or score < 0.25:
                             continue
                         if label in ("File", "Function", "Class"):
-                            valid_results.append(r)
-                            # Track for later file fetching
-                            if path not in all_found_paths or score > all_found_paths[path]["score"]:
-                                all_found_paths[path] = {"score": score, "data": data, "label": label}
+                            if path not in seen_paths or score > seen_paths[path]:
+                                seen_paths[path] = score
+                                valid_results.append(r)
+                                if path not in all_found_paths or score > all_found_paths[path]["score"]:
+                                    all_found_paths[path] = {"score": score, "data": data, "label": label}
+
                     intent_search_results[intent] = valid_results
                     result_count = len(valid_results)
                     print(f"    [{ii+1}/{len(outcome_intents)}] {intent} → {result_count} results")

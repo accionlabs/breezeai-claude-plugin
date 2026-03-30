@@ -8,7 +8,8 @@ description: >
   Code Graph Search for file discovery with citation tracking.
   Use when: "generate functional graph from code", "derive functional graph",
   "code to functional", "build functional graph from clusters",
-  "generate functional graph from code graph".
+  "generate functional graph from code graph",
+  "generate functional ontology", "generate functional from ui".
 ---
 
 ## Purpose
@@ -16,6 +17,30 @@ description: >
 Transforms a codebase's code graph (files, functions, classes, clusters) into
 a functional graph (Persona → Outcome → Scenario → Step → Action). This is
 the brownfield path — when code exists but the functional graph is empty.
+
+## Two Modes
+
+This skill supports two generation modes. Ask the user which mode to use,
+or auto-detect based on the project:
+
+### Mode A: Cluster Pipeline (default)
+Best for: backend-heavy repos, repos without a UI, or when speed is preferred
+over UI-level accuracy. Uses the Python pipeline script with LLM-based intent
+extraction from code clusters.
+
+### Mode B: UI-Driven Generation
+Best for: frontend repos with a router/navigation system (Vue, React, Angular,
+Next.js, etc.). Produces more accurate ontology by tracing UI entry points →
+form fields → API calls → backend handlers. Generates both User and System
+personas with API linking.
+
+**Auto-detection:** If the working directory contains a frontend router file
+(`src/router/index.js`, `app/routes.tsx`, `pages/` directory, etc.), suggest
+Mode B. Otherwise, default to Mode A.
+
+---
+
+# Mode A: Cluster Pipeline
 
 The pipeline uses multiple passes:
 1. **Extract intents** from each code cluster (descriptive, 5-15 words)
@@ -271,9 +296,227 @@ Requires AWS Bedrock access with:
 | Pass 3 (Sonnet + Haiku, ~130 calls) | ~$3.90 |
 | **Total** | **~$5.90** |
 
-## Post-Generation
+## Post-Generation (Both Modes)
 
-After the pipeline completes, consider running:
+After generation completes, consider running:
 - `/breeze:validate-functional-graph` — check for duplicates, gaps, quality issues
 - `/breeze:analyze-functional` — analyze specific requirements against the generated graph
 - `/breeze:generate-spec` — generate a functional specification document from the graph
+
+---
+
+# Mode B: UI-Driven Generation
+
+Generates the functional graph by tracing frontend UI entry points (routes) through
+to backend API handlers. Produces both User and System personas with API linking
+on actions.
+
+## When to Use Mode B
+
+- The project has a **frontend with a router** (Vue Router, React Router, Angular Router, Next.js pages, etc.)
+- You need **UI-accurate ontology** — every form field, conditional rendering, and user flow captured
+- You want **API linking** — each action that calls an API has it linked with method, URL, request/response shapes
+- You want **System persona grounded in actual backend code** — not inferred, but traced through the code graph
+
+## Guard
+
+Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:setup-project`.
+Extract `apiKey`, `projectUuid`, and `apiBase`.
+
+The project must have at least one code ontology indexed. If the code graph returns no results,
+the repository has not been uploaded yet — follow the upload instructions in Mode A's Guard section.
+
+## Phase 0: Discover Entry Points
+
+If `entrypoints.json` does NOT exist in the working directory, create it:
+
+### Step 1: Detect the framework
+- Vue 2/3: look for `src/router/index.js` or `src/router/index.ts`
+- React Router: look for `<Route`, `createBrowserRouter`, `useRoutes` in App/routes files
+- Next.js: check for `pages/` or `app/` directory (file-based routing)
+- Angular: look for `*-routing.module.ts` or `app.routes.ts`
+- Nuxt: check for `pages/` directory with `.vue` files
+- SvelteKit: check for `src/routes/` directory
+
+### Step 2: Use code graph as primary source for route discovery
+- Use specific queries per framework:
+  - Vue: `"src/router/index.js vue router route definitions"`
+  - React: `"routes.tsx react router createBrowserRouter Route"`
+  - Angular: `"app-routing.module.ts angular routes"`
+- The File node's `statements` field often contains full route definitions
+- Use a second query for navigation structure (sidebar, navbar)
+- Fall back to reading the router file directly if code graph is incomplete
+
+### Step 3: Extract route details
+For each route, extract: path, component, title, params, query params, auth guards, variants.
+
+### Step 4: Categorize
+Group by: Transaction, Accounting, Inventory, Reports, Users, Settings, Contacts, etc.
+
+### Step 5: Discover orphaned views
+Compare all view files against extracted routes. For views with NO route:
+1. **Check imports** — is it a sub-component? Grep for `import.*from.*<ViewName>`
+2. **Check git history** — was the route removed? `git log --all -p -- <router-file> | grep -i "<ViewName>"`
+3. **Check for API calls** — does it have real functionality (axios/fetch calls)?
+
+Classify as: sub-component (add to parent), dead code (flag for user), or truly unused (exclude).
+
+### Step 6: Cross-reference backend API routes
+If the backend repo is indexed in the code graph:
+- Search for the routes definition file (e.g., `routes.py`)
+- List all backend API endpoints
+- Flag endpoints not called from any frontend code
+
+### Step 7: Generate `entrypoints.json`
+```json
+{
+  "project": "<name>",
+  "framework": "<detected>",
+  "routerFile": "<path>",
+  "totalEntryPoints": "<count>",
+  "entryPoints": [
+    {
+      "id": 1,
+      "route": "/path",
+      "title": "Page Title",
+      "component": "src/views/Component.vue",
+      "auth": true,
+      "params": [],
+      "queryParams": [],
+      "variants": [],
+      "category": "Category",
+      "status": "pending"
+    }
+  ]
+}
+```
+
+Present the list to the user for review. Ask if any should be excluded.
+
+## Phase 1: Batch Entry Points by Category
+
+1. Read `entrypoints.json`, group pending EPs by category or shared component
+2. Plan which EPs share the same outcome (e.g., Invoice list + Create + Edit → "Manage Invoices")
+3. Process one batch per upsert call
+
+## Phase 2: Collate Context
+
+Use **code graph + direct file reading** (both required):
+
+### Code graph (for function logic and API calls)
+- Search for the page component: `Code_Graph_Search` with `"<ComponentName>.vue <description>"`
+- Extract: imports, functions, API calls from the `calls` field
+- For child components, search code graph to understand their functions
+- Use `Get_Code_File_Details` for deeper inspection when needed
+
+### Direct file reading (for template details)
+**Code graph does NOT capture `<template>` content.** Always read the actual file for:
+- Use Grep for form fields (`v-model`, `@submit`, `@click`) first — skip inline SVGs
+- Extract: form fields, `v-if`/`v-show` conditions, event handlers, slot templates
+- Read script section for: `data()`, `computed`, `methods` (API calls), `mounted`
+
+## Phase 3: Query Code Graph for Backend (System Persona)
+
+Generate System persona **alongside** User persona:
+
+1. From frontend code, identify all API endpoints (axios/fetch calls)
+2. Search the backend code graph with descriptive queries: `"addInvoice invoice create post gkcore api handler"` (not just URL paths)
+3. Code graph function results include call chains with SQL operations, helper functions, and line ranges
+4. Build System persona scenarios describing actual backend processing
+
+**System persona MUST be grounded in backend code graph — do NOT infer from frontend alone.**
+
+## Phase 4: Generate Ontology
+
+Follow the functional graph rules in `../shared/functional-graph-rules.md`, plus:
+
+### UI-specific rules
+- Group outcomes by primary ENTITY: "Manage Invoices" (not "Create Invoice")
+- Each outcome should contain AT MOST 6 scenarios
+- If two scenarios share >70% steps, MERGE with inline variant notes
+- For conditional fields (`v-if`), note condition in plain English on the action
+- FORBIDDEN action words: click, tap, button, dropdown, modal, checkbox, etc.
+- USE intent verbs: Provide, Choose, Confirm, Review, Select, Submit
+
+### API linking on actions
+For each action that triggers an API call, attach an `apis` array:
+```json
+"apis": [{
+  "method": "REST",
+  "url": "POST /invoice",
+  "request": "{payload shape}",
+  "response": "{response shape}"
+}]
+```
+
+## Phase 5: Self-Audit
+
+Before presenting, verify:
+1. No forbidden persona names
+2. Outcomes are business capabilities, not technical
+3. No scenario pairs with >70% step overlap
+4. Steps: 3-10 per scenario, ordered
+5. Actions: no forbidden words, system actions have descriptions, conditionals noted
+6. Every form field from the template has a corresponding action
+
+## Phase 6: Present for Review
+
+Show the ontology with: personas, outcomes, scenarios with steps/actions, API summary table.
+Ask user to approve, adjust, or skip.
+
+## Phase 7: Write to Functional Graph via Upsert API
+
+Build nested JSON payload and POST to the upsert endpoint:
+
+```bash
+curl -X POST "${API_BASE}/functional-graph/upsert?embedding=true&llmPlatform=AWSBEDROCK" \
+  -H "api-key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/upsert_payload.json
+```
+
+Upsert payload structure:
+```json
+{
+  "project": {"uuid": "<projectUuid>", "name": "<projectName>"},
+  "payload": {
+    "personas": [{
+      "persona": "User",
+      "citations": [{"type": "code", "name": "<file>", "reference": "<file>"}],
+      "outcomes": [{
+        "outcome": "Manage Invoices",
+        "scenarios": [{
+          "scenario": "Create Invoice",
+          "description": "...",
+          "steps": [{
+            "step": "Enter details",
+            "actions": [{
+              "action": "Select type",
+              "description": "...",
+              "apis": [{"method": "REST", "url": "POST /invoice", "request": "...", "response": "..."}]
+            }]
+          }]
+        }]
+      }]
+    }]
+  },
+  "skipStepAndAction": false
+}
+```
+
+The upsert is **idempotent** — match keys are string names. Re-running updates, not duplicates.
+The upsert **merges across calls** — you can add scenarios to the same outcome in separate calls.
+
+## Phase 8: Mark Complete
+
+Update `entrypoints.json`: set processed EPs to `"status": "done"`.
+
+## Phase 9: Coverage Validation
+
+After all EPs are done:
+1. Pull complete functional graph via `Get_complete_functional_graph`
+2. Extract all APIs linked in the graph
+3. Extract all backend routes from the backend repo
+4. Compare and categorize gaps: missing flows, helper APIs, export variants, legacy
+5. Generate coverage report with percentage
+6. Upsert missing flows if user approves
