@@ -103,33 +103,48 @@ When building actions, apply the persona-aware rules from `../shared/functional-
 
 Present the complete functional graph in **tabular format** to the user and ask for confirmation.
 
-### Step 4: Save Citation
+### Step 4: Prepare Citations
 
-After the user confirms the functional graph in Step 3, **create a citation first** before saving any functional nodes.
+After the user confirms the functional graph in Step 3, determine the citation strategy based on the input sources:
 
-Call `Call_Create_Citation_` MCP tool with:
-- `projectUuid`: from `.breeze.json`
-- `apiKey`: from `.breeze.json`
-- `name`: the document/source name. If the input is a URL, leave empty. If the input is free-text/prompt, generate a unique descriptive name (e.g., "Requirement: <short summary>").
-- `reference`: the source URL if the input came from Jira, Confluence, Figma, or any URL. Otherwise empty string.
-- `type`: one of:
-  - `"jira"` — if the input is a Jira ticket URL/key
-  - `"confluence"` — if the input is a Confluence page URL
-  - `"figma"` — if the input is a Figma URL
-  - `"exDoc"` — if the input is a document (PDF, uploaded doc, pasted spec text)
-  - `"code"` — if the input is source code or code graph
-  - `"prompt"` — if the input is free-text typed by the user
-- `inputText`: the full text of the requirement as gathered and clarified in Steps 1–2. Include the complete structured requirement text that was analyzed.
+**Determine citation type and content for each source:**
+- `"jira"` — Jira ticket URL/key. `reference`: the Jira URL. `inputText`: full ticket content.
+- `"confluence"` — Confluence page URL. `reference`: the URL. `inputText`: full page content.
+- `"figma"` — Figma URL. `reference`: the Figma URL. `inputText`: converted text content.
+- `"exDoc"` — document (PDF, uploaded doc, pasted spec). `name`: document name. `inputText`: full document content.
+- `"code"` — source code or code graph. `reference`: file path. `name`: file path. `inputText`: full file content.
+- `"prompt"` — free-text typed by the user. `name`: generate a unique descriptive name (e.g., "Requirement: <short summary>"). `inputText`: full prompt text.
 
-Save the returned citation `id` — you will need it for every functional node.
+**Choose one of two strategies:**
+
+**A. Same citation for all nodes** — When all nodes come from a single source (e.g., one Jira ticket, one document, one prompt):
+- Call `Call_Create_Citation_` MCP tool once with `projectUuid`, `apiKey`, `name`, `reference`, `type`, and `inputText`.
+- Save the returned citation `id` — you will pass it as `citationIds: [<citationId>]` on every node in Step 5.
+
+**B. Different citations per node** — When nodes originate from multiple distinct sources (e.g., part from a Jira ticket, part from a document, part from code):
+- Do NOT call `Call_Create_Citation_` separately.
+- Instead, for each node in Step 5, pass the `citations` array directly on the create/update call. Each citation object in the array follows this schema:
+  ```json
+  {
+    "type": "document | exDoc | jira | figma | confluence | code | prompt",
+    "name": "<string, optional>",
+    "inputText": "<string, optional>",
+    "reference": "<string, optional>"
+  }
+  ```
+- Populate the fields based on the citation type rules above. Each node gets its own `citations` array with the specific source(s) it came from.
 
 ### Step 5: Save Functional Graph
 
 Save all nodes using `Call_Create_Functional_Node_` MCP tool following the hierarchy order (Persona → Outcome → Scenario → Step → Action). Wait for each parent ID before creating children.
 
-**Every node must include `citationIds`**: pass `[<citationId>]` (the citation ID from Step 4) in the `citationIds` field of each `Call_Create_Functional_Node_` call. This applies to all node types — Persona, Outcome, Scenario, Step, and Action.
+**Attach citations to every node** based on the strategy chosen in Step 4:
+- **Strategy A (same citation):** pass `citationIds: [<citationId>]` on each `Call_Create_Functional_Node_` call.
+- **Strategy B (different citations):** pass the `citations` array on each `Call_Create_Functional_Node_` call with the appropriate citation object(s) for that node's source.
 
-If the user chose to update existing nodes (from conflict resolution in Step 2), use `Call_Update_Functional_Node_` MCP instead for those nodes.
+This applies to all node types — Persona, Outcome, Scenario, Step, and Action.
+
+If the user chose to update existing nodes (from conflict resolution in Step 2), use `Call_Update_Functional_Node_` MCP instead for those nodes — same citation rules apply (`citationsIds` for Strategy A, `citations` array for Strategy B).
 
 Refer to `../shared/functional-graph-rules.md` for the data model and required fields.
 
