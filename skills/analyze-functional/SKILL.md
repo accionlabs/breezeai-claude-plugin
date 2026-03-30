@@ -17,7 +17,12 @@ Extract `apiKey` and `projectUuid`.
 
 ### Step 1: Gather and Analyze Requirement
 
-Accept the user's input in any text-based format:
+First, check if the user's input contains visual content — images, screenshots, Figma URLs, or UI design files (PNG, JPG, SVG, PDF with visual screens, etc.). If visual input is detected:
+- **Do NOT proceed** with this skill.
+- Inform the user: _"It looks like you've provided a visual input. Please use the `/breeze:visual-to-text` skill first to convert your design into structured text-based user stories. You can then use `/breeze:analyze-functional` to analyze the generated output against the functional graph."_
+- Stop here and wait for the user to act.
+
+If the input is text-based, accept it in any of the following formats:
 
 **A. Jira ticket link/key** (e.g., `https://...atlassian.net/browse/PROJ-123` or `PROJ-123`)
 - Use the Jira MCP tools to fetch the ticket details (summary, description, acceptance criteria, comments)

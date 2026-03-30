@@ -89,36 +89,9 @@ Translate the visual design into functional language — extract WHAT the design
 - **Step:** Identify the configuration-level variations within each Scenario. A Step is NOT a workflow stage — it represents a complete requirement slice describing how the Scenario itself is completed (e.g., "with coupon" vs. "without coupon" vs. "with wallet payment").
 - **Action:** Identify the named logical activities required to fulfill each Step. Actions collectively complete the Step. Each Action may involve multiple interactions but is modeled as a single logical activity.
 
-Then check for the following issues within the design itself:
+Proceed directly to Step 4.
 
-**A. Ambiguous persona references**
-- Extract every actor/role implied by the design
-- If the design implies a generic term like "user" that could map to multiple distinct roles, flag it as ambiguous
-- Identify all distinct personas the design serves
-
-**B. Conflicting requirements**
-- Check if the design contains contradictory behaviors within itself (e.g., a form that requires login but also shows anonymous access)
-
-**C. Incomplete scenario definitions**
-- Check if any intent from the design describes a goal but lacks enough detail to define steps and actions (e.g., a "payments" section without visible validation, confirmation, or failure states)
-
-**D. Terminology consistency**
-- Ensure consistent terminology across the design (e.g., don't mix "purchase" and "order" for the same concept)
-
-Present all findings from A–D to the user in a summary. If no issues are found, state that the design's functional intent is clear and proceed to Step 4.
-
-### 4. Clarify Issues with User
-
-If any issues were identified in Step 3, present them to the user and ask for clarification:
-
-- **Ambiguous personas**: Ask which specific persona is intended
-- **Conflicts**: Present each contradiction and ask how to resolve
-- **Incomplete definitions**: Ask the user to provide the missing details for each flagged intent
-- **Terminology inconsistencies**: Suggest a consistent term and ask for confirmation
-
-**Repeat this step**: after each round of clarification, re-check the updated intents for remaining issues. Continue until all issues are resolved. Only then proceed to Step 5.
-
-### 5. Generate Functional Graph
+### 4. Generate User Stories
 
 Using the clarified intents from the design, generate the functional graph following the hierarchy defined in `./references/guide.md`: **Persona → Outcome → Scenario → Step → Action**.
 
@@ -158,16 +131,28 @@ Using the clarified intents from the design, generate the functional graph follo
 - All Actions belonging to a Step must be completed for Step completion
 - Actions collectively fulfill the Step → Step realizes Scenario → Scenario achieves Outcome
 
-Present the complete functional graph to the user and ask for confirmation before saving.
+Proceed to presenting the output.
 
-### 6. Save Output to File
+### 5. Present User Stories to User
 
-After the user confirms, save the complete functional graph to a `.md` file using the Write tool.
+Present the complete user stories to the user in the conversation. After presenting, ask:
+
+> **Would you like to save these user stories to a file?**
+> Suggested filename: `user-stories-[screen-name].md`
+
+If the user confirms, save the user stories to a `.md` file using the Write tool:
 
 - **Location:** Project root (current working directory)
 - **Filename format:** `user-stories-[screen-name].md` (e.g., `user-stories-login-page.md`)
 - Derive `[screen-name]` from the design title, file name, or page heading — use lowercase, hyphen-separated words
 - Confirm to the user: "Saved to `user-stories-[screen-name].md`"
+
+### 6. Suggest Functional Graph Generation
+
+After saving, ask the user:
+
+> **Would you like to generate a functional graph from these user stories?**
+> I can use the `/analyze-functional` skill to create a structured functional graph based on the user stories above.
 
 ## Output Format
 
@@ -229,52 +214,24 @@ Present the functional graph using this structure:
 |--------|-------------|
 | [Action name] | [Details or —] |
 
----
-
-## Summary
-
-**Functional Coverage:**
-- [List of outcomes and scenarios covered]
-
-**Gaps Identified:**
-- [Any functionality implied by the design but not fully captured]
-
-**Recommendations:**
-- [Priority suggestions, missing variations, implementation notes]
 ```
 
 ## Best Practices
 
 1. **Extract intent, not layout:** Focus on WHAT the user achieves, not WHERE things are on screen
-2. **Step is a variation, not a stage:** Each Step is a complete requirement slice — a configuration of the Scenario, not a sequential workflow phase
-3. **Actions are logical activities:** Each Action may involve multiple UI interactions but is modeled as one logical activity
-4. **Be specific with data:** Use actual labels/text from the design for field names and values
-5. **Include all states:** Default, loading, error, success, empty, disabled — these become Scenarios or Steps
-6. **Separate human and system personas:** If backend processing is involved, create distinct System persona outcomes
-7. **Include data sources:** Specify where data comes from (API, local storage, etc.)
-
-## Edge Cases to Consider
-
-When analyzing designs, look for and document:
-
-1. **Empty states:** What appears when there's no data?
-2. **Loading states:** Spinners, skeletons, progress indicators
-3. **Error states:** Inline errors, toast notifications, error pages
-4. **Permission states:** Disabled features, locked content
-5. **Multi-step flows:** Wizards, progress indicators, back/next navigation
-6. **Bulk actions:** Select all, multi-delete, batch operations
-7. **Search/filter:** Query inputs, filter chips, sort controls
-8. **Pagination:** Page numbers, infinite scroll, load more
-9. **Responsive layouts:** Mobile, tablet, desktop variations
+2. **Only capture what the input implies:** Do not infer, add, or suggest functionality beyond what is visible in the design. Generate user stories strictly based on what the input shows.
+3. **Step is a variation, not a stage:** Each Step is a complete requirement slice — a configuration of the Scenario, not a sequential workflow phase
+4. **Actions are logical activities:** Each Action may involve multiple UI interactions but is modeled as one logical activity
+5. **Be specific with data:** Use actual labels/text from the design for field names and values
 
 ## Error Handling
 
-- If Figma URL is invalid, ask user to verify the URL format
-- If Figma MCP is not available, tell user to install it or use PDF/image
-- If PDF cannot be read, ask user to verify file path and permissions
-- If design is unclear or ambiguous, ask clarifying questions before generating
-- If no interactive elements are found, ask if this is a static design mockup
-- If the design contains internal contradictions, present them before proceeding
+- If Figma URL is invalid, notify the user about the invalid URL format and stop
+- If Figma MCP is not available, notify the user to install it or use PDF/image and stop
+- If PDF cannot be read, notify the user about the file path/permission issue and stop
+- If design is unclear or ambiguous, use best judgment and proceed
+- If no interactive elements are found, treat it as a static design mockup and proceed
+- If the design contains internal contradictions, use the most reasonable interpretation and proceed
 
 ## Notes
 
