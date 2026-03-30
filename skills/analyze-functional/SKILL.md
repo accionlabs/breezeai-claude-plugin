@@ -103,9 +103,31 @@ When building actions, apply the persona-aware rules from `../shared/functional-
 
 Present the complete functional graph in **tabular format** to the user and ask for confirmation.
 
-### Step 4: Save Functional Graph
+### Step 4: Save Citation
 
-After the user confirms the functional graph in Step 3, save all nodes using `Call_Create_Functional_Node_` MCP tool following the hierarchy order (Persona → Outcome → Scenario → Step → Action). Wait for each parent ID before creating children.
+After the user confirms the functional graph in Step 3, **create a citation first** before saving any functional nodes.
+
+Call `Call_Create_Citation_` MCP tool with:
+- `projectUuid`: from `.breeze.json`
+- `apiKey`: from `.breeze.json`
+- `name`: the document/source name. If the input is a URL, leave empty. If the input is free-text/prompt, generate a unique descriptive name (e.g., "Requirement: <short summary>").
+- `reference`: the source URL if the input came from Jira, Confluence, Figma, or any URL. Otherwise empty string.
+- `type`: one of:
+  - `"jira"` — if the input is a Jira ticket URL/key
+  - `"confluence"` — if the input is a Confluence page URL
+  - `"figma"` — if the input is a Figma URL
+  - `"exDoc"` — if the input is a document (PDF, uploaded doc, pasted spec text)
+  - `"code"` — if the input is source code or code graph
+  - `"prompt"` — if the input is free-text typed by the user
+- `inputText`: the full text of the requirement as gathered and clarified in Steps 1–2. Include the complete structured requirement text that was analyzed.
+
+Save the returned citation `id` — you will need it for every functional node.
+
+### Step 5: Save Functional Graph
+
+Save all nodes using `Call_Create_Functional_Node_` MCP tool following the hierarchy order (Persona → Outcome → Scenario → Step → Action). Wait for each parent ID before creating children.
+
+**Every node must include `citationIds`**: pass `[<citationId>]` (the citation ID from Step 4) in the `citationIds` field of each `Call_Create_Functional_Node_` call. This applies to all node types — Persona, Outcome, Scenario, Step, and Action.
 
 If the user chose to update existing nodes (from conflict resolution in Step 2), use `Call_Update_Functional_Node_` MCP instead for those nodes.
 
