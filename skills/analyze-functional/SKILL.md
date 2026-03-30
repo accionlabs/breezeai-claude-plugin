@@ -15,14 +15,18 @@ Extract `apiKey` and `projectUuid`.
 
 ## Instructions
 
-### Step 1: Gather Requirement Input
+### Step 1: Gather and Analyze Requirement
 
-Determine the input type. The user may provide ANY of the following:
+First, check if the user's input contains visual content — images, screenshots, Figma URLs, or UI design files (PNG, JPG, SVG, PDF with visual screens, etc.). If visual input is detected:
+- **Do NOT proceed** with this skill.
+- Inform the user: _"It looks like you've provided a visual input. Please use the `/breeze:visual-to-text` skill first to convert your design into structured text-based user stories. You can then use `/breeze:analyze-functional` to analyze the generated output against the functional graph."_
+- Stop here and wait for the user to act.
+
+If the input is text-based, accept it in any of the following formats:
 
 **A. Jira ticket link/key** (e.g., `https://...atlassian.net/browse/PROJ-123` or `PROJ-123`)
 - Use the Jira MCP tools to fetch the ticket details (summary, description, acceptance criteria, comments)
 - Extract the requirement from the ticket content
-- Remember that a Jira ticket was provided — store the ticket key for later (Step 7)
 
 **B. Document or specification text** (pasted text, PDF reference, uploaded doc)
 - Extract functional intents from the document text
@@ -35,71 +39,113 @@ Determine the input type. The user may provide ANY of the following:
   conditionals → business rules, queries → data operations
 - Do NOT reproduce raw code in the requirement
 
-**D. Figma design URL**
-- Use Figma MCP `get_design_context` to fetch the design
-- Extract functional intents from the UI components and interactions
+**D. Free-text requirement** (no external reference)
+- Accept the text as-is
 
-**E. Free-text requirement** (no external reference)
-- Ask user to define the requirement properly
-- Remember that no Jira ticket was provided — a new ticket may be created later (Step 7)
+Format the requirement into a clear, structured statement. Then identify functional intents — the discrete capabilities or behaviors the system must support (e.g., "authenticate user", "send notification", "generate report").
 
-Identify functional intents from the input text.
+Next, search the existing functional graph using `Functional_Graph_Search` MCP and fetch all existing personas using `Get_all_personas` MCP. Compare the input against the existing graph and check for the following issues:
 
-### Step 2: Refine Requirement
+**A. Ambiguous persona references**
+- Extract every actor/role mentioned in the input (e.g., "user", "admin", "customer")
+- For each actor, match it to an existing persona in the graph
+- If the input uses a generic term like "user" that could map to multiple existing personas, flag it as ambiguous
+- If a referenced actor does not match any existing persona, flag it as a potentially new persona
 
-Format the given requirement, check if there are any missing details or ambiguity, and take confirmation from user. According to feedback update the requirement.
+**B. Conflicting requirements**
+- Check if the input contains contradictory behaviors within itself (e.g., "require login" and "allow anonymous access" for the same flow)
+- Check if any identified intent contradicts an existing scenario already in the graph (e.g., input says "email is optional" but an existing scenario enforces "email is required")
 
-**Repeat this step in a loop**: after each update, present the revised requirement and ask the user to confirm whether the requirement is complete. Keep asking for feedback and refining until the user explicitly confirms that the requirement is complete. Only then proceed to Step 3.
+**C. Incomplete scenario definitions**
+- Check if any intent describes a goal but lacks enough detail to define steps and actions (e.g., "handle payments" without specifying trigger, validation, or success/failure behavior)
 
-Once confirmed, search existing graph using functional graph search mcp.
+**D. Terminology misalignment**
+- Compare key terms in the input (entity names, action verbs, status values) against the vocabulary used in the existing functional graph
+- Flag terms that mean the same thing as existing graph terms but are worded differently (e.g., "purchase" vs existing "order", "client" vs existing "customer")
 
-### Step 3: Resolve Persona
+Present all findings from A–D to the user in a summary. If no issues are found, state that the requirement is clear and proceed to Step 2.
 
-Identify **all personas** relevant to the requirement and check if they exist in the current functional graph using the get persona MCP tool. If a new persona is detected, ask the user for confirmation whether to use a new persona or reuse an existing one.
+### Step 2: Clarify Issues with User
 
-Apply persona resolution rules from `../shared/functional-graph-rules.md` (priority order, forbidden names, resolution tiebreakers).
+If any issues were identified in Step 1, present them to the user and ask for clarification:
 
-**Multi-persona resolution:** If the requirement involves backend processing (API endpoints, credential validation, token generation, email sending, database operations, background jobs, etc.), automatically include the **System persona** alongside the user-facing persona. Build separate scenarios for each:
-- **User-facing persona** — scenarios covering the interaction flow
-- **System persona** — scenarios covering the internal backend processing behavior
+- **Ambiguous personas**: Ask which specific persona is intended, or whether to create a new one
+- **Conflicts**: Present each conflict with the existing graph node details and ask how to resolve — keep existing behavior, replace it, or support both as separate scenarios
+- **Incomplete definitions**: Ask the user to provide the missing details for each flagged intent
+- **Terminology mismatches**: Suggest adopting the existing graph term and ask for confirmation, or let the user introduce a new term
 
-### Step 4: Resolve Conflicts
+**Repeat this step**: after each round of clarification, re-check the updated requirement for remaining issues. Continue until all issues are resolved. Only then proceed to Step 3.
 
-If any conflict detected in the functional graph (means any scenario/outcome already exists for the given requirement) ask user if he wants to update existing scenario/outcome or wants to create new. For those scenarios create step and action.
+### Step 3: Generate Functional Graph
 
-### Step 5: Present Functional Graph
+Using the clarified requirement, generate the functional graph following the hierarchy: **Persona → Outcome → Scenario → Step → Action**.
 
-Show the functional graph for the requirement user has given in tabular format.
+**Resolve Personas:**
+- Reuse existing personas from the graph wherever possible
+- Apply persona resolution rules from `../shared/functional-graph-rules.md` (priority order, forbidden names, resolution tiebreakers)
+- If the requirement involves backend processing (API endpoints, credential validation, token generation, email sending, database operations, background jobs, etc.), automatically include the **System persona** alongside the user-facing persona. Build separate scenarios for each:
+  - **User-facing persona** — scenarios covering the interaction flow
+  - **System persona** — scenarios covering the internal backend processing behavior
 
-When presenting steps and actions, apply the persona-aware action
-rules from `../shared/functional-graph-rules.md`:
+**Resolve Conflicts:**
+- If any scenario/outcome already exists in the graph for the given requirement (detected in Step 1B), apply the user's resolution choice from Step 2 — update existing nodes or create new ones
+
+**Build the graph:**
+- Define Outcomes as high-level business capabilities
+- Define Scenarios as specific testable flows under each Outcome
+- Define Steps as sequential stages within each Scenario
+- Define Actions as atomic operations within each Step
+
+When building actions, apply the persona-aware rules from `../shared/functional-graph-rules.md`:
 - Human personas: platform-agnostic, intent verbs, no UI widgets
 - System persona: description REQUIRED with business logic precision
 - External System: API/integration with endpoint details
 
-### Step 6: Sync to Jira
+Present the complete functional graph in **tabular format** to the user and ask for confirmation.
 
-After user confirms the functional graph in Step 5, ask:
-"Would you like to save the refined requirement and functional analysis to Jira?"
+### Step 4: Prepare Citations
 
-If user confirms:
+After the user confirms the functional graph in Step 3, determine the citation strategy based on the input sources:
 
-**If a Jira ticket was provided in Step 1:**
-- Update the existing Jira ticket using Jira MCP tools
-- Update the ticket description with the refined requirement
-- Add the functional graph summary (personas, outcomes, scenarios, steps, actions) as a comment or in the description
+**Determine citation type and content for each source:**
+- `"jira"` — Jira ticket URL/key. `reference`: the Jira URL. `inputText`: full ticket content.
+- `"confluence"` — Confluence page URL. `reference`: the URL. `inputText`: full page content.
+- `"figma"` — Figma URL. `reference`: the Figma URL. `inputText`: converted text content.
+- `"exDoc"` — document (PDF, uploaded doc, pasted spec). `name`: document name. `inputText`: full document content.
+- `"code"` — source code or code graph. `reference`: file path. `name`: file path. `inputText`: full file content.
+- `"prompt"` — free-text typed by the user. `name`: generate a unique descriptive name (e.g., "Requirement: <short summary>"). `inputText`: full prompt text.
 
-**If no Jira ticket was provided in Step 1:**
-- Create a new Jira ticket using Jira MCP tools
-- Ask user for the Jira project key (e.g., `PROJ`) if not already known
-- Set the summary from the refined requirement title
-- Set the description with the full refined requirement and functional graph summary
-- Report the new ticket key/link to the user
+**Choose one of two strategies:**
 
-If user declines, skip Jira sync.
+**A. Same citation for all nodes** — When all nodes come from a single source (e.g., one Jira ticket, one document, one prompt):
+- Call `Call_Create_Citation_` MCP tool once with `projectUuid`, `apiKey`, `name`, `reference`, `type`, and `inputText`.
+- Save the returned citation `id` — you will pass it as `citationIds: [<citationId>]` on every node in Step 5.
 
-### Step 7: Update Functional Graph
+**B. Different citations per node** — When nodes originate from multiple distinct sources (e.g., part from a Jira ticket, part from a document, part from code):
+- Do NOT call `Call_Create_Citation_` separately.
+- Instead, for each node in Step 5, pass the `citations` array directly on the create/update call. Each citation object in the array follows this schema:
+  ```json
+  {
+    "type": "document | exDoc | jira | figma | confluence | code | prompt",
+    "name": "<string, optional>",
+    "inputText": "<string, optional>",
+    "reference": "<string, optional>"
+  }
+  ```
+- Populate the fields based on the citation type rules above. Each node gets its own `citations` array with the specific source(s) it came from.
 
-Save all nodes to the functional graph using create functional node mcp tool following the hierarchy order (Persona → Outcome → Scenario → Step → Action). If user chose to update existing nodes in Step 4, use update functional node mcp instead. Refer to `../shared/functional-graph-rules.md` for data model and required fields.
+### Step 5: Save Functional Graph
 
-When creating actions, ensure descriptions follow the persona-aware rules from Step 5.
+Save all nodes using `Call_Create_Functional_Node_` MCP tool following the hierarchy order (Persona → Outcome → Scenario → Step → Action). Wait for each parent ID before creating children.
+
+**Attach citations to every node** based on the strategy chosen in Step 4:
+- **Strategy A (same citation):** pass `citationIds: [<citationId>]` on each `Call_Create_Functional_Node_` call.
+- **Strategy B (different citations):** pass the `citations` array on each `Call_Create_Functional_Node_` call with the appropriate citation object(s) for that node's source.
+
+This applies to all node types — Persona, Outcome, Scenario, Step, and Action.
+
+If the user chose to update existing nodes (from conflict resolution in Step 2), use `Call_Update_Functional_Node_` MCP instead for those nodes — same citation rules apply (`citationsIds` for Strategy A, `citations` array for Strategy B).
+
+Refer to `../shared/functional-graph-rules.md` for the data model and required fields.
+
+When creating actions, ensure descriptions follow the persona-aware rules from Step 3.
