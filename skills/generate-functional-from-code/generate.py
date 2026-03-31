@@ -809,6 +809,16 @@ Module, Worker, Backend, Frontend, Database, Controller, Handler, Repository
    use "System" as persona.
 7. If input contains ONLY data models, schemas, configs, type definitions,
    or internal utilities with no user-facing behavior → return []
+   Non-functional code to SKIP (never generate intents for):
+   - UI rendering internals: loading skeletons, spinners, error boundaries,
+     tooltip positioning, CSS/theme utilities, font metric parsing
+   - Component plumbing: state management wrappers, context providers,
+     event handler registrations, debounce/throttle utilities
+   - Build/deploy: webpack configs, Docker, nginx, CI/CD pipelines,
+     environment variable loading, health check endpoints
+   - Generic CRUD helpers: base service classes, abstract repositories,
+     generic pagination/filter utilities (capture the SPECIFIC entity
+     CRUD that uses them, not the utility itself)
 
 8. When a single function or API endpoint handles MULTIPLE DISTINCT BUSINESS WORKFLOWS
    distinguished by flags, parameters, type arguments, or conditional branches, extract
@@ -1030,11 +1040,17 @@ OUTCOME RULES:
 - Target 3-8 outcomes per persona total
 
 OUTCOME SIZE RULES:
-- An outcome should have AT MOST 6 intents. If you are about to assign a 7th intent
-  to an existing outcome, STOP and create a new, more specific outcome instead.
-- Split by the primary entity (noun), not the action (verb).
-- When an outcome grows too large, look at the intents already assigned and identify
-  natural sub-groupings by entity or domain area.
+- There is NO hard cap on intents per outcome. A complex entity may have
+  10-15 intents covering create, edit, delete, search, export, import, etc.
+  — these all belong under ONE outcome if they share the same primary entity.
+- Only split an outcome when intents cover DIFFERENT ENTITIES or clearly
+  different domain areas, not different operations on the same entity.
+- Group by PRIMARY ENTITY, not by operation. All intents related to the
+  same entity belong under ONE outcome like "Manage [Entity]", NOT split
+  into separate outcomes per operation.
+- If existing outcomes list contains two outcomes for the same entity
+  under different operation names, consolidate into the more specific
+  one and reassign intents.
 
 OUTPUT FORMAT (strict JSON):
 {
@@ -1083,6 +1099,13 @@ It should have a clear start and end.
 - Create new only for genuinely distinct interaction paths
 - If two Scenarios share >70% of their steps, consider merging them
 - Each Scenario MUST include a brief description
+- Intents are the PRIMARY driver for scenarios, not individual functions.
+  Each intent should map to roughly 1 scenario. Only create additional
+  scenarios if the code reveals a genuinely distinct user flow that no
+  intent covers.
+- Do NOT create a separate scenario for each function/method. Multiple
+  functions that contribute to the same user flow (e.g., save, validate,
+  serialize, upload) should be ONE scenario with multiple steps.
 
 **Duplicate detection — these are the SAME flow:**
 - "Create new X" vs "Add X" vs "Submit X form" → SAME
@@ -1200,6 +1223,21 @@ Output ONLY a valid JSON array. No explanations.
 - Actions describe single atomic API/integration operations
 - description = endpoint, payload shape, or auth mechanism when known; otherwise null
 
+### API LINKING on actions
+- If the code shows an action triggers a REST API call (route decorator,
+  fetch/axios call, apiFetch, HTTP method), attach an "apis" array to that action.
+- Extract: type (REST | GraphQL | gRPC | WebSocket | Event), method, url, request shape, response shape
+- type = the protocol. method = the operation verb for that protocol.
+- For REST: type="REST", method=GET|POST|PUT|DELETE|PATCH, url="/path"
+- For GraphQL: type="GraphQL", method=QUERY|MUTATION|SUBSCRIPTION, url=operation name
+- For gRPC: type="gRPC", method=UNARY|SERVER_STREAM|CLIENT_STREAM|BIDI_STREAM, url=Service.Method
+- For WebSocket: type="WebSocket", method=EMIT|ON|SUBSCRIBE, url=event name
+- For Event: type="Event", method=PUBLISH|CONSUME, url=topic/event name
+- Derive from route decorators (@Get, @Post, @Put, @Delete) or fetch URLs in code
+- Default type to "REST" if not explicitly another protocol
+- Not every action has an API — only add when the code evidence is clear
+- If no API call is involved, omit the "apis" field entirely (do not add empty array)
+
 ### Quantity guidelines
 - A Step typically has 1-5 Actions
 - If more than 5, consider splitting the parent Step
@@ -1219,7 +1257,9 @@ include EVERY item as a separate action. Never summarize with "e.g." or "such as
 ---
 
 ## OUTPUT FORMAT
-[{"scenario": "<title>", "steps": [{"step": "<purpose>", "actions": [{"action": "<interaction>", "description": "<detail or null>"}]}]}]
+[{"scenario": "<title>", "steps": [{"step": "<purpose>", "actions": [{"action": "<interaction>", "description": "<detail or null>", "apis": [{"type": "REST", "method": "<GET|POST|PUT|DELETE|PATCH>", "url": "<path>", "request": "<payload shape>", "response": "<response shape>"}]}]}]}]
+
+NOTE: "apis" is optional — include ONLY when the action triggers an API call visible in the code. Omit for actions with no API involvement. Default type to "REST" unless code shows GraphQL/gRPC/WebSocket/Event.
 """
 
 
@@ -1538,18 +1578,41 @@ def main():
 
     if persona_clusters is None:
         FILTER_KEYWORDS = [
+            # Test/mock/benchmark
             "Test ", "Mock ", "Benchmark",
+            # Server startup and initialization
             "Initialize ", "Establish ", "Run Service Initialization",
             "Register API Handlers",
+            "Start Application", "Start Web Server",
+            "Start Moderation Service",
+            # Database/connection setup
             "Database Migration", "Database Connection", "Connect to ",
+            # Build tooling and dev environment
             "Vite", "Frontend Build", "Development Environment",
             "Configure Frontend Environment",
+            # Infrastructure configuration
             "Configure GRPC", "Configure gRPC",
             "Configure Application Router",
             "Configure Server Router", "Configure Service Router",
             "Configure Logging",
-            "Start Application", "Start Web Server",
-            "Start Moderation Service",
+            # UI rendering internals (specific patterns only)
+            "Render Loading", "Render Skeleton", "Render Fallback",
+            "Render Tooltip", "Render Error Boundary", "Render Spinner",
+            "Re-render Component",
+            "Font Rendering", "Font Metric", "Font Loading",
+            "Parse SVG Path", "Transform SVG Coordinates",
+            "Skeleton Loading", "Loading Spinner", "Loading Fallback",
+            "Error Boundary",
+            # Generic component plumbing
+            "State Management", "Context Provider",
+            "Event Handler", "Event Listener",
+            "Debounce ", "Throttle ",
+            # Build/deploy/infra
+            "Webpack", "Docker", "Nginx",
+            "CI/CD", "Pipeline Configuration",
+            "Environment Variable",
+            "Health Check Endpoint",
+            "CORS Configuration",
         ]
 
         def _is_non_functional(intent):
@@ -2432,8 +2495,10 @@ most relevant to that scenario (for detailed code analysis in the next step).
             # CitationInputDto: type (enum: document|exDoc|figma|jira|confluence|code|prompt), name, reference
             def _path_to_citation(path):
                 info = all_found_paths.get(path, {})
+                # Always use file path as name, never function/class names
+                file_path = info.get("data", {}).get("path", path)
                 file_id = info.get("data", {}).get("id", path)
-                return {"reference": file_id, "name": path, "type": "code"}
+                return {"reference": file_id, "name": file_path, "type": "code"}
 
             all_outcome_paths = list(all_found_paths.keys())
             outcome_citations = [_path_to_citation(p) for p in all_outcome_paths]
@@ -2443,6 +2508,8 @@ most relevant to that scenario (for detailed code analysis in the next step).
                     oo["citations"] = outcome_citations
                     for so in oo.get("scenarios", []):
                         rel_files = so.pop("relevant_files", [])
+                        # Filter to only file paths (must contain /), not function/class names
+                        rel_files = [f for f in rel_files if '/' in f]
                         scenario_citations = [_path_to_citation(fp) for fp in rel_files] if rel_files else outcome_citations
                         so["citations"] = scenario_citations
                         for step in so.get("steps", []):

@@ -318,6 +318,24 @@ on actions.
 - You want **API linking** — each action that calls an API has it linked with method, URL, request/response shapes
 - You want **System persona grounded in actual backend code** — not inferred, but traced through the code graph
 
+## Why Mode B Needs Both Code Graph AND Local File Access
+
+Mode B uses **two complementary sources** for every entry point:
+
+1. **Code Graph Search** (for BOTH frontend AND backend):
+   - Frontend: function signatures, call chains, service hook dependencies, imports, class structures, route decorators
+   - Backend: controller handlers, service methods, database queries, middleware chains, entity relationships
+   - The code graph captures the **logic and data flow** across the full stack
+
+2. **Local file reading** (for UI-specific details the code graph misses):
+   - JSX/TSX return blocks, template markup, conditional rendering (`v-if`, ternaries)
+   - Form fields, event handlers (`onClick`, `onSubmit`, `onChange`)
+   - CSS/styling that implies UI structure (grids, tabs, modals)
+   - The code graph does NOT index template/JSX content — only script-level declarations
+
+**Rule: Always search the code graph FIRST for both frontend and backend files,
+then supplement with local file reading for UI template details that the code graph cannot capture.**
+
 ## Guard
 
 Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:setup-project`.
@@ -338,14 +356,18 @@ If `entrypoints.json` does NOT exist in the working directory, create it:
 - Nuxt: check for `pages/` directory with `.vue` files
 - SvelteKit: check for `src/routes/` directory
 
-### Step 2: Use code graph as primary source for route discovery
-- Use specific queries per framework:
+### Step 2: Use code graph AND local files for route discovery
+- **Code graph first**: search with framework-specific queries:
   - Vue: `"src/router/index.js vue router route definitions"`
   - React: `"routes.tsx react router createBrowserRouter Route"`
   - Angular: `"app-routing.module.ts angular routes"`
 - The File node's `statements` field often contains full route definitions
 - Use a second query for navigation structure (sidebar, navbar)
-- Fall back to reading the router file directly if code graph is incomplete
+- **Then read the router file locally** — code graph may not capture the full
+  route config (lazy imports, nested routes, route guards). Local reading
+  gives the complete picture including dynamic imports and component mappings
+- Read the sidebar/navbar component locally to discover panel triggers and
+  non-routed features (drawers, modals, overlay panels)
 
 ### Step 3: Extract route details
 For each route, extract: path, component, title, params, query params, auth guards, variants.
@@ -361,13 +383,91 @@ Compare all view files against extracted routes. For views with NO route:
 
 Classify as: sub-component (add to parent), dead code (flag for user), or truly unused (exclude).
 
-### Step 6: Cross-reference backend API routes
+### Step 6: Discover non-routed feature surfaces (panels, drawers, modals)
+
+**CRITICAL: Routes alone do NOT capture the full application.** Many significant feature
+surfaces live as panels, drawers, or overlay components with no dedicated URL. These are
+triggered by state changes (e.g., `setPanelType()`, `setIsOpen()`) from within routed pages.
+
+**How to discover them:**
+1. **Search for panel/drawer type constants** — look for panel type enums, constants, or
+   union types (e.g., `TPanel`, `panelType`, `drawerType`) in constants or context files
+2. **Read the panel/drawer renderer** — find the component that switches on panel type
+   to render different layouts (e.g., `RightPanelLayout`, `PanelDrawer`)
+3. **Identify feature-rich panels** — panels that have their own tabs, CRUD operations,
+   sub-components, or API calls are significant feature surfaces (not just simple viewers)
+
+**Classification rules:**
+- **Simple viewer panels** (e.g., markdown render, Gherkin script display): capture as
+  actions within the triggering page's scenarios (e.g., "View Gherkin script in side panel")
+- **Feature-rich panels** (e.g., a panel with tabs, forms, CRUD, its own API calls):
+  treat as a **separate entry point** in `entrypoints.json` with `"type": "panel"` and
+  process it as its own batch with full context collation (Phase 2 + 3)
+
+**Add feature-rich panels to `entrypoints.json`:**
+```json
+{
+  "id": 18,
+  "route": null,
+  "title": "Semantic Model Panel",
+  "component": "src/components/layout/unified-model-layout.tsx",
+  "auth": true,
+  "type": "panel",
+  "trigger": "setPanelType('UNIFIED_MODEL')",
+  "triggeredFrom": ["dashboard", "sidebar"],
+  "category": "Semantic Model",
+  "status": "pending"
+}
+```
+
+**Why this matters:** A panel like the Semantic Model (with Functional, Architecture,
+Design, Code, and History tabs — each with full CRUD, pagination, search, import/export,
+clone, merge, and version history) is a larger feature surface than most routed pages.
+Missing it would leave a major gap in the functional graph.
+
+**Also check for sub-tab workspaces within pages.** Some pages contain tabbed
+layouts where each tab is a full feature surface with its own CRUD operations,
+service hooks, and backend controllers. These are NOT panels — they're rendered
+inline within the page component. Discover them by:
+1. Grepping for `TabsContent` or `activeTab` in page and layout components
+2. Reading the parent layout to see what tabs exist and what components they render
+3. Processing each significant tab as part of the parent page's batch
+
+**Check for conditional layouts on parameterized routes.** A single route like
+`/chat/:agent/:id` may render completely different layouts depending on the URL
+parameter value. For example, one agent param might show a simple chat, while
+another renders a full workspace with tabs, canvas, and CRUD operations. These
+are easy to miss because the route looks like it was already processed.
+
+**How to discover them:**
+1. When processing a parameterized route, check if the component conditionally
+   renders different layouts based on the param (e.g., `if (agent === "x") return <WorkspaceLayout />`)
+2. Read EACH conditional branch — not just the default. Each branch that renders
+   a different layout component is effectively a separate entry point
+3. For significant branches, add them as variant entry points in `entrypoints.json`:
+   ```json
+   {
+     "id": 19,
+     "route": "/chat/:agent/:id",
+     "title": "Architecture Workspace",
+     "component": "src/components/layout/architecture-agent-layout.tsx",
+     "auth": true,
+     "type": "route-variant",
+     "paramValue": {"agent": "architecture_agent"},
+     "triggeredFrom": ["agents page"],
+     "category": "Architecture",
+     "status": "pending"
+   }
+   ```
+4. Process each variant as its own batch with full context collation
+
+### Step 7: Cross-reference backend API routes
 If the backend repo is indexed in the code graph:
 - Search for the routes definition file (e.g., `routes.py`)
 - List all backend API endpoints
 - Flag endpoints not called from any frontend code
 
-### Step 7: Generate `entrypoints.json`
+### Step 8: Generate `entrypoints.json`
 ```json
 {
   "project": "<name>",
@@ -384,11 +484,19 @@ If the backend repo is indexed in the code graph:
       "params": [],
       "queryParams": [],
       "variants": [],
+      "type": "route",
       "category": "Category",
-      "status": "pending"
+      "status": "pending",
+      "backendCodeGraphChecked": false,
+      "backendControllersFound": []
     }
   ]
 }
+```
+
+- `type`: `"route"` (default) or `"panel"` for non-routed feature surfaces
+- `backendCodeGraphChecked`: updated to `true` after Phase 3 backend search
+- `backendControllersFound`: populated with file paths of backend controllers found
 ```
 
 Present the list to the user for review. Ask if any should be excluded.
@@ -397,34 +505,58 @@ Present the list to the user for review. Ask if any should be excluded.
 
 1. Read `entrypoints.json`, group pending EPs by category or shared component
 2. Plan which EPs share the same outcome (e.g., Invoice list + Create + Edit → "Manage Invoices")
-3. Process one batch per upsert call
+3. **Include panel-type entry points** — feature-rich panels (type: "panel") should be
+   processed as their own batch, not folded into the pages that trigger them
+4. Process one batch per upsert call
 
-## Phase 2: Collate Context
+## Phase 2: Collate Context (Code Graph + Local Files)
 
-Use **code graph + direct file reading** (both required):
+For EVERY entry point batch, use **both** code graph search and direct file reading.
+The code graph is the **primary source** for understanding logic; local files fill in
+UI-specific details the code graph cannot capture.
 
-### Code graph (for function logic and API calls)
-- Search for the page component: `Code_Graph_Search` with `"<ComponentName>.vue <description>"`
-- Extract: imports, functions, API calls from the `calls` field
-- For child components, search code graph to understand their functions
-- Use `Get_Code_File_Details` for deeper inspection when needed
+### Step 1: Search code graph for frontend components
+- Search for the page component: `Code_Graph_Search` with `"<ComponentName>.tsx <description>"`
+- Search for service hooks used by the page: `Code_Graph_Search` with `"use<HookName> service hook"`
+- Extract from code graph results: imports, function signatures, `calls` field (call chains),
+  class structures, injected services, route decorators
+- Use `Get_Code_File_Details` with the File node ID for full hierarchy (classes → methods → statements)
+- For child/sub-components referenced in the page, search code graph for those too
 
-### Direct file reading (for template details)
-**Code graph does NOT capture `<template>` content.** Always read the actual file for:
-- Use Grep for form fields (`v-model`, `@submit`, `@click`) first — skip inline SVGs
-- Extract: form fields, `v-if`/`v-show` conditions, event handlers, slot templates
-- Read script section for: `data()`, `computed`, `methods` (API calls), `mounted`
+### Step 2: Read local files for UI template details
+**Code graph does NOT capture JSX return blocks or template markup.** Read the actual file for:
+- Form fields, input elements, select/dropdown options
+- Conditional rendering (ternaries, `v-if`/`v-show`, `&&` guards)
+- Event handlers (`onClick`, `onSubmit`, `onChange`, `@click`, `@submit`)
+- Tab structures, modal triggers, panel openers (`setPanelType` calls)
+- Use Grep for quick extraction of patterns (`v-model`, `@submit`, `onClick`) — skip inline SVGs
+- For React: read the component's return/render block for UI structure
+- For Vue: read `<template>` section separately from `<script>`
 
-## Phase 3: Query Code Graph for Backend (System Persona)
+### Step 3: Identify API calls from frontend
+- From service hooks and component code, extract all API endpoints (axios/fetch/apiFetch calls)
+- Note the HTTP method, URL pattern, request payload shape, and response handling
+- These become the bridge to backend code graph search in the next phase
 
-Generate System persona **alongside** User persona:
+## Phase 3: Search Code Graph for Backend (System Persona) — MANDATORY
 
-1. From frontend code, identify all API endpoints (axios/fetch calls)
-2. Search the backend code graph with descriptive queries: `"addInvoice invoice create post gkcore api handler"` (not just URL paths)
-3. Code graph function results include call chains with SQL operations, helper functions, and line ranges
-4. Build System persona scenarios describing actual backend processing
+**This phase is REQUIRED for every batch**, not optional. Generate System persona
+**alongside** User persona for each outcome:
+
+1. From Phase 2 Step 3, take each identified API endpoint
+2. Search the **backend** code graph with descriptive queries:
+   `"<controllerName> <httpMethod> <endpointDescription> handler"` (not just URL paths)
+3. Use `Get_Code_File_Details` on backend controller/service files to get:
+   - Route decorators (e.g., `@Post('/login', ...)`) confirming the endpoint
+   - Method call chains (what the handler calls: services, repositories, helpers)
+   - Database queries (`query_statement` type in statements)
+   - Injected services and their methods
+4. Follow the call chain one level deeper: search for the service methods the controller calls
+5. Build System persona scenarios describing actual backend processing with grounded evidence
 
 **System persona MUST be grounded in backend code graph — do NOT infer from frontend alone.**
+**If a backend repository is not indexed in the code graph, note this and skip System persona
+for those APIs — do not fabricate backend behavior.**
 
 ## Phase 4: Generate Ontology
 
@@ -442,12 +574,22 @@ Follow the functional graph rules in `../shared/functional-graph-rules.md`, plus
 For each action that triggers an API call, attach an `apis` array:
 ```json
 "apis": [{
-  "method": "REST",
-  "url": "POST /invoice",
+  "type": "REST",
+  "method": "POST",
+  "url": "/invoice",
   "request": "{payload shape}",
   "response": "{response shape}"
 }]
 ```
+
+- `type`: protocol — `REST` (default), `GraphQL`, `gRPC`, `WebSocket`, `Event`
+- `method`: operation verb for that protocol:
+  - REST: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`
+  - GraphQL: `QUERY`, `MUTATION`, `SUBSCRIPTION`
+  - gRPC: `UNARY`, `SERVER_STREAM`, `CLIENT_STREAM`, `BIDI_STREAM`
+  - WebSocket: `EMIT`, `ON`, `SUBSCRIBE`
+  - Event: `PUBLISH`, `CONSUME`
+- `url`: endpoint path, query name, service.method, or event name
 
 ## Phase 5: Self-Audit
 
@@ -493,7 +635,7 @@ Upsert payload structure:
             "actions": [{
               "action": "Select type",
               "description": "...",
-              "apis": [{"method": "REST", "url": "POST /invoice", "request": "...", "response": "..."}]
+              "apis": [{"type": "REST", "method": "POST", "url": "/invoice", "request": "...", "response": "..."}]
             }]
           }]
         }]
@@ -509,7 +651,19 @@ The upsert **merges across calls** — you can add scenarios to the same outcome
 
 ## Phase 8: Mark Complete
 
-Update `entrypoints.json`: set processed EPs to `"status": "done"`.
+Update `entrypoints.json` for each processed EP:
+- Set `"status": "done"`
+- Set `"backendCodeGraphChecked": true/false` — whether backend code graph was
+  searched for this EP's API calls
+- Set `"backendControllersFound": [...]` — list of backend controller/service file
+  paths that were found and used for System persona generation
+- If backend was NOT checked, add `"backendNote"` explaining why (e.g., "N8N
+  integration only", "localStorage only", "no API calls from this page")
+
+**This tracking is MANDATORY.** It ensures accountability — when reviewing results,
+the user can verify which EPs have grounded System persona vs. frontend-only coverage.
+If an EP has `backendCodeGraphChecked: false` without a valid reason, it should be
+flagged for re-processing.
 
 ## Phase 9: Coverage Validation
 

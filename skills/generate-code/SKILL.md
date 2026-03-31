@@ -101,6 +101,7 @@ Scenario → Page sections, Step → Component interactions, Action → UI eleme
 Call `Get_all_personas` with the project UUID.
 
 For each persona returned, call `Get_all_outcomes_for_a_persona_id`.
+**Call all persona-outcome fetches in parallel** to minimize round-trips.
 
 Build a **persona-outcome map** — this drives the entire UI structure:
 
@@ -126,6 +127,8 @@ Rules for consolidation:
 - Auth models WHO IS ALLOWED TO DO WHAT (permission boundaries)
 - A single user may act as multiple personas (e.g., upload files as
   "Fund Operations User" and review dashboard as "Fund Operations Analyst")
+- Check persona descriptions for sub-role hints (e.g., "may have roles:
+  Admin, Manager, Operator" in a single persona → multiple auth roles)
 
 Present the proposed mapping to the user for confirmation:
 
@@ -162,6 +165,8 @@ Present the proposed navigation structure to the user.
 
 For each outcome that maps to a page, call
 `Get_all_scenarios_for_a_outcome_id`.
+**Call ALL outcome-scenario fetches in parallel** (batch all calls in one
+message to maximize throughput).
 
 This tells you what features each page must support. For example,
 the Dashboard page might need:
@@ -173,9 +178,10 @@ the Dashboard page might need:
 
 ### B5. DEEP DIVE — Get steps and actions for key scenarios
 
-For the most complex scenarios, call
-`Get_all_steps_actions_for_a_scenario_id` to get the exact
-UI interactions needed.
+For the most complex scenarios (especially create/edit forms, dashboards,
+and workflows), call `Get_all_steps_actions_for_a_scenario_id` to get
+the exact UI interactions needed.
+**Call 8-10 key scenarios in parallel** per batch.
 
 This reveals:
 - What form fields are needed (from "Provide..." actions)
@@ -183,6 +189,21 @@ This reveals:
 - What validation rules apply (from action descriptions)
 - What role-gating is needed (from persona ownership)
 - What error messages to show (from action descriptions)
+- **What API endpoints exist** (from HAS_API children on actions:
+  url, method, request schema, response schema)
+
+### B5.1. EXTRACT API CONTRACTS from step/action data
+
+Actions with `HAS_API` children contain the actual REST endpoints:
+```
+Action → Api { url, method, request, response }
+```
+
+Collect ALL API contracts discovered across scenarios into a centralized
+reference. These drive:
+- TypeScript API service stubs with correct request/response types
+- Dummy data shape (must match response schemas)
+- Form field names (must match request schemas)
 
 ### B6. DATA — Build dummy payloads from source documents
 
@@ -192,17 +213,12 @@ Call `Documents` with broad queries to find:
 - Validation rules and error messages
 - Acceptance criteria with expected values
 
-Create JSON data files that:
-- Cover all entity types referenced in the functional graph
-- Include realistic values from source documents
-- Have a clear structure matching the graph's entity model
-- Are easily replaceable with backend API calls
-
-Mark all data imports with a comment:
-```
-// TODO: Replace with API call — GET /api/exceptions
-import exceptions from '../data/exceptions.json';
-```
+Create a **single TypeScript dummy data file** (`src/data/dummy.ts`) that:
+- Exports named constants for every entity type
+- Uses realistic values from source documents (not lorem ipsum)
+- Includes 5-10 records per entity for meaningful list/table views
+- Matches the TypeScript interfaces exactly
+- Marks every export with `// TODO: Replace with API call — GET /api/...`
 
 ### B7. SCAFFOLD — Generate the project
 
@@ -211,34 +227,153 @@ existing code in the repo (check via `Code_Graph_Search`).
 
 **Default frontend stack:** React + TypeScript + Vite + Tailwind CSS
 
-Generate files in this order:
+#### B7.1. Generation Order and Parallelization Strategy
 
-1. **Project setup** — package.json, vite.config, tsconfig, CSS
-2. **Types** — TypeScript interfaces from graph entity model
-3. **Data files** — Dummy JSON from step B6
-4. **Auth context** — From persona→role map (step B2)
-5. **Shared components** — Badges, inputs, tables derived from
-   common patterns across scenarios
-6. **Layout + Navigation** — From outcome→route map (step B3)
-7. **Pages** — One per route, covering all scenarios (step B4)
-8. **Route wiring** — App.tsx with protected routes per role
+Generate in two phases to maximize speed:
+
+**Phase 1 — Foundation (parallel agents):**
+Launch 3 agents simultaneously:
+1. **Types + Data agent**: TypeScript interfaces + dummy data file
+2. **Auth + Utils agent**: AuthContext, useRoleGuard hook, formatters,
+   main.tsx, index.css
+3. **Components agent**: All shared UI components (see B7.2)
+
+**Phase 2 — Pages and Routing (parallel agents):**
+Once Phase 1 completes, launch 4-6 agents simultaneously:
+1. **Layout + App.tsx agent**: Sidebar layout, route wiring
+2. **Auth pages agent**: Login, Register, ForgotPassword, SelectOrg
+3. **Core pages agent**: Dashboard, primary transaction pages
+4. **Secondary pages agent**: Remaining list/create/detail pages
+5. **Reports + Admin agent**: Report views, admin panels
+
+Each agent gets a self-contained prompt with the relevant scenarios,
+component API, and type definitions.
+
+#### B7.2. Shared Component Library — Design Rules
+
+Build these reusable components following these critical rules:
+
+**FormField + Input components:**
+- FormField must NOT have built-in margin (no `mb-4`). Parent controls
+  spacing via grid `gap`. This prevents layout breakage in grids.
+- All input sub-components (TextInput, NumberInput, DateInput,
+  SelectInput, TextArea) must use `React.forwardRef` and MERGE
+  incoming `className` with base classes:
+  ```tsx
+  export const TextInput = React.forwardRef<HTMLInputElement, Props>(
+    ({ className, ...props }, ref) => (
+      <input ref={ref} className={`${baseClasses} ${className ?? ''}`} {...props} />
+    )
+  );
+  ```
+  This prevents double-class conflicts when pages customize inputs.
+
+**DataTable:**
+- Wrap in a card container (`bg-white rounded-xl border shadow-sm overflow-hidden`)
+- Toolbar row: search input (with search icon) on left, filter pills on right
+- Footer: "Showing X of Y items" count
+- No striped rows — use `hover:bg-gray-50` only (cleaner)
+
+**DetailPanel (slide-in right panel):**
+- z-index MUST be higher than sidebar: backdrop `z-50`, panel `z-[60]`
+  (sidebar is typically `z-40`)
+- Width: `w-full sm:w-[480px]` for mobile responsiveness
+- Lock body scroll when open
+
+**Modal:**
+- Content must be scrollable: `max-h-[85vh]` with `overflow-y-auto`
+- All interactive features (Create, Import, etc.) must be wired with
+  real state and form logic — NEVER leave as placeholder buttons
+
+**Layout (Sidebar + Header):**
+- Sidebar: dark theme (`bg-slate-900`), nav items with rounded active
+  indicators (not border-left which adds width shifts)
+- Header: compact (56px), no shadow (border-b only for cleaner look)
+- Content area: `max-w-7xl mx-auto` for ultra-wide screen containment
+- Mobile: sidebar slides in with backdrop, swipe-to-close support
+
+**CSS Utility Classes — define in index.css:**
+```css
+@layer components {
+  .btn-primary { @apply inline-flex items-center justify-center gap-1.5
+    rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white
+    shadow-sm transition-all hover:bg-blue-700 focus:outline-none
+    focus:ring-2 focus:ring-blue-500 focus:ring-offset-2; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-1.5
+    rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm
+    font-medium text-gray-700 shadow-sm transition-all hover:bg-gray-50; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-1.5
+    rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white
+    shadow-sm transition-all hover:bg-red-700; }
+}
+```
+Use these classes across all pages for button consistency.
+
+**Badge:**
+- Use `ring-1 ring-inset` borders for better definition:
+  `bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20`
+
+#### B7.3. Page Generation Rules
 
 For each page, use the scenarios as a checklist:
 - Each scenario = a section or interaction on the page
 - Each step = a sequential phase in the interaction
 - Each action = a specific UI element or behavior
 
+**List pages pattern:**
+- PageHeader with "Create X" action button
+- Tabs (if type variants exist, e.g., Sale/Purchase)
+- Date filter row (plain labels + DateInput, NOT wrapped in FormField)
+- DataTable with appropriate columns
+- DetailPanel on row click with full details + action buttons
+
+**Create/Edit form pages pattern:**
+- Multi-section Card layout (one Card per functional step)
+- Grid layout: `grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4`
+- Toggle buttons for type selection (not plain radio buttons)
+- Dynamic line item tables for invoice-like forms
+- Totals summary in `bg-gray-50 rounded-lg p-4` box
+- Footer with btn-primary (Submit) and btn-secondary (Cancel)
+
+**Dashboard pattern:**
+- StatCard grid: `grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5`
+- Chart rows: `grid-cols-1 lg:grid-cols-2 gap-5`
+- Use `recharts` with `ResponsiveContainer` — parent MUST have explicit height
+- Pie chart labels: use `fontSize: 11` to prevent overlap
+
+#### B7.4. Common Pitfalls to Avoid
+
+1. **Never use FormField for inline filter controls** (date pickers in
+   toolbars). Use plain `<span>` labels + input directly.
+2. **Never pass className to input components that already style themselves**.
+   The base component owns its styling; pages only override via the
+   merged className prop when truly needed.
+3. **Always set explicit height on chart containers** (e.g., `h-64`).
+   `ResponsiveContainer` needs a sized parent to render.
+4. **Use `tabular-nums` on columns with numbers/dates** for alignment.
+5. **Use `truncate` on values that might overflow** (currency, long names).
+6. **Every button/action must be wired** — no placeholder `onClick` handlers
+   that do nothing. At minimum, show a modal or alert.
+7. **Test the sidebar collapsed state** — all content must remain usable
+   when sidebar is collapsed to icon-only width.
+
 ### B8. VERIFY — Build and test
 
-Run the project's build command (e.g., `npx tsc --noEmit && npx vite build`)
-to verify zero errors.
+Run **both** checks:
+```bash
+npx tsc --noEmit    # Type check — must produce zero output
+npx vite build      # Production build — must succeed
+```
 
-If errors found, fix them and re-verify.
+If errors found, fix them and re-verify. Common issues:
+- Missing imports (components used but not imported)
+- Type mismatches between dummy data and interfaces
+- Unused imports flagged by strict mode
 
 Present the file manifest to the user with:
-- File path and size
-- Which graph personas/outcomes/scenarios it covers
-- How to run the dev server
+- Total file count and build output size
+- Module breakdown (how many pages per section)
+- How to run the dev server (`npm run dev`)
 
 ---
 
@@ -252,7 +387,7 @@ Action → Business rule implementation.
 ### C1. EXTRACT — Build the persona-to-API map
 
 Same as B1: Call `Get_all_personas` then `Get_all_outcomes_for_a_persona_id`
-for each persona.
+for each persona. **Call all in parallel.**
 
 Additionally, pay special attention to the **System persona** — its
 scenarios define background jobs, cron tasks, and internal processing
@@ -285,6 +420,7 @@ Outcome → Resource → Endpoints
 ### C4. DETAIL — Get scenarios for each resource
 
 For each outcome, call `Get_all_scenarios_for_a_outcome_id`.
+**Call all in parallel.**
 
 Map scenarios to HTTP endpoints:
 - "Upload CSV files" → POST /api/upload
@@ -301,6 +437,7 @@ to extract:
 - Error messages and status codes
 - Data transformation logic
 - Database query requirements
+- **API contracts** (from HAS_API children: url, method, request, response)
 
 ### C6. REFERENCE — Get constraints from documents
 
@@ -347,6 +484,7 @@ Step                      User interaction phase  Processing phase
 Action (human)            UI element / Form field Request parameter
 Action (system)           (not in UI)             Business logic / Service
 Action (system desc)      (not in UI)             Formula / Threshold / Rule
+Action → HAS_API          API service stub        Route handler implementation
 ```
 
 ## Reference: Dummy Data Pattern
@@ -361,8 +499,12 @@ When building dummy data files, always:
    // TODO: Replace with API call — GET /api/exceptions
    const exceptions = await fetch('/api/exceptions').then(r => r.json());
    ```
-5. Store in `/src/data/*.json` (frontend) or `/seeds/*.json` (backend)
+5. Store in `/src/data/dummy.ts` (single file, named exports) for frontend
+   or `/seeds/*.json` for backend
 6. Match the TypeScript interfaces exactly
+7. Use 5-10 records per entity for realistic list/table rendering
+8. Include realistic domain-specific values (e.g., valid GSTIN formats for
+   Indian accounting, proper date ranges within financial year)
 
 ## Reference: Auth Role Consolidation Rules
 
@@ -376,4 +518,40 @@ When mapping graph personas to auth roles:
    - "Can only view" → base role
    - "Can view + modify status" → elevated role
    - "Can configure system" → admin role
-5. **Present the mapping to the user** — they know the org structure
+5. **Check persona descriptions for embedded sub-roles** — a single persona
+   like "User" may describe multiple roles (Admin, Manager, Operator) in
+   its description. These become separate auth roles.
+6. **Present the mapping to the user** — they know the org structure
+
+## Reference: UX Quality Checklist
+
+Before delivering the frontend, verify:
+
+- [ ] **No overflow**: Currency values use `truncate`, tables use `overflow-x-auto`
+- [ ] **Consistent spacing**: All page sections use `space-y-5` or `space-y-6`
+- [ ] **Grid alignment**: Form fields use `gap-x-6 gap-y-4`, never `mb-4` on FormField
+- [ ] **Z-index layering**: Sidebar(40) < DetailPanel backdrop(50) < Panel(60) < Modal(50+)
+- [ ] **Mobile responsive**: Sidebar collapses, tables scroll, grids stack to single column
+- [ ] **All buttons wired**: Every Create/Import/Edit button opens a modal or navigates
+- [ ] **Loading states**: Submit buttons show spinner during async operations
+- [ ] **Error states**: Forms show validation errors, API failures show error banners
+- [ ] **Empty states**: Tables show a helpful message when no data exists
+- [ ] **Custom scrollbars**: Thin, subtle scrollbars in sidebar and panels
+- [ ] **Build passes**: `npx tsc --noEmit` AND `npx vite build` both succeed with zero errors
+
+## Reference: Parallelization Strategy for MCP Calls
+
+To minimize latency when fetching the full functional graph:
+
+```
+Step 1: Get_all_personas (single call)
+           ↓
+Step 2: Get_all_outcomes_for_a_persona_id × N personas (ALL in parallel)
+           ↓
+Step 3: Get_all_scenarios_for_a_outcome_id × M outcomes (ALL in parallel)
+           ↓
+Step 4: Get_all_steps_actions_for_a_scenario_id × K key scenarios (batch 8-10 in parallel)
+```
+
+Each step depends on IDs from the previous step, so steps are sequential.
+But within each step, ALL calls should be made in a single parallel batch.
