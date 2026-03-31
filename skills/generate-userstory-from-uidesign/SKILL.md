@@ -88,9 +88,51 @@ Analyze the design to understand:
 - **Error scenarios:** What can go wrong and how is it handled?
 - **Success scenarios:** What happens when actions complete successfully?
 
-### 4. Generate User Stories
+### 4. Assess Design Complexity
 
-For each distinct user flow or feature area, create a user story following this structure:
+Before generating user stories, analyze the design to determine if it represents a **simple screen** or a **complex feature**:
+
+**Simple Screen (Create ONE comprehensive user story):**
+- Single-purpose page with one primary action (e.g., Login, Registration, Contact Form)
+- All UI elements support the same user goal
+- Related interactions are part of the same workflow (e.g., login includes forgot password, remember me)
+- Typically 1-10 interactive elements
+
+**Examples of Simple Screens:**
+- Login page (includes login form, forgot password link, remember me checkbox)
+- Contact form (includes form fields, submit button, validation)
+- Profile view page (displays user info with edit button)
+- Single product detail page
+- Search results page
+
+**Complex Design (Create MULTIPLE user stories):**
+- Dashboard with multiple independent widgets or sections
+- Page with distinct feature areas serving different user goals
+- Multi-step workflows or wizards
+- Page combining multiple CRUD operations (e.g., user management with create, edit, delete, search)
+- More than 15 interactive elements with different purposes
+
+**Examples of Complex Designs:**
+- Admin dashboard with analytics, user management, and settings sections
+- E-commerce checkout (shipping → payment → review → confirmation)
+- Project management board with multiple lists, cards, and actions
+- Settings page with multiple tabs (Profile, Security, Notifications, Billing)
+
+### 5. Generate User Stories
+
+Based on the complexity assessment:
+
+**For Simple Screens:** Create ONE comprehensive user story that covers all UI elements and interactions on that screen.
+- Include all related features in the acceptance criteria (e.g., for login: main login flow, forgot password, remember me, validation, errors)
+- The story should represent the complete user experience for that screen
+- All secondary actions (like "Forgot password?") should be acceptance criteria, NOT separate stories
+
+**For Complex Designs:** Create separate user stories for each distinct user flow or feature area.
+- Each story should address an independent user goal
+- Stories should be independently testable and implementable
+- Group related stories into epics if needed
+
+Use this structure for each story:
 
 ```
 ## User Story: [Story Title]
@@ -122,14 +164,53 @@ For each distinct user flow or feature area, create a user story following this 
 
 - **[Error type]:** [Error message and handling]
 - **[Error type]:** [Error message and handling]
-
-### Success Criteria
-
-- [What indicates successful completion]
-- [Post-action state or navigation]
 ```
 
-### 5. Acceptance Criteria Guidelines
+**Example: Login Page (Simple Screen → ONE Story)**
+
+```markdown
+## User Story: User Login
+
+**As a** registered user
+**I want to** securely log into the application
+**So that** I can access my account and personalized features
+
+### Acceptance Criteria
+
+- [ ] User can enter email address in email field (format: name@domain.com)
+- [ ] User can enter password in password field (masked input)
+- [ ] "Remember me" checkbox allows user to stay logged in across sessions
+- [ ] Login button is enabled only when both email and password are filled
+- [ ] Clicking "Login" button authenticates the user credentials
+- [ ] On successful login, user is redirected to the dashboard
+- [ ] On failed login, system displays "Invalid email or password" error message
+- [ ] "Forgot password?" link navigates to password reset page
+- [ ] Email field validates format before submission
+- [ ] Password field shows/hides toggle icon for visibility
+- [ ] Form prevents submission with empty fields
+- [ ] Loading spinner appears on login button during authentication
+
+### User Flow
+
+1. User lands on login page
+2. User enters email address
+3. User enters password
+4. User optionally checks "Remember me" checkbox
+5. User clicks "Login" button
+6. System validates credentials
+7. On success: User is redirected to dashboard
+8. On failure: Error message is displayed, user can retry
+
+### Validation Rules
+
+- Email: Must be valid email format (contains @ and domain)
+- Password: Required field, minimum 8 characters
+```
+
+**Note:** This is ONE comprehensive story covering all login page functionality. Do NOT create separate stories for "Forgot Password", "Remember Me", or "Form Validation" - these are acceptance criteria within the main login story.
+
+
+### 6. Acceptance Criteria Guidelines
 
 Write acceptance criteria that are:
 
@@ -153,7 +234,7 @@ Write acceptance criteria that are:
 ✗ Good user experience
 ✗ System behaves correctly
 
-### 6. Group Related Stories
+### 7. Group Related Stories
 
 If the design contains multiple screens or complex flows:
 
@@ -163,14 +244,39 @@ If the design contains multiple screens or complex flows:
 - Prioritize stories (Must Have, Should Have, Could Have)
 
 
-### 7. Save Output to File
+### 8. Present User Stories and Ask to Save
 
-After presenting the user stories, ALWAYS save the complete output to a `.md` file using the Write tool:
+**Step 1: Present the user stories**
+- Display the complete user stories output in markdown format to the user
 
-- **Location:** Project root (current working directory)
+**Step 2: Ask user if they want to save**
+- After presenting the user stories, ASK the user if they want to save the output as a markdown file
+- Use this exact question: "Would you like me to save these user stories as a markdown (.md) file?"
+
+**Step 3: Only save if user confirms**
+- If user says yes, save the file using the Write tool
 - **Filename format:** `user-stories-[screen-name].md` (e.g., `user-stories-login-page.md`)
 - Derive `[screen-name]` from the design title, file name, or page heading — use lowercase, hyphen-separated words
-- Confirm to the user: "Saved to `user-stories-[screen-name].md`"
+- **Location:** Project root directory (from `<env>Working directory: ...</env>`)
+
+**Step 4: Display the FULL ABSOLUTE PATH to the user**
+
+After saving, you MUST display the complete file path in this exact format:
+
+```
+✅ User stories saved successfully!
+
+📁 File location: /Users/sandeshbirwadkar/Documents/projects/breezeai-claude-plugin/user-stories-[screen-name].md
+
+You can find your user stories at the above location.
+```
+
+**CRITICAL RULES:**
+- ❌ DO NOT say: "Saved to user-stories-form.md"
+- ❌ DO NOT say: "Saved to `user-stories-form.md`"
+- ✅ DO say: "📁 File location: /Users/sandeshbirwadkar/Documents/projects/breezeai-claude-plugin/user-stories-form.md"
+- The path MUST be the FULL ABSOLUTE PATH starting with `/` (root directory)
+- Construct the path by combining: `<env>Working directory</env>` + `/` + filename
 
 ## Output Format
 
