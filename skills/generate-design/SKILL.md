@@ -11,6 +11,63 @@ description: >
 
 Consult `references/guide.md` for detailed mapping rules, component types, and payload structures.
 
+## Design Graph Query Tools
+
+Three tools are available for querying design graph nodes:
+
+### 1. Get_all_Design_By_Label
+
+Gets all design nodes of a specific type with pagination.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
+
+**Use when:** You need to fetch all nodes of a specific type.
+
+### 2. Design_Graph_Search
+
+Semantic search across all design graph node types.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `query` (required): Search query string
+- `limit` (optional): Number of results (default: 10)
+- `skip` (optional): Offset for pagination (default: 0)
+- `includeLabels` (optional): Filter by labels - `["UserJourney", "Flow", "Page", "Component"]`
+
+**Use when:** You need to search for nodes by name, description, or any text content.
+
+### 3. Get_Design_Nodes_by_Ids
+
+Query design nodes with various filters. This is the most flexible query tool.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
+- `queryParams` (optional): Query string for filtering
+
+**Query Parameter Examples:**
+
+| Use Case                         | Query Params                                     |
+| -------------------------------- | ------------------------------------------------ |
+| Get by specific ID               | `id=uj-123`                                      |
+| Get by multiple IDs              | `id=uj-123&id=uj-456`                            |
+| Get Flows by UserJourney         | `userJourneyId=uj-123`                           |
+| Get Pages by Flow                | `flowId=flow-123`                                |
+| Get Components by Page           | `pageId=page-123`                                |
+| Get Components by parent         | `parentComponentId=comp-123`                     |
+| Get Components by type           | `type=ORGANISM` or `type=MOLECULE` or `type=ATOM` |
+| Get Pages by pageType            | `pageType=form` or `pageType=list`               |
+| Get by modality                  | `modality=web` or `modality=mobile`              |
+| Combine filters                  | `pageId=page-123&type=ORGANISM`                  |
+| With pagination                  | `page=1&limit=50&sortName=name&sortOrder=asc`    |
+
+**Use when:** You need to query nodes by specific relationships or properties.
+
 ## Guard
 
 Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
@@ -99,13 +156,40 @@ Processing scenario 2 of 5: "Appointment Booking"
 
 ### 2a. Check Direct Mappings
 
-Call `Design_Graph_Search` with relevant terms from fetched functional nodes.
+Query existing design nodes to find what's already mapped from functional graph.
+
+**Step 2a.1: Fetch all existing design nodes**
+
+```
+Call Get_all_Design_By_Label for each type:
+  - uuid: projectUuid
+  - label: "UserJourney"  → Get all user journeys
+  - label: "Flow"         → Get all flows
+  - label: "Page"         → Get all pages
+  - label: "Component"    → Get all components
+```
+
+**Step 2a.2: Check for existing mappings**
 
 For each functional node, check if a design node already maps to it:
 
-- UserJourney with matching `scenarioId`
-- Flow/Page with matching `stepIds[]`
-- Component with matching `actionIds[]`
+| Functional Node | Design Node   | Check Field    | Query Example                                    |
+| --------------- | ------------- | -------------- | ------------------------------------------------ |
+| Scenario        | UserJourney   | `scenarioId`   | Search results for matching scenarioId           |
+| Step            | Flow          | `stepIds[]`    | `Get_Design_Nodes_by_Ids` with `label=Flow`      |
+| Step            | Page          | `stepIds[]`    | `Get_Design_Nodes_by_Ids` with `label=Page`      |
+| Action          | Component     | `actionIds[]`  | `Get_Design_Nodes_by_Ids` with `label=Component` |
+
+**Step 2a.3: Use semantic search for fuzzy matching**
+
+```
+Call Design_Graph_Search with:
+  - uuid: projectUuid
+  - query: "<scenario/step/action name>"
+  - includeLabels: ["UserJourney", "Flow", "Page", "Component"]
+```
+
+This helps find design nodes that may be related but not directly mapped.
 
 ### 2b. Extract Personas/Roles
 
@@ -150,9 +234,40 @@ Result: Create ONE TextInputField component, reuse for all three.
 **Build Registry:**
 
 1. Group actions by `designSystemRef` pattern (see Step 3c table)
-2. For each unique pattern, check if component already exists:
-   - Call `Design_Graph_Search` with `designSystemRef` value
-3. Build a map: `{ designSystemRef → existingComponentId or "CREATE_NEW" }`
+
+2. Fetch all existing reusable components:
+
+   ```
+   Call Get_Design_Nodes_by_Ids with:
+     - uuid: projectUuid
+     - label: "Component"
+     - queryParams: "type=ATOM&page=1&limit=100"
+
+   Call Get_Design_Nodes_by_Ids with:
+     - uuid: projectUuid
+     - label: "Component"
+     - queryParams: "type=MOLECULE&page=1&limit=100"
+   ```
+
+3. For each unique `designSystemRef` pattern, search for existing component:
+
+   ```
+   Call Design_Graph_Search with:
+     - uuid: projectUuid
+     - query: "<designSystemRef value>" (e.g., "TextInput", "Button")
+     - includeLabels: ["Component"]
+   ```
+
+4. Build a map: `{ designSystemRef → existingComponentId or "CREATE_NEW" }`
+
+**Example Registry Result:**
+
+| designSystemRef | Existing Component ID | Action         |
+| --------------- | --------------------- | -------------- |
+| TextInput       | comp-abc-123          | REUSE          |
+| Button          | comp-def-456          | REUSE          |
+| DatePicker      | null                  | CREATE_NEW     |
+| Select          | comp-ghi-789          | REUSE          |
 
 ### 2d. For existing mappings, ask user:
 
@@ -373,24 +488,51 @@ Page
 
 **Step 1: Check if reusable component exists**
 
-Call `Design_Graph_Search` with:
+Option A - Use semantic search:
 
-- `query`: designSystemRef value (e.g., "TextInput")
-- Filter by `reusability: "GLOBAL"` or `"DOMAIN"`
+```
+Call Design_Graph_Search with:
+  - uuid: projectUuid
+  - query: "<designSystemRef value>" (e.g., "TextInput", "Button")
+  - includeLabels: ["Component"]
+```
+
+Option B - Query by component type (more precise):
+
+```
+Call Get_Design_Nodes_by_Ids with:
+  - uuid: projectUuid
+  - label: "Component"
+  - queryParams: "type=ATOM" or "type=MOLECULE"
+```
+
+Then filter results locally by `designSystemRef` and `reusability: "GLOBAL"` or `"DOMAIN"`.
+
+Option C - Get components used in a specific page:
+
+```
+Call Get_Design_Nodes_by_Ids with:
+  - uuid: projectUuid
+  - label: "Component"
+  - queryParams: "pageId=<page-uuid>"
+```
 
 **Step 2a: If EXISTS → Update existing component**
 
-Call `Update_Design_Node` to add actionId:
+Call `Update_Design_Node` to add actionId and update usedIn:
 
 ```json
 {
   "uuid": "<projectUuid>",
   "nodeId": "<existing component UUID>",
   "data": {
-    "actionIds": ["<existing actionIds>", "<new action UUID>"]
+    "actionIds": ["<existing actionIds>", "<new action UUID>"],
+    "usedIn": ["<existing usedIn>", "<new parent page/component name>"]
   }
 }
 ```
+
+> **Note:** Always append to existing arrays, don't replace them. First fetch the current component using `Get_Design_Nodes_by_Ids` with `id=<component-uuid>` to get current values.
 
 **Step 2b: If NOT EXISTS → Create new reusable component**
 
@@ -411,6 +553,7 @@ Call `Create_Design_Node`:
     "states": ["default", "focused", "error", "disabled", "loading"],
     "layoutType": "flex",
     "slots": [],
+    "usedIn": ["<parent component/page names that use this>"],
     "pageId": "<null for GLOBAL, Page UUID for PAGE-level>",
     "parentComponentId": "<parent ORGANISM UUID if nested>",
     "actionIds": ["<action UUID>"]
@@ -420,12 +563,13 @@ Call `Create_Design_Node`:
 
 **Key differences for reusable components:**
 
-| Field         | GLOBAL/DOMAIN (Reusable)      | PAGE (Instance)                     |
-| ------------- | ----------------------------- | ----------------------------------- |
-| `name`        | Generic: "TextInputField"     | Specific: "PatientNameInput"        |
-| `pageId`      | `null` (not tied to page)     | Page UUID                           |
-| `reusability` | "GLOBAL" or "DOMAIN"          | "PAGE"                              |
-| `props`       | Schema: `{"label": "string"}` | Values: `{"label": "Patient Name"}` |
+| Field         | GLOBAL/DOMAIN (Reusable)                           | PAGE (Instance)                     |
+| ------------- | -------------------------------------------------- | ----------------------------------- |
+| `name`        | Generic: "TextInputField"                          | Specific: "PatientNameInput"        |
+| `pageId`      | `null` (not tied to page)                          | Page UUID                           |
+| `reusability` | "GLOBAL" or "DOMAIN"                               | "PAGE"                              |
+| `props`       | Schema: `{"label": "string"}`                      | Values: `{"label": "Patient Name"}` |
+| `usedIn`      | Array of all component/page names using this       | Usually empty or single parent      |
 
 **Reusability and Modality:**
 
@@ -473,12 +617,22 @@ Create TEMPLATE components for consistent page layouts.
     "reusability": "GLOBAL",
     "layoutType": "flex",
     "slots": ["header", "content", "footer", "actions"],
+    "usedIn": ["<page names using this template>"],
     "pageId": "<Page UUID where applied>"
   }
 }
 ```
 
 **Template Reuse:** Check if template exists before creating. Templates are GLOBAL reusable.
+
+```
+Call Get_Design_Nodes_by_Ids with:
+  - uuid: projectUuid
+  - label: "Component"
+  - queryParams: "type=TEMPLATE"
+```
+
+Then check if a template with the same `name` or `pageType` pattern already exists.
 
 ### 3e. Order Preservation
 
@@ -588,6 +742,35 @@ UserJourney
 | Component   | Component  | `parentComponentId` in Component |
 
 > **Note:** The backend automatically creates CONTAINS relationships when these ID fields are provided.
+
+**Querying Hierarchical Relationships:**
+
+To get child nodes of a parent, use `Get_Design_Nodes_by_Ids`:
+
+| Parent       | Child      | Query                                                 |
+| ------------ | ---------- | ----------------------------------------------------- |
+| UserJourney  | Flows      | `label=Flow`, `queryParams=userJourneyId=<uj-id>`     |
+| Flow         | Pages      | `label=Page`, `queryParams=flowId=<flow-id>`          |
+| Page         | Components | `label=Component`, `queryParams=pageId=<page-id>`     |
+| Component    | Children   | `label=Component`, `queryParams=parentComponentId=<comp-id>` |
+
+**Example: Get all components under a page**
+
+```
+Call Get_Design_Nodes_by_Ids with:
+  - uuid: projectUuid
+  - label: "Component"
+  - queryParams: "pageId=page-123&page=1&limit=100"
+```
+
+**Example: Get all ORGANISM components under a page**
+
+```
+Call Get_Design_Nodes_by_Ids with:
+  - uuid: projectUuid
+  - label: "Component"
+  - queryParams: "pageId=page-123&type=ORGANISM"
+```
 
 ### 5d. Error Handling
 
