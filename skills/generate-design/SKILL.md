@@ -13,7 +13,7 @@ Consult `references/guide.md` for detailed mapping rules, component types, and p
 
 ## Design Graph Query Tools
 
-Three tools are available for querying design graph nodes:
+Three tools are available for querying design graph nodes (see also Mutation Tools below):
 
 ### 1. Get_all_Design_By_Label
 
@@ -68,6 +68,157 @@ Query design nodes with various filters. This is the most flexible query tool.
 
 **Use when:** You need to query nodes by specific relationships or properties.
 
+## Design Graph Mutation Tools
+
+### 4. Delete_Design_Node
+
+Deletes a design node from the graph.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
+- `apiKey` (required): API key from .breeze.json
+- `nodeId` (required): The ID of the node to delete
+
+**Use when:** You need to remove a design node from the graph.
+
+**Confirmation Required:** Before deleting any node, ALWAYS ask the user for confirmation with:
+
+1. **Node details:** Show the node name, type, and ID being deleted
+2. **Reason:** Explain why this deletion is being performed
+3. **Impact:** List any child nodes that will be orphaned
+
+**Confirmation Format:**
+
+```
+⚠️ Delete Confirmation Required
+
+Node to delete:
+  - Name: <node name>
+  - Type: <UserJourney|Flow|Page|Component>
+  - ID: <nodeId>
+
+Reason for deletion:
+  <explain why this node should be deleted>
+
+Impact:
+  - <list orphaned children if any, or "No child nodes affected">
+
+Proceed with deletion? (Yes/No)
+```
+
+**Example:**
+
+```
+⚠️ Delete Confirmation Required
+
+Node to delete:
+  - Name: PatientRegistrationForm
+  - Type: Component
+  - ID: comp-abc-123
+
+Reason for deletion:
+  This component is a duplicate of the existing PatientForm component
+  and was created in error during the last design generation.
+
+Impact:
+  - 3 child ATOM components will be orphaned
+
+Proceed with deletion? (Yes/No)
+```
+
+After user confirms, call Delete_Design_Node with:
+
+```
+Call Delete_Design_Node with:
+  - uuid: projectUuid
+  - label: "Component"
+  - apiKey: apiKey
+  - nodeId: "comp-abc-123"
+```
+
+**Warning:** Deleting a node may affect related nodes. Consider the following before deletion:
+
+| Node Type   | Impact of Deletion                                      |
+| ----------- | ------------------------------------------------------- |
+| UserJourney | Orphans child Flows                                     |
+| Flow        | Orphans child Pages                                     |
+| Page        | Orphans child Components                                |
+| Component   | Orphans child Components (if ORGANISM with children)    |
+
+### Cascade Delete Option
+
+When deleting a parent node, ask user whether to cascade delete children.
+
+> **Important:** Components are NEVER deleted during cascade delete. Components may be reusable (GLOBAL/DOMAIN) and shared across multiple Pages/Flows. Only UserJourney, Flow, and Page nodes are cascade deleted.
+
+**Cascade Delete Confirmation:**
+
+```
+⚠️ Cascade Delete Option
+
+Node to delete:
+  - Name: Patient Registration Journey
+  - Type: UserJourney
+  - ID: uj-abc-123
+
+This node has children:
+  - 3 Flows
+  - 8 Pages
+  - 24 Components (will be preserved, not deleted)
+
+Delete options:
+  1. Delete node only (orphan children)
+  2. Cascade delete (delete node + Flows + Pages only)
+  3. Cancel
+
+Select option: (1/2/3)
+```
+
+**Cascade Delete Implementation:**
+
+If user selects cascade delete, delete in reverse hierarchical order (children first, excluding Components):
+
+```
+1. Query child nodes (excluding Components):
+   - Get Flows: queryParams="userJourneyId=<uj-id>"
+   - Get Pages: queryParams="flowId=<flow-id>" (for each Flow)
+
+2. Delete in order (bottom-up):
+   a. Delete all Pages
+   b. Delete all Flows
+   c. Delete the parent node (UserJourney)
+
+   Note: Components are preserved and become orphaned (pageId no longer valid)
+
+3. Show progress:
+   Cascade deleting: Patient Registration Journey
+     ├── Preserving 24 Components (not deleted)
+     ├── Deleting 8 Pages... Done
+     ├── Deleting 3 Flows... Done
+     └── Deleting UserJourney... Done
+
+   Total deleted: 12 nodes (Components preserved)
+```
+
+**Cascade Delete by Node Type:**
+
+| Node Type   | Cascade Deletes          | Preserved (Not Deleted)   |
+| ----------- | ------------------------ | ------------------------- |
+| UserJourney | Flows → Pages            | All Components            |
+| Flow        | Pages                    | All Components            |
+| Page        | (none)                   | All Components            |
+| Component   | (not supported)          | -                         |
+
+**Why Components Are Preserved:**
+
+| Reason                | Explanation                                           |
+| --------------------- | ----------------------------------------------------- |
+| Reusability           | GLOBAL/DOMAIN components may be used by other Pages   |
+| Action mappings       | Components have `actionIds[]` linking to functional graph |
+| Manual cleanup        | User should explicitly delete unused components       |
+
 ## Guard
 
 Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
@@ -90,22 +241,69 @@ Ask user which modalities to generate design nodes for:
 
 - Allow multiple selection
 - Default: `web` if user doesn't specify
-- Store selected modalities for use in Step 3
+- Store selected modalities for use in Step 4
 
 > **Note:** For each selected modality, separate Flow and Page nodes will be created from the same functional graph. This enables multi-platform design from a single functional specification.
 
-## Step 1: Fetch Functional Graph Data
+## Step 1: Check Existing Design Graph
 
-Fetch all scenarios, steps, and actions for the project using pagination:
+Before fetching functional data, verify if a design graph already exists for this project.
 
-### 1a. Pagination Loop
+### 1a. Query for Existing Design Graph
+
+```
+Call Get_Design_Nodes_by_Ids with:
+  - uuid: projectUuid
+  - label: "UserJourney"
+  - queryParams: "limit=1"
+```
+
+### 1b. Evaluate Result & Set Fetch Mode
+
+| Result | Status | Fetch Mode for Step 2 |
+|--------|--------|----------------------|
+| Empty/No results | No design graph exists | Fetch ALL scenarios (no filter) |
+| Returns 1+ UserJourney | Design graph exists | Fetch ONLY unprocessed scenarios (with filter) |
+
+**Store the fetch mode** for use in Step 2:
+
+```
+IF UserJourney exists:
+    fetchMode = "INCREMENTAL"
+    Show: "Existing design graph found. Will only process scenarios without design."
+ELSE:
+    fetchMode = "FULL"
+    Show: "No existing design graph. Will process all scenarios."
+```
+
+> **Note:** This approach automatically handles incremental design generation - only scenarios that haven't been converted to design nodes will be processed, preserving existing work.
+
+## Step 2: Fetch Functional Graph Data
+
+Fetch scenarios based on the fetch mode determined in Step 1.
+
+### 2a. Pagination Loop with Conditional Filter
 
 ```
 page = 1
 allScenarios = []
 
 LOOP:
-    scenario = Get_scenarios_by_uuid(uuid, limit=1, page)
+    IF fetchMode == "INCREMENTAL":
+        # Fetch only scenarios without design generated
+        scenario = Get_scenarios_by_uuid(
+            uuid: projectUuid,
+            limit: 1,
+            page: page,
+            filters: "filters[isDesignGenerated][$eq]=false"
+        )
+    ELSE:
+        # Fetch all scenarios (no filter)
+        scenario = Get_scenarios_by_uuid(
+            uuid: projectUuid,
+            limit: 1,
+            page: page
+        )
 
     IF scenario is empty:
         BREAK (no more scenarios)
@@ -118,10 +316,29 @@ LOOP:
 
 END LOOP
 
-Show: "Total scenarios to process: {allScenarios.length}"
+IF fetchMode == "INCREMENTAL":
+    Show: "Found {allScenarios.length} scenarios without design (incremental mode)"
+ELSE:
+    Show: "Total scenarios to process: {allScenarios.length}"
+
+IF allScenarios.length == 0:
+    Show: "All scenarios already have design generated. Nothing to process."
+    Exit skill
 ```
 
-### 1b. Fetch Scenario Details
+### Filter Reference
+
+| Fetch Mode | Filter | Description |
+|------------|--------|-------------|
+| `FULL` | None | Fetch all scenarios for initial design generation |
+| `INCREMENTAL` | `filters[isDesignGenerated][$eq]=false` | Fetch only scenarios without design |
+
+**Additional Available Filters:**
+- `filters[isDesignGenerated][$eq]=true` - scenarios WITH design generated
+- `filters[name][$contains]=<text>` - filter by scenario name
+- `filters[status][$eq]=<status>` - filter by scenario status
+
+### 2b. Fetch Scenario Details
 
 For EACH scenario in allScenarios:
 
@@ -136,9 +353,7 @@ For EACH scenario in allScenarios:
 
    This returns the complete hierarchy: Scenario → Steps → Actions.
 
-3. Extract `allowedRoles` from the Persona associated with this scenario's Outcome.
-
-### 1c. Progress Indication
+### 2c. Progress Indication
 
 For large functional graphs, show progress:
 
@@ -152,13 +367,13 @@ Processing scenario 2 of 5: "Appointment Booking"
   ...
 ```
 
-## Step 2: Check Existing Design Coverage & Reusable Components
+## Step 3: Check Existing Design Coverage & Reusable Components
 
-### 2a. Check Direct Mappings
+### 3a. Check Direct Mappings
 
 Query existing design nodes to find what's already mapped from functional graph.
 
-**Step 2a.1: Fetch all existing design nodes**
+**Step 3a.1: Fetch all existing design nodes**
 
 ```
 Call Get_all_Design_By_Label for each type:
@@ -169,7 +384,7 @@ Call Get_all_Design_By_Label for each type:
   - label: "Component"    → Get all components
 ```
 
-**Step 2a.2: Check for existing mappings**
+**Step 3a.2: Check for existing mappings**
 
 For each functional node, check if a design node already maps to it:
 
@@ -180,7 +395,7 @@ For each functional node, check if a design node already maps to it:
 | Step            | Page          | `stepIds[]`    | `Get_Design_Nodes_by_Ids` with `label=Page`      |
 | Action          | Component     | `actionIds[]`  | `Get_Design_Nodes_by_Ids` with `label=Component` |
 
-**Step 2a.3: Use semantic search for fuzzy matching**
+**Step 3a.3: Use semantic search for fuzzy matching**
 
 ```
 Call Design_Graph_Search with:
@@ -191,24 +406,7 @@ Call Design_Graph_Search with:
 
 This helps find design nodes that may be related but not directly mapped.
 
-### 2b. Extract Personas/Roles
-
-The functional graph has: Persona → Outcome → Scenario → Step → Action
-
-Extract `allowedRoles` for Pages from the Persona associated with each Scenario:
-
-```
-For each Scenario:
-    1. Get parent Outcome (Scenario belongs to Outcome)
-    2. Get parent Persona (Outcome belongs to Persona)
-    3. Store: scenarioId → Persona.name
-
-Use Persona.name as allowedRoles[] when creating Pages.
-```
-
-**API Call:** Use `Get_all_personas` or traverse from Scenario to get Persona info.
-
-### 2c. Build Reusable Component Registry
+### 3b. Build Reusable Component Registry
 
 Analyze ALL actions and identify reusable patterns:
 
@@ -233,7 +431,7 @@ Result: Create ONE TextInputField component, reuse for all three.
 
 **Build Registry:**
 
-1. Group actions by `designSystemRef` pattern (see Step 3c table)
+1. Group actions by `designSystemRef` pattern (see Step 3b table)
 
 2. Fetch all existing reusable components:
 
@@ -269,7 +467,7 @@ Result: Create ONE TextInputField component, reuse for all three.
 | DatePicker      | null                  | CREATE_NEW     |
 | Select          | comp-ghi-789          | REUSE          |
 
-### 2d. For existing mappings, ask user:
+### 3c. For existing mappings, ask user:
 
 | Option      | Action                                         |
 | ----------- | ---------------------------------------------- |
@@ -279,11 +477,11 @@ Result: Create ONE TextInputField component, reuse for all three.
 
 Present unmapped functional nodes as gaps to be filled.
 
-## Step 3: Generate Design Graph Nodes
+## Step 4: Generate Design Graph Nodes
 
-For each functional node without design coverage, prepare design nodes:
+For each functional node without design coverage (identified in Step 3), prepare design nodes:
 
-### 3a. Scenario → UserJourney
+### 4a. Scenario → UserJourney
 
 Call `Create_Design_Node` with:
 
@@ -300,7 +498,7 @@ Call `Create_Design_Node` with:
 }
 ```
 
-### 3b. Step → Flow OR Page (EXCLUSIVE - choose one)
+### 4b. Step → Flow OR Page (EXCLUSIVE - choose one)
 
 > **Important:** A Step maps to Flow OR Page, never both.
 >
@@ -354,7 +552,6 @@ Example for 2 modalities (web + mobile):
     "pageType": "<form|list|detail|dashboard|modal|search|wizard|report>",
     "modality": "<selected modality from Step 0>",
     "requiresAuth": true,
-    "allowedRoles": ["<persona from functional graph>"],
     "flowId": "<parent Flow UUID for this modality>",
     "stepIds": ["<step UUID>"]
   }
@@ -379,7 +576,7 @@ Example for 2 modalities (web + mobile):
 | Multi-step process    | `wizard`    | "Complete Registration"      |
 | Report generation     | `report`    | "Generate Discharge Summary" |
 
-### 3c. Action → Page OR Component (EXCLUSIVE - choose one)
+### 4c. Action → Page OR Component (EXCLUSIVE - choose one)
 
 > **Important:** An Action maps to Page OR Component, never both.
 
@@ -391,7 +588,7 @@ Example for 2 modalities (web + mobile):
 | "View Dashboard", "Open Settings"  | "Enter Name", "Submit Form"           |
 | Action represents entire screen    | Action represents specific UI element |
 
-**For Action → Page**, add `actionIds` to the Page payload (see 3b).
+**For Action → Page**, add `actionIds` to the Page payload (see 4b).
 
 **For Action → Component**, follow the REUSE-FIRST approach:
 
@@ -402,7 +599,7 @@ For each Action:
     │
     ├─► 1. Determine designSystemRef from action content
     │
-    ├─► 2. Check Registry (from Step 2b): Does component exist?
+    ├─► 2. Check Registry (from Step 3b): Does component exist?
     │       │
     │       ├─► YES (existing component found)
     │       │       │
@@ -486,7 +683,7 @@ Page
 
 ### Creating Components (Reuse-Aware)
 
-**Step 1: Check if reusable component exists**
+**Check if reusable component exists**
 
 Option A - Use semantic search:
 
@@ -517,13 +714,15 @@ Call Get_Design_Nodes_by_Ids with:
   - queryParams: "pageId=<page-uuid>"
 ```
 
-**Step 2a: If EXISTS → Update existing component**
+**If EXISTS → Update existing component**
 
 Call `Update_Design_Node` to add actionId and update usedIn:
 
 ```json
 {
-  "uuid": "<projectUuid>",
+  "uuid": "<projectUuid from .breeze.json>",
+  "apiKey": "<apiKey from .breeze.json>",
+  "label": "Component",
   "nodeId": "<existing component UUID>",
   "data": {
     "actionIds": ["<existing actionIds>", "<new action UUID>"],
@@ -534,7 +733,7 @@ Call `Update_Design_Node` to add actionId and update usedIn:
 
 > **Note:** Always append to existing arrays, don't replace them. First fetch the current component using `Get_Design_Nodes_by_Ids` with `id=<component-uuid>` to get current values.
 
-**Step 2b: If NOT EXISTS → Create new reusable component**
+**If NOT EXISTS → Create new reusable component**
 
 Call `Create_Design_Node`:
 
@@ -588,7 +787,7 @@ When multiple related actions exist under a Step:
 3. Set `parentComponentId` to link children to ORGANISM
 4. Repeat for each selected modality
 
-### 3d. Template Generation (Optional)
+### 4d. Template Generation (Optional)
 
 Create TEMPLATE components for consistent page layouts.
 
@@ -634,7 +833,7 @@ Call Get_Design_Nodes_by_Ids with:
 
 Then check if a template with the same `name` or `pageType` pattern already exists.
 
-### 3e. Order Preservation
+### 4e. Order Preservation
 
 Preserve the `order` field from functional graph:
 
@@ -655,7 +854,7 @@ Preserve the `order` field from functional graph:
 
 This ensures design nodes maintain the same sequence as functional nodes.
 
-## Step 4: User Confirmation
+## Step 5: User Confirmation
 
 Present the design nodes in two tables:
 
@@ -687,29 +886,31 @@ Allow user to:
 - Override reuse decision (create new instead of reusing)
 - Filter by modality
 
-## Step 5: Create Design Nodes
+## Step 6: Create Design Nodes
 
-### 5a. Create NEW nodes
+### 6a. Create NEW nodes
 
 For each confirmed NEW node, call `Create_Design_Node` with:
 
 - `uuid`: projectUuid from .breeze.json
-- Node data as prepared in Step 3
+- Node data as prepared in Step 4
 
 **Creation order** (to establish relationships):
 
 1. GLOBAL/DOMAIN reusable components first (no pageId dependency)
 2. UserJourney nodes (references Scenario)
 3. Flow/Page nodes (references Steps, get UUIDs for components)
-4. PAGE-level components last (need pageId from step 3)
+4. PAGE-level components last (need pageId from step above)
 
-### 5b. Link actions to EXISTING reusable components
+### 6b. Link actions to EXISTING reusable components
 
 For each action reusing an existing component, call `Update_Design_Node`:
 
 ```json
 {
-  "uuid": "<projectUuid>",
+  "uuid": "<projectUuid from .breeze.json>",
+  "apiKey": "<apiKey from .breeze.json>",
+  "label": "Component",
   "nodeId": "<existing component UUID>",
   "data": {
     "actionIds": ["<existing actionIds...>", "<new action UUID>"]
@@ -719,7 +920,7 @@ For each action reusing an existing component, call `Update_Design_Node`:
 
 This links the functional action to the existing design component via `IMPLEMENTED_BY` relationship.
 
-### 5c. CONTAINS Relationships (Design Graph Hierarchy)
+### 6c. CONTAINS Relationships (Design Graph Hierarchy)
 
 The design graph has internal CONTAINS relationships for hierarchy:
 
@@ -772,7 +973,7 @@ Call Get_Design_Nodes_by_Ids with:
   - queryParams: "pageId=page-123&type=ORGANISM"
 ```
 
-### 5d. Error Handling
+### 6d. Error Handling
 
 Handle failures gracefully during creation:
 
@@ -808,7 +1009,45 @@ The backend automatically creates:
 - `IMPLEMENTED_BY` relationships: Action→Component
 - `CONTAINS` relationships: Via parent ID fields (userJourneyId, flowId, pageId, parentComponentId)
 
-## Step 6: Output Summary
+### 6e. Mark Scenarios as Processed
+
+After successfully creating all design nodes for a scenario, mark it as processed to enable incremental mode for future runs.
+
+**For EACH successfully processed scenario**, call `Update_Functional_Node`:
+
+```json
+{
+  "uuid": "<projectUuid from .breeze.json>",
+  "apiKey": "<apiKey from .breeze.json>",
+  "label": "Scenario",
+  "id": "<scenario UUID>",
+  "data": {
+    "isDesignGenerated": true
+  }
+}
+```
+
+**When to mark as processed:**
+
+| Condition | Action |
+|-----------|--------|
+| All design nodes created successfully | Mark `isDesignGenerated: true` |
+| Partial failure (some nodes failed) | Do NOT mark - allows retry |
+| UserJourney creation failed | Do NOT mark - critical failure |
+
+**Progress indication:**
+
+```
+Marking scenario as processed: "Patient Registration"
+  └── Updated isDesignGenerated = true
+
+Marking scenario as processed: "Appointment Booking"
+  └── Updated isDesignGenerated = true
+```
+
+> **Note:** This step is critical for incremental mode (Step 1b). Without it, scenarios will be re-processed on every run.
+
+## Step 7: Output Summary
 
 Present results:
 
