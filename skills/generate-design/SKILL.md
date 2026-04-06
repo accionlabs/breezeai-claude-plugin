@@ -1,5 +1,5 @@
 ---
-name: analyze-design
+name: generate-design
 description: >
   Generate design graph nodes (UserJourney, Flow, Page, Component) from
   functional graph. Maps Scenario→UserJourney, Step→Flow/Page, Action→Component.
@@ -52,19 +52,19 @@ Query design nodes with various filters. This is the most flexible query tool.
 
 **Query Parameter Examples:**
 
-| Use Case                         | Query Params                                     |
-| -------------------------------- | ------------------------------------------------ |
-| Get by specific ID               | `id=uj-123`                                      |
-| Get by multiple IDs              | `id=uj-123&id=uj-456`                            |
-| Get Flows by UserJourney         | `userJourneyId=uj-123`                           |
-| Get Pages by Flow                | `flowId=flow-123`                                |
-| Get Components by Page           | `pageId=page-123`                                |
-| Get Components by parent         | `parentComponentId=comp-123`                     |
-| Get Components by type           | `type=ORGANISM` or `type=MOLECULE` or `type=ATOM` |
-| Get Pages by pageType            | `pageType=form` or `pageType=list`               |
-| Get by modality                  | `modality=web` or `modality=mobile`              |
-| Combine filters                  | `pageId=page-123&type=ORGANISM`                  |
-| With pagination                  | `page=1&limit=50&sortName=name&sortOrder=asc`    |
+| Use Case                 | Query Params                                      |
+| ------------------------ | ------------------------------------------------- |
+| Get by specific ID       | `id=uj-123`                                       |
+| Get by multiple IDs      | `id=uj-123&id=uj-456`                             |
+| Get Flows by UserJourney | `userJourneyId=uj-123`                            |
+| Get Pages by Flow        | `flowId=flow-123`                                 |
+| Get Components by Page   | `pageId=page-123`                                 |
+| Get Components by parent | `parentComponentId=comp-123`                      |
+| Get Components by type   | `type=ORGANISM` or `type=MOLECULE` or `type=ATOM` |
+| Get Pages by pageType    | `pageType=form` or `pageType=list`                |
+| Get by modality          | `modality=web` or `modality=mobile`               |
+| Combine filters          | `pageId=page-123&type=ORGANISM`                   |
+| With pagination          | `page=1&limit=50&sortName=name&sortOrder=asc`     |
 
 **Use when:** You need to query nodes by specific relationships or properties.
 
@@ -140,12 +140,12 @@ Call Delete_Design_Node with:
 
 **Warning:** Deleting a node may affect related nodes. Consider the following before deletion:
 
-| Node Type   | Impact of Deletion                                      |
-| ----------- | ------------------------------------------------------- |
-| UserJourney | Orphans child Flows                                     |
-| Flow        | Orphans child Pages                                     |
-| Page        | Orphans child Components                                |
-| Component   | Orphans child Components (if ORGANISM with children)    |
+| Node Type   | Impact of Deletion                                   |
+| ----------- | ---------------------------------------------------- |
+| UserJourney | Orphans child Flows                                  |
+| Flow        | Orphans child Pages                                  |
+| Page        | Orphans child Components                             |
+| Component   | Orphans child Components (if ORGANISM with children) |
 
 ### Cascade Delete Option
 
@@ -204,20 +204,20 @@ If user selects cascade delete, delete in reverse hierarchical order (children f
 
 **Cascade Delete by Node Type:**
 
-| Node Type   | Cascade Deletes          | Preserved (Not Deleted)   |
-| ----------- | ------------------------ | ------------------------- |
-| UserJourney | Flows → Pages            | All Components            |
-| Flow        | Pages                    | All Components            |
-| Page        | (none)                   | All Components            |
-| Component   | (not supported)          | -                         |
+| Node Type   | Cascade Deletes | Preserved (Not Deleted) |
+| ----------- | --------------- | ----------------------- |
+| UserJourney | Flows → Pages   | All Components          |
+| Flow        | Pages           | All Components          |
+| Page        | (none)          | All Components          |
+| Component   | (not supported) | -                       |
 
 **Why Components Are Preserved:**
 
-| Reason                | Explanation                                           |
-| --------------------- | ----------------------------------------------------- |
-| Reusability           | GLOBAL/DOMAIN components may be used by other Pages   |
-| Action mappings       | Components have `actionIds[]` linking to functional graph |
-| Manual cleanup        | User should explicitly delete unused components       |
+| Reason          | Explanation                                               |
+| --------------- | --------------------------------------------------------- |
+| Reusability     | GLOBAL/DOMAIN components may be used by other Pages       |
+| Action mappings | Components have `actionIds[]` linking to functional graph |
+| Manual cleanup  | User should explicitly delete unused components           |
 
 ## Guard
 
@@ -260,10 +260,10 @@ Call Get_Design_Nodes_by_Ids with:
 
 ### 1b. Evaluate Result & Set Fetch Mode
 
-| Result | Status | Fetch Mode for Step 2 |
-|--------|--------|----------------------|
-| Empty/No results | No design graph exists | Fetch ALL scenarios (no filter) |
-| Returns 1+ UserJourney | Design graph exists | Fetch ONLY unprocessed scenarios (with filter) |
+| Result                 | Status                 | Fetch Mode for Step 2                          |
+| ---------------------- | ---------------------- | ---------------------------------------------- |
+| Empty/No results       | No design graph exists | Fetch ALL scenarios (no filter)                |
+| Returns 1+ UserJourney | Design graph exists    | Fetch ONLY unprocessed scenarios (with filter) |
 
 **Store the fetch mode** for use in Step 2:
 
@@ -328,12 +328,13 @@ IF allScenarios.length == 0:
 
 ### Filter Reference
 
-| Fetch Mode | Filter | Description |
-|------------|--------|-------------|
-| `FULL` | None | Fetch all scenarios for initial design generation |
-| `INCREMENTAL` | `filters[isDesignGenerated][$eq]=false` | Fetch only scenarios without design |
+| Fetch Mode    | Filter                                  | Description                                       |
+| ------------- | --------------------------------------- | ------------------------------------------------- |
+| `FULL`        | None                                    | Fetch all scenarios for initial design generation |
+| `INCREMENTAL` | `filters[isDesignGenerated][$eq]=false` | Fetch only scenarios without design               |
 
 **Additional Available Filters:**
+
 - `filters[isDesignGenerated][$eq]=true` - scenarios WITH design generated
 - `filters[name][$contains]=<text>` - filter by scenario name
 - `filters[status][$eq]=<status>` - filter by scenario status
@@ -388,12 +389,12 @@ Call Get_all_Design_By_Label for each type:
 
 For each functional node, check if a design node already maps to it:
 
-| Functional Node | Design Node   | Check Field    | Query Example                                    |
-| --------------- | ------------- | -------------- | ------------------------------------------------ |
-| Scenario        | UserJourney   | `scenarioId`   | Search results for matching scenarioId           |
-| Step            | Flow          | `stepIds[]`    | `Get_Design_Nodes_by_Ids` with `label=Flow`      |
-| Step            | Page          | `stepIds[]`    | `Get_Design_Nodes_by_Ids` with `label=Page`      |
-| Action          | Component     | `actionIds[]`  | `Get_Design_Nodes_by_Ids` with `label=Component` |
+| Functional Node | Design Node | Check Field   | Query Example                                    |
+| --------------- | ----------- | ------------- | ------------------------------------------------ |
+| Scenario        | UserJourney | `scenarioId`  | Search results for matching scenarioId           |
+| Step            | Flow        | `stepIds[]`   | `Get_Design_Nodes_by_Ids` with `label=Flow`      |
+| Step            | Page        | `stepIds[]`   | `Get_Design_Nodes_by_Ids` with `label=Page`      |
+| Action          | Component   | `actionIds[]` | `Get_Design_Nodes_by_Ids` with `label=Component` |
 
 **Step 3a.3: Use semantic search for fuzzy matching**
 
@@ -460,12 +461,12 @@ Result: Create ONE TextInputField component, reuse for all three.
 
 **Example Registry Result:**
 
-| designSystemRef | Existing Component ID | Action         |
-| --------------- | --------------------- | -------------- |
-| TextInput       | comp-abc-123          | REUSE          |
-| Button          | comp-def-456          | REUSE          |
-| DatePicker      | null                  | CREATE_NEW     |
-| Select          | comp-ghi-789          | REUSE          |
+| designSystemRef | Existing Component ID | Action     |
+| --------------- | --------------------- | ---------- |
+| TextInput       | comp-abc-123          | REUSE      |
+| Button          | comp-def-456          | REUSE      |
+| DatePicker      | null                  | CREATE_NEW |
+| Select          | comp-ghi-789          | REUSE      |
 
 ### 3c. For existing mappings, ask user:
 
@@ -762,13 +763,13 @@ Call `Create_Design_Node`:
 
 **Key differences for reusable components:**
 
-| Field         | GLOBAL/DOMAIN (Reusable)                           | PAGE (Instance)                     |
-| ------------- | -------------------------------------------------- | ----------------------------------- |
-| `name`        | Generic: "TextInputField"                          | Specific: "PatientNameInput"        |
-| `pageId`      | `null` (not tied to page)                          | Page UUID                           |
-| `reusability` | "GLOBAL" or "DOMAIN"                               | "PAGE"                              |
-| `props`       | Schema: `{"label": "string"}`                      | Values: `{"label": "Patient Name"}` |
-| `usedIn`      | Array of all component/page names using this       | Usually empty or single parent      |
+| Field         | GLOBAL/DOMAIN (Reusable)                     | PAGE (Instance)                     |
+| ------------- | -------------------------------------------- | ----------------------------------- |
+| `name`        | Generic: "TextInputField"                    | Specific: "PatientNameInput"        |
+| `pageId`      | `null` (not tied to page)                    | Page UUID                           |
+| `reusability` | "GLOBAL" or "DOMAIN"                         | "PAGE"                              |
+| `props`       | Schema: `{"label": "string"}`                | Values: `{"label": "Patient Name"}` |
+| `usedIn`      | Array of all component/page names using this | Usually empty or single parent      |
 
 **Reusability and Modality:**
 
@@ -948,12 +949,12 @@ UserJourney
 
 To get child nodes of a parent, use `Get_Design_Nodes_by_Ids`:
 
-| Parent       | Child      | Query                                                 |
-| ------------ | ---------- | ----------------------------------------------------- |
-| UserJourney  | Flows      | `label=Flow`, `queryParams=userJourneyId=<uj-id>`     |
-| Flow         | Pages      | `label=Page`, `queryParams=flowId=<flow-id>`          |
-| Page         | Components | `label=Component`, `queryParams=pageId=<page-id>`     |
-| Component    | Children   | `label=Component`, `queryParams=parentComponentId=<comp-id>` |
+| Parent      | Child      | Query                                                        |
+| ----------- | ---------- | ------------------------------------------------------------ |
+| UserJourney | Flows      | `label=Flow`, `queryParams=userJourneyId=<uj-id>`            |
+| Flow        | Pages      | `label=Page`, `queryParams=flowId=<flow-id>`                 |
+| Page        | Components | `label=Component`, `queryParams=pageId=<page-id>`            |
+| Component   | Children   | `label=Component`, `queryParams=parentComponentId=<comp-id>` |
 
 **Example: Get all components under a page**
 
@@ -1029,11 +1030,11 @@ After successfully creating all design nodes for a scenario, mark it as processe
 
 **When to mark as processed:**
 
-| Condition | Action |
-|-----------|--------|
+| Condition                             | Action                         |
+| ------------------------------------- | ------------------------------ |
 | All design nodes created successfully | Mark `isDesignGenerated: true` |
-| Partial failure (some nodes failed) | Do NOT mark - allows retry |
-| UserJourney creation failed | Do NOT mark - critical failure |
+| Partial failure (some nodes failed)   | Do NOT mark - allows retry     |
+| UserJourney creation failed           | Do NOT mark - critical failure |
 
 **Progress indication:**
 
