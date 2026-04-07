@@ -1,15 +1,49 @@
 ---
 name: generate-functional-from-code
 description: >
-  Generate a functional graph (Persona → Outcome → Scenario → Step → Action)
-  from the code graph. Uses a multi-pass pipeline: extract intents from code
-  clusters, deduplicate via embeddings + DBSCAN clustering, filter/merge/assign
-  outcomes with Sonnet, then generate scenarios per outcome using intent-driven
-  Code Graph Search for file discovery with citation tracking.
-  Use when: "generate functional graph from code", "derive functional graph",
-  "code to functional", "build functional graph from clusters",
-  "generate functional graph from code graph",
-  "generate functional ontology", "generate functional from ui".
+  DEPRECATED legacy cluster pipeline. Generates a functional graph
+  (Persona → Outcome → Scenario → Step → Action) from the code graph
+  via a Python multi-pass pipeline (intent extraction → DBSCAN
+  dedup → outcome assignment → scenario generation). Kept for
+  reference and as a fallback for backend-heavy or no-UI repos where
+  running the split pipeline is overkill. For all other cases use the
+  recommended skills instead:
+    - /breeze:generate-functional-from-ui (frontend repos)
+    - /breeze:generate-functional-from-backend (backend repos)
+  Use when: "run legacy cluster pipeline", "generate functional via
+  DBSCAN clusters", or explicit fallback after the split pipeline has
+  been ruled out.
+---
+
+## ⚠ DEPRECATED — read this first
+
+This skill is the **legacy v1 cluster pipeline**. It is superseded
+by the split pipeline:
+
+- **`/breeze:generate-functional-from-ui`** — for frontend repos.
+  Produces the human-persona side with full JSX coverage, panel
+  discovery, API linking, and per-EP verification.
+- **`/breeze:generate-functional-from-backend`** — for backend repos.
+  Discovers REST controllers AND non-HTTP entry points (SQS/Kafka
+  consumers, cron workers, WebSocket handlers, webhook receivers)
+  and writes System / External System personas with side effects
+  captured in `apis[]`.
+
+The split pipeline is more accurate, has stricter per-EP discipline,
+and is the recommended approach for any project that has either a
+frontend repo or a backend repo with non-HTTP entry points. The two
+passes are independent and merge automatically by outcome name in
+the functional graph.
+
+**Use this legacy skill only when:**
+- The repo has no UI and no message queues / cron / WebSocket
+  handlers — just plain REST controllers — AND
+- You explicitly want a fast batched run with no per-EP review
+
+For everything else, stop and run one of the two recommended skills
+above. The rest of this file is preserved unchanged for reference
+and resume of in-progress runs.
+
 ---
 
 ## Purpose
