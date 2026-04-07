@@ -4,6 +4,257 @@ This document defines the rules for generating Design Ontology Graph nodes from 
 
 ---
 
+## API Tools Reference
+
+### Functional Graph Query Tools
+
+#### Get_scenarios_by_uuid
+
+Fetches scenarios from the functional graph with pagination and filtering.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `limit` (optional): Number of results per page
+- `page` (optional): Page number for pagination
+- `filters` (optional): Filter string for conditional queries
+
+**Filter Examples:**
+
+| Filter | Description |
+|--------|-------------|
+| `filters[isDesignGenerated][$eq]=false` | Scenarios without design |
+| `filters[isDesignGenerated][$eq]=true` | Scenarios with design |
+| `filters[name][$contains]=<text>` | Filter by scenario name |
+| `filters[status][$eq]=<status>` | Filter by status |
+
+#### Get_all_steps_actions_for_a_scenario_id
+
+Fetches complete hierarchy for a scenario including all steps and actions.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `scenarioId` (required): The scenario UUID
+
+**Returns:** Complete hierarchy: Scenario → Steps → Actions
+
+#### Update_Functional_Node
+
+Updates a functional graph node (used to mark scenarios as processed).
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `apiKey` (required): API key from .breeze.json
+- `label` (required): Node type - `Scenario`
+- `id` (required): Node ID to update
+- `data` (required): Object with fields to update
+
+**Example:**
+
+```json
+{
+  "uuid": "<projectUuid>",
+  "apiKey": "<apiKey>",
+  "label": "Scenario",
+  "id": "<scenario UUID>",
+  "data": {
+    "isDesignGenerated": true
+  }
+}
+```
+
+---
+
+### Design Graph Query Tools
+
+#### 1. Get_all_Design_By_Label
+
+Gets all design nodes of a specific type with pagination.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
+
+**Use when:** You need to fetch all nodes of a specific type.
+
+#### 2. Design_Graph_Search
+
+Semantic search across all design graph node types.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `query` (required): Search query string
+- `limit` (optional): Number of results (default: 10)
+- `skip` (optional): Offset for pagination (default: 0)
+- `includeLabels` (optional): Filter by labels - `["UserJourney", "Flow", "Page", "Component"]`
+
+**Use when:** You need to search for nodes by name, description, or any text content.
+
+#### 3. Get_Design_Nodes_by_Ids
+
+Query design nodes with various filters. This is the most flexible query tool.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
+- `queryParams` (optional): Query string for filtering
+
+**Query Parameter Examples:**
+
+| Use Case | Query Params |
+|----------|--------------|
+| Get by specific ID | `id=uj-123` |
+| Get by multiple IDs | `id=uj-123&id=uj-456` |
+| Get Flows by UserJourney | `userJourneyId=uj-123` |
+| Get Pages by Flow | `flowId=flow-123` |
+| Get Components by Page | `pageId=page-123` |
+| Get Components by parent | `parentComponentId=comp-123` |
+| Get Components by type | `type=ORGANISM` or `type=MOLECULE` or `type=ATOM` |
+| Get Pages by pageType | `pageType=form` or `pageType=list` |
+| Get by modality | `modality=web` or `modality=mobile` |
+| Combine filters | `pageId=page-123&type=ORGANISM` |
+| With pagination | `page=1&limit=50&sortName=name&sortOrder=asc` |
+
+**Use when:** You need to query nodes by specific relationships or properties.
+
+---
+
+### Design Graph Mutation Tools
+
+#### Create_Design_Node
+
+Creates a new design node in the graph.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `apiKey` (required): API key from .breeze.json
+- `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
+- `data` (required): Node data object (see payload structures below)
+
+**Payload Structures:**
+
+See sections below for UserJourney, Flow, Page, and Component payload structures.
+
+#### Update_Design_Node
+
+Updates an existing design node.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `apiKey` (required): API key from .breeze.json
+- `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
+- `nodeId` (required): The ID of the node to update
+- `data` (required): Object with fields to update
+
+**Example:**
+
+```json
+{
+  "uuid": "<projectUuid>",
+  "apiKey": "<apiKey>",
+  "label": "Component",
+  "nodeId": "<component UUID>",
+  "data": {
+    "actionIds": ["<existing actionIds>", "<new action UUID>"],
+    "usedIn": ["<existing usedIn>", "<new parent name>"]
+  }
+}
+```
+
+> **Note:** Always append to existing arrays, don't replace them. First fetch the current node to get current values.
+
+#### Delete_Design_Node
+
+Deletes a design node from the graph.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
+- `apiKey` (required): API key from .breeze.json
+- `nodeId` (required): The ID of the node to delete
+
+**Confirmation Required:** Before deleting any node, ALWAYS ask the user for confirmation with:
+
+1. **Node details:** Show the node name, type, and ID being deleted
+2. **Reason:** Explain why this deletion is being performed
+3. **Impact:** List any child nodes that will be orphaned
+
+**Confirmation Format:**
+
+```
+⚠️ Delete Confirmation Required
+
+Node to delete:
+  - Name: <node name>
+  - Type: <UserJourney|Flow|Page|Component>
+  - ID: <nodeId>
+
+Reason for deletion:
+  <explain why this node should be deleted>
+
+Impact:
+  - <list orphaned children if any, or "No child nodes affected">
+
+Proceed with deletion? (Yes/No)
+```
+
+**Deletion Impact:**
+
+| Node Type | Impact of Deletion |
+|-----------|-------------------|
+| UserJourney | Orphans child Flows |
+| Flow | Orphans child Pages |
+| Page | Orphans child Components |
+| Component | Orphans child Components (if ORGANISM with children) |
+
+### Cascade Delete Option
+
+When deleting a parent node, ask user whether to cascade delete children.
+
+> **Important:** Components are NEVER deleted during cascade delete. Components may be reusable (GLOBAL/DOMAIN) and shared across multiple Pages/Flows. Only UserJourney, Flow, and Page nodes are cascade deleted.
+
+**Cascade Delete Confirmation:**
+
+```
+⚠️ Cascade Delete Option
+
+Node to delete:
+  - Name: <node name>
+  - Type: UserJourney
+  - ID: <nodeId>
+
+This node has children:
+  - N Flows
+  - N Pages
+  - N Components (will be preserved, not deleted)
+
+Delete options:
+  1. Delete node only (orphan children)
+  2. Cascade delete (delete node + Flows + Pages only)
+  3. Cancel
+
+Select option: (1/2/3)
+```
+
+**Cascade Delete by Node Type:**
+
+| Node Type | Cascade Deletes | Preserved (Not Deleted) |
+|-----------|-----------------|------------------------|
+| UserJourney | Flows → Pages | All Components |
+| Flow | Pages | All Components |
+| Page | (none) | All Components |
+| Component | (not supported) | - |
+
+---
+
 ## Mapping Overview
 
 | Functional Node | Design Node           | Relationship                                                       |
