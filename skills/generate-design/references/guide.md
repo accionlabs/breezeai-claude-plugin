@@ -35,7 +35,10 @@ Fetches complete hierarchy for a scenario including all steps and actions.
 **Inputs:**
 
 - `uuid` (required): Project UUID
-- `scenarioId` (required): The scenario UUID
+- `parameters0_Value` (required): The scenario ID (e.g. `1771932502952-zxdi7x4`).
+  This maps to `filters[id][$eq]` on the backend. Do NOT pass it as `scenarioId` —
+  the tool schema requires the exact name `parameters0_Value` and will fail with
+  `Required → at parameters0_Value` otherwise.
 
 **Returns:** Complete hierarchy: Scenario → Steps → Actions
 

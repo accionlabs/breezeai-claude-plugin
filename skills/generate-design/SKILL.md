@@ -28,6 +28,18 @@ Extract `apiKey` and `projectUuid`.
 > `projectUuid`). When calling any Breeze MCP tool, pass the value from
 > `.breeze.json`'s `projectUuid` field as the `uuid` argument. Using any other
 > name will fail with `Required → at uuid`.
+>
+> 💡 **Scenario ID hint:** When calling
+> `Get_all_steps_actions_for_a_scenario_id`, the scenario ID parameter MUST
+> be named **`parameters0_Value`** (NOT `scenarioId`, `id`, or `scenario_id`).
+> It maps to `filters[id][$eq]` on the backend. Using any other name fails
+> with `Required → at parameters0_Value`.
+>
+> 💡 **Design-by-label hint:** When calling `Get_all_Design_By_Label`, pass
+> the node label as **`label`** (e.g., `label: "Component"`), NOT as
+> `parameters0_Value`. The `parameters0_Value` naming is specific to
+> `Get_all_steps_actions_for_a_scenario_id` — do not generalize it. Using
+> the wrong name fails with `Required → at label`.
 
 ---
 
@@ -70,8 +82,8 @@ Process scenarios one at a time (incremental batch processing).
    - `limit`: 1
    - `page`: 1
    - `filters[isDesignGenerated][$eq]=false`
-   This returns the next scenario whose design graph has not yet been generated.
-   Do NOT walk personas → outcomes → scenarios; call this tool directly.
+     This returns the next scenario whose design graph has not yet been generated.
+     Do NOT walk personas → outcomes → scenarios; call this tool directly.
 2. `Get_all_steps_actions_for_a_scenario_id` — fetch steps + actions for ONLY
    that one scenario
 3. Generate design nodes for that scenario
@@ -153,7 +165,7 @@ Build map: `{ designSystemRef → existingComponentId or "CREATE_NEW" }`
 > iterations within a run AND across separate runs of the skill
 > (e.g., when a new scenario is added later). Index the result by
 > `designSystemRef` (level-1 match) and by `(type, semantic-name,
-> domain)` (level-2/3 matches).
+domain)` (level-2/3 matches).
 
 ### 2c. For Existing Mappings, Ask User
 
@@ -329,15 +341,16 @@ Total actions to LINK: 5 (reusing existing components)
 
 Ask user: **"Proceed with creating these design nodes for this scenario?"**
 
-| Option | Action |
-|--------|--------|
-| **Yes** | Create all nodes as shown |
-| **No** | Skip this scenario, move to next |
+| Option     | Action                                   |
+| ---------- | ---------------------------------------- |
+| **Yes**    | Create all nodes as shown                |
+| **No**     | Skip this scenario, move to next         |
 | **Modify** | Let user specify changes before creating |
 
 ### If User Selects "Modify"
 
 Allow user to:
+
 - Remove specific nodes from creation
 - Change node names
 - Change component reusability level
@@ -350,91 +363,46 @@ After modifications, show updated preview and ask for confirmation again.
 
 ## Step 5: Create Design Nodes
 
-> ✅ **Use ONE bulk create call per scenario.** Do NOT create UserJourney,
-> Flows, Pages, and Components with separate calls. The Breeze API accepts a
-> single nested payload for an entire scenario's design subtree, which is
-> dramatically faster and avoids partial-failure states.
+> ⛔ **MANDATORY — DO NOT BULK CREATE.** Bulk/nested create payloads are NOT
+> allowed. Create each node with its own single Breeze MCP call. Walk the
+> tree top-down (UserJourney → Flow → Page → Component → child Component)
+> and issue one create call per node, passing the parent ID returned from
+> the previous call as the explicit parent reference on the child.
 
-### 5a. Bulk Create Payload (one call per scenario)
+### 5a. Per-Node Create Sequence
 
-Send the entire scenario's design tree (UserJourney → Flows → Pages →
-Components → nested children) in a single call. Payload shape:
+For the current scenario, in order:
 
-```json
-{
-  "project": { "uuid": "<projectUuid>", "name": "<project name>" },
-  "payload": {
-    "userJourneys": [
-      {
-        "name": "Customer Onboarding",
-        "description": "End-to-end signup and activation",
-        "scenarioId": "<scenario-uuid>",
-        "flows": [
-          {
-            "name": "Email Signup Flow",
-            "description": "User signs up via email",
-            "modality": "WEB",
-            "entryPoint": "/signup",
-            "exitPoint": "/dashboard",
-            "stepIds": ["<step-uuid>"],
-            "pages": [
-              {
-                "name": "Signup Page",
-                "description": "Email/password signup form",
-                "pageType": "FORM",
-                "requiresAuth": false,
-                "allowedRoles": ["guest"],
-                "stepIds": ["<step-uuid>"],
-                "components": [
-                  {
-                    "name": "SignupForm",
-                    "type": "ORGANISM",
-                    "description": "Signup form",
-                    "designSystemRef": "ds://forms/SignupForm@1.2",
-                    "props": "{\"variant\":\"default\"}",
-                    "states": ["default", "loading", "error"],
-                    "layoutType": "VERTICAL",
-                    "slots": ["header", "body", "footer"],
-                    "actionIds": ["<action-uuid>"],
-                    "children": [
-                      {
-                        "name": "EmailInput",
-                        "type": "ATOM",
-                        "description": "Email text field",
-                        "actionIds": []
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+1. Create the **UserJourney** (1 call) — pass `scenarioId`. Capture its
+   returned `uuid`.
+2. For each **Flow** under it: 1 call, passing `userJourneyId` = the
+   UserJourney `uuid` from step 1, plus `stepIds[]` and `modality`.
+3. For each **Page** under a Flow (or directly under the UserJourney if no
+   Flow): 1 call, passing `flowId` (or `userJourneyId`), `pageType`,
+   `stepIds[]`.
+4. For each **Component** on a Page: 1 call, passing `pageId` and
+   `actionIds[]`. For nested children (MOLECULE/ATOM inside an ORGANISM),
+   pass `parentComponentId` = the parent component `uuid` from the prior
+   call.
 
-Hierarchy is implicit via nesting — do NOT also pass `userJourneyId`,
-`flowId`, `pageId`, or `parentComponentId` in the bulk payload; the server
-infers them from the tree structure.
+Each call is a single create — never combine multiple nodes into one
+payload, and never use a nested `children`/`pages`/`flows` array on a
+parent create.
 
 ### 5b. Link Actions to Existing Components
 
-For components being reused across scenarios (already created in a prior
-iteration), do NOT include them inside the bulk `children` tree. Instead,
-after the bulk create succeeds, update the existing component's `actionIds[]`
-array to append the new action UUIDs.
+For components being reused (from Step 2b registry — created in this run or
+a prior run), do NOT create a new component. Issue a single update call to
+append the new action UUIDs to the existing component's `actionIds[]`.
 
 ### 5c. Hierarchy
 
-Hierarchy is established implicitly by nesting in the bulk payload
-(`userJourneys → flows → pages → components → children`). Do NOT pass
-`userJourneyId`, `flowId`, `pageId`, or `parentComponentId` — the server
-infers them from the tree.
+Hierarchy is established **explicitly** via parent-id fields on each create
+call (`userJourneyId`, `flowId`, `pageId`, `parentComponentId`). You must
+wait for each parent create to return its `uuid` before issuing the child
+create — these calls are sequential, not parallel.
 
-### 5d. Error Handling
+### 5e. Error Handling
 
 | Failure Point        | Recovery Action                        |
 | -------------------- | -------------------------------------- |
