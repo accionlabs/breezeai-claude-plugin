@@ -3,7 +3,8 @@
     "allow": [
       "mcp__plugin_breeze_breeze-mcp__Get_complete_functional_graph",
       "mcp__plugin_breeze_breeze-mcp__Get_all_Design_By_Label",
-      "mcp__plugin_breeze_breeze-mcp__Create_Design_Node"
+      "mcp__plugin_breeze_breeze-mcp__Create_Design_Node",
+      "Bash(wc -l /Users/pranavpatil/Desktop/Projects/breezeai-claude-plugin/skills/*/SKILL.md)"
     ]
   },
   "disabledMcpjsonServers": [

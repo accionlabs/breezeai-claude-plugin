@@ -143,6 +143,18 @@ Analyze actions and identify reusable patterns:
 
 Build map: `{ designSystemRef → existingComponentId or "CREATE_NEW" }`
 
+> ⚠️ **Registry must be rebuilt every iteration.** Do NOT cache the
+> component registry across scenarios. At the start of each scenario
+> iteration (after Step 1 fetches the scenario, before Step 3 generates
+> nodes), query the design graph fresh via `Get_all_Design_By_Label`
+> (label=`Component`) or, for large projects, `Design_Graph_Search`
+> scoped to the current scenario's action vocabulary. The DB is the
+> source of truth — this is what makes reuse work both across loop
+> iterations within a run AND across separate runs of the skill
+> (e.g., when a new scenario is added later). Index the result by
+> `designSystemRef` (level-1 match) and by `(type, semantic-name,
+> domain)` (level-2/3 matches).
+
 ### 2c. For Existing Mappings, Ask User
 
 | Option      | Action                                         |
@@ -159,6 +171,14 @@ Build map: `{ designSystemRef → existingComponentId or "CREATE_NEW" }`
 
 Create one UserJourney per Scenario with `scenarioId` link.
 
+**Naming convention:** UserJourney `name` MUST end with the suffix
+`Journey`. Derive it from the scenario name and append `Journey` if not
+already present.
+
+- Scenario `Patient Registration` → UserJourney `Patient Registration Journey`
+- Scenario `Checkout` → UserJourney `Checkout Journey`
+- Scenario `Onboarding Journey` → keep as-is (already ends in `Journey`)
+
 ### 3b. Step → Flow OR Page (Exclusive)
 
 > A Step maps to Flow OR Page, never both.
@@ -171,7 +191,42 @@ Create one UserJourney per Scenario with `scenarioId` link.
 
 **Create separate Flow/Page for EACH selected modality.**
 
-### 3c. Action → Component (Reuse-First)
+### 3c. Component Reuse Resolution (REUSE FIRST)
+
+Before creating any new Component, walk this priority order and stop at the
+first match. Always prefer reuse over creation.
+
+1. **Exact `designSystemRef` match** — a component already exists in the
+   registry with the same `designSystemRef` (e.g., `ds://forms/TextInput@1.0`).
+   REUSE: append the new `actionId` to its `actionIds[]`.
+2. **Semantic + type match in same domain** — same component `type`
+   (ATOM/MOLECULE) and semantically equivalent purpose within the same
+   business domain (e.g., two "Patient name" inputs in the Patient domain).
+   REUSE the existing DOMAIN-level component.
+3. **Global atom/molecule match** — a `GLOBAL`-scoped ATOM or MOLECULE
+   exists that satisfies the action regardless of domain (TextInput, Button,
+   Select, Checkbox, DatePicker). REUSE the global component.
+4. **Template/layout match** — for TEMPLATE-level reuse, an existing
+   template matches the target `pageType` and modality. REUSE the template,
+   only its slotted children differ.
+5. **Create new** — no match above. Create with the narrowest reusability
+   scope that is still correct: `GLOBAL` > `DOMAIN` > `PAGE`.
+
+**Hard rules:**
+
+- Always check the registry built in Step 2b BEFORE creating.
+- ORGANISM containers are page-specific — always CREATE NEW at level 5,
+  never reuse across pages. Their MOLECULE/ATOM children still follow
+  rules 1–3.
+- Merge near-duplicates (e.g., "Email Field" and "EmailInput" with same
+  `designSystemRef`) — pick one canonical name and reuse it.
+- Never downgrade scope on reuse: if a component is `GLOBAL`, do not
+  create a `DOMAIN` copy of it for a new action — just append the
+  `actionId`.
+- If two candidates tie, prefer the one with the higher reusability scope
+  (GLOBAL > DOMAIN > PAGE) and the more `actionIds[]` already linked.
+
+### 3c-bis. Action → Component (mechanics)
 
 ```
 For each Action:
@@ -365,23 +420,19 @@ Hierarchy is implicit via nesting — do NOT also pass `userJourneyId`,
 `flowId`, `pageId`, or `parentComponentId` in the bulk payload; the server
 infers them from the tree structure.
 
-### 5b. Creation Order
-
-Only one call is needed per scenario. After it succeeds, mark the scenario
-processed (Step 5e).
-
 ### 5b. Link Actions to Existing Components
 
-For reused components, update `actionIds[]` array.
+For components being reused across scenarios (already created in a prior
+iteration), do NOT include them inside the bulk `children` tree. Instead,
+after the bulk create succeeds, update the existing component's `actionIds[]`
+array to append the new action UUIDs.
 
-### 5c. CONTAINS Relationships
+### 5c. Hierarchy
 
-Hierarchy is created automatically via parent ID fields:
-
-- `userJourneyId` in Flow
-- `flowId` in Page
-- `pageId` in Component
-- `parentComponentId` in nested Component
+Hierarchy is established implicitly by nesting in the bulk payload
+(`userJourneys → flows → pages → components → children`). Do NOT pass
+`userJourneyId`, `flowId`, `pageId`, or `parentComponentId` — the server
+infers them from the tree.
 
 ### 5d. Error Handling
 
