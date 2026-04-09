@@ -21,12 +21,12 @@ Fetches scenarios from the functional graph with pagination and filtering.
 
 **Filter Examples:**
 
-| Filter | Description |
-|--------|-------------|
+| Filter                                  | Description              |
+| --------------------------------------- | ------------------------ |
 | `filters[isDesignGenerated][$eq]=false` | Scenarios without design |
-| `filters[isDesignGenerated][$eq]=true` | Scenarios with design |
-| `filters[name][$contains]=<text>` | Filter by scenario name |
-| `filters[status][$eq]=<status>` | Filter by status |
+| `filters[isDesignGenerated][$eq]=true`  | Scenarios with design    |
+| `filters[name][$contains]=<text>`       | Filter by scenario name  |
+| `filters[status][$eq]=<status>`         | Filter by status         |
 
 #### Get_all_steps_actions_for_a_scenario_id
 
@@ -35,7 +35,10 @@ Fetches complete hierarchy for a scenario including all steps and actions.
 **Inputs:**
 
 - `uuid` (required): Project UUID
-- `scenarioId` (required): The scenario UUID
+- `parameters0_Value` (required): The scenario ID (e.g. `1771932502952-zxdi7x4`).
+  This maps to `filters[id][$eq]` on the backend. Do NOT pass it as `scenarioId` —
+  the tool schema requires the exact name `parameters0_Value` and will fail with
+  `Required → at parameters0_Value` otherwise.
 
 **Returns:** Complete hierarchy: Scenario → Steps → Actions
 
@@ -50,18 +53,21 @@ Updates a functional graph node (used to mark scenarios as processed).
 - `label` (required): Node type - `Scenario`
 - `id` (required): Node ID to update
 - `data` (required): Object with fields to update
-
-**Example:**
+- `citations` (required): empty array mandetory
+- `citationsIds` (required): empty array mandetory
+  **Example:**
 
 ```json
 {
   "uuid": "<projectUuid>",
   "apiKey": "<apiKey>",
   "label": "Scenario",
-  "id": "<scenario UUID>",
+  "id": "<scenario id>",
   "data": {
     "isDesignGenerated": true
-  }
+  },
+  "citations": [],
+  "citationsIds": []
 }
 ```
 
@@ -106,19 +112,19 @@ Query design nodes with various filters. This is the most flexible query tool.
 
 **Query Parameter Examples:**
 
-| Use Case | Query Params |
-|----------|--------------|
-| Get by specific ID | `id=uj-123` |
-| Get by multiple IDs | `id=uj-123&id=uj-456` |
-| Get Flows by UserJourney | `userJourneyId=uj-123` |
-| Get Pages by Flow | `flowId=flow-123` |
-| Get Components by Page | `pageId=page-123` |
-| Get Components by parent | `parentComponentId=comp-123` |
-| Get Components by type | `type=ORGANISM` or `type=MOLECULE` or `type=ATOM` |
-| Get Pages by pageType | `pageType=form` or `pageType=list` |
-| Get by modality | `modality=web` or `modality=mobile` |
-| Combine filters | `pageId=page-123&type=ORGANISM` |
-| With pagination | `page=1&limit=50&sortName=name&sortOrder=asc` |
+| Use Case                 | Query Params                                      |
+| ------------------------ | ------------------------------------------------- |
+| Get by specific ID       | `id=uj-123`                                       |
+| Get by multiple IDs      | `id=uj-123&id=uj-456`                             |
+| Get Flows by UserJourney | `userJourneyId=uj-123`                            |
+| Get Pages by Flow        | `flowId=flow-123`                                 |
+| Get Components by Page   | `pageId=page-123`                                 |
+| Get Components by parent | `parentComponentId=comp-123`                      |
+| Get Components by type   | `type=ORGANISM` or `type=MOLECULE` or `type=ATOM` |
+| Get Pages by pageType    | `pageType=form` or `pageType=list`                |
+| Get by modality          | `modality=web` or `modality=mobile`               |
+| Combine filters          | `pageId=page-123&type=ORGANISM`                   |
+| With pagination          | `page=1&limit=50&sortName=name&sortOrder=asc`     |
 
 **Use when:** You need to query nodes by specific relationships or properties.
 
@@ -153,7 +159,7 @@ Updates an existing design node.
 - `nodeId` (required): The ID of the node to update
 - `data` (required): Object with fields to update
 
-**Example:**
+**Example — link action to existing component:**
 
 ```json
 {
@@ -168,7 +174,175 @@ Updates an existing design node.
 }
 ```
 
+**Example — link step to existing flow (flow deduplication):**
+
+When a flow with the same `(name, modality)` already exists from a prior
+scenario, append the new step's UUID to the existing flow's `stepIds[]`.
+This reuses the entire flow including all its pages and components.
+
+```json
+{
+  "uuid": "<projectUuid>",
+  "apiKey": "<apiKey>",
+  "label": "Flow",
+  "nodeId": "<existing flow UUID>",
+  "data": {
+    "stepIds": [
+      "<existing step-uuid-1>",
+      "<new step-uuid-from-current-scenario>"
+    ]
+  }
+}
+```
+
+**Example — link step to existing page (page deduplication):**
+
+When a page with the same `(name, pageType, modality)` already exists from a
+prior scenario, append the new step's UUID to the existing page's `stepIds[]`
+instead of creating a duplicate page.
+
+```json
+{
+  "uuid": "<projectUuid>",
+  "apiKey": "<apiKey>",
+  "label": "Page",
+  "nodeId": "<existing page UUID>",
+  "data": {
+    "stepIds": [
+      "<existing step-uuid-1>",
+      "<new step-uuid-from-current-scenario>"
+    ]
+  }
+}
+```
+
 > **Note:** Always append to existing arrays, don't replace them. First fetch the current node to get current values.
+
+#### Bulk_Update_Design_Nodes
+
+Creates the entire UserJourney tree for a scenario in one call using a nested
+payload. The backend handles hierarchy creation, ID linking, and component
+deduplication (upsert by `designSystemRef`) automatically.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `apiKey` (required): API key from .breeze.json
+- `data` (required): Nested tree object (see payload structure below)
+
+**Payload Structure:**
+
+```json
+{
+  "userJourneys": [
+    {
+      "name": "User Registration Journey",
+      "description": "End-to-end registration flow",
+      "scenarioId": "scenario-uuid-from-functional-graph",
+      "flows": [
+        {
+          "name": "Sign Up Flow",
+          "description": "New user sign up process",
+          "modality": "WEB",
+          "entryPoint": "page-id-1",
+          "exitPoint": "page-id-3",
+          "stepIds": ["step-uuid-1", "step-uuid-2"],
+          "pages": [
+            {
+              "name": "Registration Page",
+              "description": "User fills in registration details",
+              "pageType": "form",
+              "requiresAuth": false,
+              "allowedRoles": [],
+              "stepIds": ["step-uuid-1"],
+              "components": [
+                {
+                  "name": "RegistrationForm",
+                  "type": "ORGANISM",
+                  "description": "Main registration form with validation",
+                  "designSystemRef": "ds-form-ref",
+                  "props": "{\"variant\": \"primary\"}",
+                  "states": ["idle", "loading", "error", "success"],
+                  "layoutType": "vertical",
+                  "slots": ["header", "body", "footer"],
+                  "actionIds": ["action-uuid-1"],
+                  "supportingComponents": [
+                    "EmailInput",
+                    "PasswordInput",
+                    "SubmitButton"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "Confirmation Page",
+              "description": "Email verification confirmation",
+              "pageType": "info",
+              "requiresAuth": false,
+              "stepIds": ["step-uuid-2"],
+              "components": [
+                {
+                  "name": "ConfirmationMessage",
+                  "type": "MOLECULE",
+                  "description": "Displays confirmation message",
+                  "designSystemRef": "ds://feedback/Alert@1.0"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Payload Rules:**
+
+- **One UserJourney per call** — each call handles one scenario. Do NOT batch
+  multiple scenarios.
+- **Nesting = hierarchy** — Flows nest under UserJourney, Pages under Flows,
+  Components under Pages, child Components under parent Components via
+  `supportingComponents`.
+- **Component supportingComponents** — ORGANISM lists MOLECULE/ATOM supportingComponents, MOLECULE
+  lists ATOM supportingComponents, ATOM has no supportingComponents (omit or `[]`).
+- **Upsert for reuse** — include reusable components with their
+  `designSystemRef`. If a component with the same ref exists, the backend
+  appends new `actionIds` instead of duplicating.
+- **Multi-modality** — include separate Flow entries per modality under the
+  same UserJourney, each with its own `modality` field.
+
+**supportingComponents Array (Component Composition):**
+
+Every non-ATOM component MUST include a `supportingComponents` array listing its direct
+child components:
+
+| Component Type | `supportingComponents` value                |
+| -------------- | ------------------------------------------- |
+| TEMPLATE       | Names of ORGANISMs it contains              |
+| ORGANISM       | Names of MOLECULEs and/or ATOMs it contains |
+| MOLECULE       | Names of ATOMs it contains                  |
+| ATOM           | `[]` (leaf node — no supportingComponents)  |
+
+**Example composition:**
+
+```
+TEMPLATE "RegistrationPageLayout"
+  supportingComponents: ["HeaderBar", "PatientRegistrationForm", "FooterActions"]
+
+ORGANISM "PatientRegistrationForm"
+  supportingComponents: ["FullNameField", "EmailField", "PhoneField", "DatePickerField", "GenderSelect", "SubmitButton"]
+
+MOLECULE "FullNameField"
+  supportingComponents: ["TextLabel", "TextInput", "ValidationMessage"]
+
+ATOM "TextInput"
+  supportingComponents: []
+```
+
+Order within `supportingComponents` reflects visual/logical order on the page.
+
+**NO `children` array:** Do NOT add a `children` field to any node. Composition is expressed solely through `supportingComponents`. The backend resolves hierarchy from `supportingComponents`; a nested `children` array is not part of the schema and must never be included in any payload.
 
 #### Delete_Design_Node
 
@@ -201,23 +375,23 @@ Reason for deletion:
   <explain why this node should be deleted>
 
 Impact:
-  - <list orphaned children if any, or "No child nodes affected">
+  - <list orphaned supportingComponents if any, or "No child nodes affected">
 
 Proceed with deletion? (Yes/No)
 ```
 
 **Deletion Impact:**
 
-| Node Type | Impact of Deletion |
-|-----------|-------------------|
-| UserJourney | Orphans child Flows |
-| Flow | Orphans child Pages |
-| Page | Orphans child Components |
-| Component | Orphans child Components (if ORGANISM with children) |
+| Node Type   | Impact of Deletion                                               |
+| ----------- | ---------------------------------------------------------------- |
+| UserJourney | Orphans child Flows                                              |
+| Flow        | Orphans child Pages                                              |
+| Page        | Orphans child Components                                         |
+| Component   | Orphans child Components (if ORGANISM with supportingComponents) |
 
 ### Cascade Delete Option
 
-When deleting a parent node, ask user whether to cascade delete children.
+When deleting a parent node, ask user whether to cascade delete child nodes.
 
 > **Important:** Components are NEVER deleted during cascade delete. Components may be reusable (GLOBAL/DOMAIN) and shared across multiple Pages/Flows. Only UserJourney, Flow, and Page nodes are cascade deleted.
 
@@ -231,13 +405,13 @@ Node to delete:
   - Type: UserJourney
   - ID: <nodeId>
 
-This node has children:
+This node has child nodes:
   - N Flows
   - N Pages
   - N Components (will be preserved, not deleted)
 
 Delete options:
-  1. Delete node only (orphan children)
+  1. Delete node only (orphan child nodes)
   2. Cascade delete (delete node + Flows + Pages only)
   3. Cancel
 
@@ -246,12 +420,12 @@ Select option: (1/2/3)
 
 **Cascade Delete by Node Type:**
 
-| Node Type | Cascade Deletes | Preserved (Not Deleted) |
-|-----------|-----------------|------------------------|
-| UserJourney | Flows → Pages | All Components |
-| Flow | Pages | All Components |
-| Page | (none) | All Components |
-| Component | (not supported) | - |
+| Node Type   | Cascade Deletes | Preserved (Not Deleted) |
+| ----------- | --------------- | ----------------------- |
+| UserJourney | Flows → Pages   | All Components          |
+| Flow        | Pages           | All Components          |
+| Page        | (none)          | All Components          |
+| Component   | (not supported) | -                       |
 
 ---
 
@@ -965,12 +1139,7 @@ Usage:
     "designSystemRef": "TextInputField",
     "props": "{\"label\": \"string\", \"placeholder\": \"string\", \"required\": \"boolean\", \"helperText\": \"string\"}",
     "states": ["default", "focused", "error", "disabled", "readonly"],
-    "children": [
-      { "name": "Label", "type": "ATOM" },
-      { "name": "TextInput", "type": "ATOM" },
-      { "name": "HelperText", "type": "ATOM" },
-      { "name": "ErrorMessage", "type": "ATOM" }
-    ]
+    "supportingComponents": ["Label", "TextInput", "HelperText", "ErrorMessage"]
   }
 }
 ```
@@ -1010,22 +1179,7 @@ Domain Extensions:
     "layoutType": "flex",
     "slots": ["card-header", "card-body", "card-footer"],
     "states": ["default", "hover", "selected", "expanded"],
-    "children": [
-      {
-        "name": "CardHeader",
-        "type": "MOLECULE",
-        "children": [
-          { "name": "Title", "type": "ATOM" },
-          { "name": "Subtitle", "type": "ATOM" },
-          { "name": "ActionMenu", "type": "MOLECULE" }
-        ]
-      },
-      {
-        "name": "CardFooter",
-        "type": "MOLECULE",
-        "children": [{ "name": "ActionButtons", "type": "MOLECULE" }]
-      }
-    ]
+    "supportingComponents": ["CardHeader", "CardFooter"]
   }
 }
 ```
@@ -1230,14 +1384,14 @@ PAGE ORGANISMS (built from domain organisms):
 
 ### Action → Component Type Mapping
 
-| Action Pattern          | Component Type                  | Example                                                |
-| ----------------------- | ------------------------------- | ------------------------------------------------------ |
-| Multiple related inputs | ORGANISM with MOLECULE children | "Record Patient Information" → Patient Form (ORGANISM) |
-| Single input action     | MOLECULE or ATOM                | "Enter patient name" → Name Input (ATOM)               |
-| Selection action        | ATOM (select/dropdown)          | "Select gender" → Gender Select (ATOM)                 |
-| Submit/trigger action   | ATOM (button)                   | "Submit form" → Submit Button (ATOM)                   |
-| Display action          | MOLECULE or ORGANISM            | "View results" → Results Panel (ORGANISM)              |
-| Date/time entry         | MOLECULE                        | "Enter admission date" → DateTime Picker (MOLECULE)    |
+| Action Pattern          | Component Type                              | Example                                                |
+| ----------------------- | ------------------------------------------- | ------------------------------------------------------ |
+| Multiple related inputs | ORGANISM with MOLECULE supportingComponents | "Record Patient Information" → Patient Form (ORGANISM) |
+| Single input action     | MOLECULE or ATOM                            | "Enter patient name" → Name Input (ATOM)               |
+| Selection action        | ATOM (select/dropdown)                      | "Select gender" → Gender Select (ATOM)                 |
+| Submit/trigger action   | ATOM (button)                               | "Submit form" → Submit Button (ATOM)                   |
+| Display action          | MOLECULE or ORGANISM                        | "View results" → Results Panel (ORGANISM)              |
+| Date/time entry         | MOLECULE                                    | "Enter admission date" → DateTime Picker (MOLECULE)    |
 
 ### Payload Structure
 
@@ -1398,7 +1552,7 @@ FOR each Scenario in Functional Graph:
                 FOR each Action Group:
                     8. CREATE ORGANISM Component
                        - pageId = Page.id
-                       - actionIds = [] (empty - actions map to children)
+                       - actionIds = [] (empty - actions map to supportingComponents)
 
                     FOR each Action in Group:
                         9. CREATE MOLECULE/ATOM Component
