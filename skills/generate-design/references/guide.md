@@ -257,28 +257,7 @@ deduplication (upsert by `designSystemRef`) automatically.
                   "layoutType": "vertical",
                   "slots": ["header", "body", "footer"],
                   "actionIds": ["action-uuid-1"],
-                  "children": [
-                    {
-                      "name": "EmailInput",
-                      "type": "ATOM",
-                      "description": "Email input field",
-                      "designSystemRef": "ds://inputs/TextInput@1.0",
-                      "actionIds": ["action-uuid-2"]
-                    },
-                    {
-                      "name": "PasswordInput",
-                      "type": "ATOM",
-                      "description": "Password input with strength meter",
-                      "designSystemRef": "ds://inputs/PasswordInput@1.0"
-                    },
-                    {
-                      "name": "SubmitButton",
-                      "type": "ATOM",
-                      "description": "Submit registration button",
-                      "designSystemRef": "ds://buttons/Button@1.0",
-                      "actionIds": ["action-uuid-3"]
-                    }
-                  ]
+                  "supportingComponents": ["EmailInput", "PasswordInput", "SubmitButton"]
                 }
               ]
             },
@@ -311,44 +290,44 @@ deduplication (upsert by `designSystemRef`) automatically.
   multiple scenarios.
 - **Nesting = hierarchy** — Flows nest under UserJourney, Pages under Flows,
   Components under Pages, child Components under parent Components via
-  `children`.
-- **Component children** — ORGANISM lists MOLECULE/ATOM children, MOLECULE
-  lists ATOM children, ATOM has no children (omit or `[]`).
+  `supportingComponents`.
+- **Component supportingComponents** — ORGANISM lists MOLECULE/ATOM supportingComponents, MOLECULE
+  lists ATOM supportingComponents, ATOM has no supportingComponents (omit or `[]`).
 - **Upsert for reuse** — include reusable components with their
   `designSystemRef`. If a component with the same ref exists, the backend
   appends new `actionIds` instead of duplicating.
 - **Multi-modality** — include separate Flow entries per modality under the
   same UserJourney, each with its own `modality` field.
 
-**Children Array (Component Composition):**
+**supportingComponents Array (Component Composition):**
 
-Every non-ATOM component MUST include a `children` array listing its direct
+Every non-ATOM component MUST include a `supportingComponents` array listing its direct
 child components:
 
-| Component Type | `children` value                             |
+| Component Type | `supportingComponents` value                 |
 |----------------|----------------------------------------------|
 | TEMPLATE       | Names of ORGANISMs it contains               |
 | ORGANISM       | Names of MOLECULEs and/or ATOMs it contains  |
 | MOLECULE       | Names of ATOMs it contains                   |
-| ATOM           | `[]` (leaf node — no children)               |
+| ATOM           | `[]` (leaf node — no supportingComponents)   |
 
 **Example composition:**
 
 ```
 TEMPLATE "RegistrationPageLayout"
-  children: ["HeaderBar", "PatientRegistrationForm", "FooterActions"]
+  supportingComponents: ["HeaderBar", "PatientRegistrationForm", "FooterActions"]
 
 ORGANISM "PatientRegistrationForm"
-  children: ["FullNameField", "EmailField", "PhoneField", "DatePickerField", "GenderSelect", "SubmitButton"]
+  supportingComponents: ["FullNameField", "EmailField", "PhoneField", "DatePickerField", "GenderSelect", "SubmitButton"]
 
 MOLECULE "FullNameField"
-  children: ["TextLabel", "TextInput", "ValidationMessage"]
+  supportingComponents: ["TextLabel", "TextInput", "ValidationMessage"]
 
 ATOM "TextInput"
-  children: []
+  supportingComponents: []
 ```
 
-Order within `children` reflects visual/logical order on the page.
+Order within `supportingComponents` reflects visual/logical order on the page.
 
 #### Delete_Design_Node
 
@@ -381,7 +360,7 @@ Reason for deletion:
   <explain why this node should be deleted>
 
 Impact:
-  - <list orphaned children if any, or "No child nodes affected">
+  - <list orphaned supportingComponents if any, or "No child nodes affected">
 
 Proceed with deletion? (Yes/No)
 ```
@@ -393,11 +372,11 @@ Proceed with deletion? (Yes/No)
 | UserJourney | Orphans child Flows |
 | Flow | Orphans child Pages |
 | Page | Orphans child Components |
-| Component | Orphans child Components (if ORGANISM with children) |
+| Component | Orphans child Components (if ORGANISM with supportingComponents) |
 
 ### Cascade Delete Option
 
-When deleting a parent node, ask user whether to cascade delete children.
+When deleting a parent node, ask user whether to cascade delete child nodes.
 
 > **Important:** Components are NEVER deleted during cascade delete. Components may be reusable (GLOBAL/DOMAIN) and shared across multiple Pages/Flows. Only UserJourney, Flow, and Page nodes are cascade deleted.
 
@@ -411,13 +390,13 @@ Node to delete:
   - Type: UserJourney
   - ID: <nodeId>
 
-This node has children:
+This node has child nodes:
   - N Flows
   - N Pages
   - N Components (will be preserved, not deleted)
 
 Delete options:
-  1. Delete node only (orphan children)
+  1. Delete node only (orphan child nodes)
   2. Cascade delete (delete node + Flows + Pages only)
   3. Cancel
 
@@ -1145,12 +1124,7 @@ Usage:
     "designSystemRef": "TextInputField",
     "props": "{\"label\": \"string\", \"placeholder\": \"string\", \"required\": \"boolean\", \"helperText\": \"string\"}",
     "states": ["default", "focused", "error", "disabled", "readonly"],
-    "children": [
-      { "name": "Label", "type": "ATOM" },
-      { "name": "TextInput", "type": "ATOM" },
-      { "name": "HelperText", "type": "ATOM" },
-      { "name": "ErrorMessage", "type": "ATOM" }
-    ]
+    "supportingComponents": ["Label", "TextInput", "HelperText", "ErrorMessage"]
   }
 }
 ```
@@ -1190,22 +1164,7 @@ Domain Extensions:
     "layoutType": "flex",
     "slots": ["card-header", "card-body", "card-footer"],
     "states": ["default", "hover", "selected", "expanded"],
-    "children": [
-      {
-        "name": "CardHeader",
-        "type": "MOLECULE",
-        "children": [
-          { "name": "Title", "type": "ATOM" },
-          { "name": "Subtitle", "type": "ATOM" },
-          { "name": "ActionMenu", "type": "MOLECULE" }
-        ]
-      },
-      {
-        "name": "CardFooter",
-        "type": "MOLECULE",
-        "children": [{ "name": "ActionButtons", "type": "MOLECULE" }]
-      }
-    ]
+    "supportingComponents": ["CardHeader", "CardFooter"]
   }
 }
 ```
@@ -1412,7 +1371,7 @@ PAGE ORGANISMS (built from domain organisms):
 
 | Action Pattern          | Component Type                  | Example                                                |
 | ----------------------- | ------------------------------- | ------------------------------------------------------ |
-| Multiple related inputs | ORGANISM with MOLECULE children | "Record Patient Information" → Patient Form (ORGANISM) |
+| Multiple related inputs | ORGANISM with MOLECULE supportingComponents | "Record Patient Information" → Patient Form (ORGANISM) |
 | Single input action     | MOLECULE or ATOM                | "Enter patient name" → Name Input (ATOM)               |
 | Selection action        | ATOM (select/dropdown)          | "Select gender" → Gender Select (ATOM)                 |
 | Submit/trigger action   | ATOM (button)                   | "Submit form" → Submit Button (ATOM)                   |
@@ -1578,7 +1537,7 @@ FOR each Scenario in Functional Graph:
                 FOR each Action Group:
                     8. CREATE ORGANISM Component
                        - pageId = Page.id
-                       - actionIds = [] (empty - actions map to children)
+                       - actionIds = [] (empty - actions map to supportingComponents)
 
                     FOR each Action in Group:
                         9. CREATE MOLECULE/ATOM Component

@@ -9,7 +9,7 @@ description: >
 
 ## Resources
 
-- For API tools, mapping rules, payload structures, bulk upsert format, component types, children array, reusability patterns, and designSystemRef lookup tables, read [references/guide.md](references/guide.md)
+- For API tools, mapping rules, payload structures, bulk upsert format, component types, supportingComponents array, reusability patterns, and designSystemRef lookup tables, read [references/guide.md](references/guide.md)
 
 ---
 
@@ -208,7 +208,7 @@ Walk this priority order, stop at the first match:
 **Hard rules:**
 
 - Always check registry from Step 2b BEFORE creating
-- ORGANISM containers are page-specific — always CREATE NEW; children follow rules 1–3
+- ORGANISM containers are page-specific — always CREATE NEW; supportingComponents follow rules 1–3
 - Merge near-duplicates with same `designSystemRef`
 - Never downgrade scope on reuse
 - Ties: prefer higher scope and more `actionIds[]` linked
@@ -246,17 +246,17 @@ modality assignments. Show updated preview and re-confirm.
 
 Use `Bulk_Update_Design_Nodes` to create the entire UserJourney tree for the
 current scenario in **one call**. See [references/guide.md](references/guide.md)
-for the full payload structure, children array rules, and examples.
+for the full payload structure, supportingComponents array rules, and examples.
 
 ### 5a. Build the Bulk Payload
 
 Assemble the nested tree from the confirmed preview: UserJourney → Flows →
-Pages → Components (with `children`). One UserJourney per call (one scenario).
+Pages → Components (with `supportingComponents`). One UserJourney per call (one scenario).
 
 ### 5b. Payload Rules
 
 - **Nesting = hierarchy** — backend wires parent-child relationships
-- **Component children** — ORGANISM → MOLECULE/ATOM, MOLECULE → ATOM, ATOM → `[]`
+- **Component supportingComponents** — ORGANISM → MOLECULE/ATOM, MOLECULE → ATOM, ATOM → `[]`
 - **Reused components** — include with `designSystemRef`; backend deduplicates via upsert
 - **Multi-modality** — separate Flow entries per modality under the same UserJourney
 
