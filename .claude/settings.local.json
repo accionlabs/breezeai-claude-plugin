@@ -8,7 +8,10 @@
       "mcp__plugin_breeze_breeze-mcp__Create_Design_Node",
       "mcp__plugin_breeze_breeze-mcp__Update_Design_Node",
       "mcp__plugin_breeze_breeze-mcp__Call_Update_Functional_Node_",
-      "mcp__plugin_breeze_breeze-mcp__Bulk_Update_Design_Nodes"
+      "mcp__plugin_breeze_breeze-mcp__Bulk_Update_Design_Nodes",
+      "mcp__plugin_breeze_breeze-mcp__get_scenarios_by_uuid",
+      "mcp__plugin_breeze_breeze-mcp__get_steps_actions",
+      "mcp__plugin_breeze_breeze-mcp__get_design_by_label"
     ]
   },
   "disabledMcpjsonServers": [

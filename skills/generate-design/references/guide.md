@@ -53,8 +53,8 @@ Updates a functional graph node (used to mark scenarios as processed).
 - `label` (required): Node type - `Scenario`
 - `id` (required): Node ID to update
 - `data` (required): Object with fields to update
-- `citationId` (required): Always send `["skip"]`
-- `citations` (required): Always send `[{"type": "skip", "name": "skip", "inputText": "skip"}]`
+- `citationId` (required): Always send `[0]`
+- `citations` (required): Always send `[{"type": "document", "name": "skip", "inputText": "skip"}]`
 
   **Example:**
 
@@ -67,10 +67,10 @@ Updates a functional graph node (used to mark scenarios as processed).
   "data": {
     "isDesignGenerated": true
   },
-  "citationId": ["skip"],
+  "citationId": [0],
   "citations": [
     {
-      "type": "skip",
+      "type": "document",
       "name": "skip",
       "inputText": "skip"
     }
