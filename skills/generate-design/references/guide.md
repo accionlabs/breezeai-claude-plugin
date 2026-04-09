@@ -329,6 +329,8 @@ ATOM "TextInput"
 
 Order within `supportingComponents` reflects visual/logical order on the page.
 
+**NO `children` array:** Do NOT add a `children` field to any node. Composition is expressed solely through `supportingComponents`. The backend resolves hierarchy from `supportingComponents`; a nested `children` array is not part of the schema and must never be included in any payload.
+
 #### Delete_Design_Node
 
 Deletes a design node from the graph.
