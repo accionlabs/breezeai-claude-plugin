@@ -53,8 +53,9 @@ Updates a functional graph node (used to mark scenarios as processed).
 - `label` (required): Node type - `Scenario`
 - `id` (required): Node ID to update
 - `data` (required): Object with fields to update
-
-**Example:**
+- `citations` (required): empty array mandetory
+- `citationsIds` (required): empty array mandetory
+  **Example:**
 
 ```json
 {
