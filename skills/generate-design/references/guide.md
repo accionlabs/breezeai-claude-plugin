@@ -156,7 +156,7 @@ Updates an existing design node.
 - `nodeId` (required): The ID of the node to update
 - `data` (required): Object with fields to update
 
-**Example:**
+**Example — link action to existing component:**
 
 ```json
 {
@@ -167,6 +167,42 @@ Updates an existing design node.
   "data": {
     "actionIds": ["<existing actionIds>", "<new action UUID>"],
     "usedIn": ["<existing usedIn>", "<new parent name>"]
+  }
+}
+```
+
+**Example — link step to existing flow (flow deduplication):**
+
+When a flow with the same `(name, modality)` already exists from a prior
+scenario, append the new step's UUID to the existing flow's `stepIds[]`.
+This reuses the entire flow including all its pages and components.
+
+```json
+{
+  "uuid": "<projectUuid>",
+  "apiKey": "<apiKey>",
+  "label": "Flow",
+  "nodeId": "<existing flow UUID>",
+  "data": {
+    "stepIds": ["<existing step-uuid-1>", "<new step-uuid-from-current-scenario>"]
+  }
+}
+```
+
+**Example — link step to existing page (page deduplication):**
+
+When a page with the same `(name, pageType, modality)` already exists from a
+prior scenario, append the new step's UUID to the existing page's `stepIds[]`
+instead of creating a duplicate page.
+
+```json
+{
+  "uuid": "<projectUuid>",
+  "apiKey": "<apiKey>",
+  "label": "Page",
+  "nodeId": "<existing page UUID>",
+  "data": {
+    "stepIds": ["<existing step-uuid-1>", "<new step-uuid-from-current-scenario>"]
   }
 }
 ```

@@ -105,11 +105,28 @@ Query existing design nodes to find what's already mapped:
 | Step            | Flow/Page   | `stepIds[]`   |
 | Action          | Component   | `actionIds[]` |
 
-### 2b. Build Reusable Component Registry
+### 2b. Build Reusable Registries
 
-Rebuild every iteration — query `Get_all_Design_By_Label` (label=`Component`)
-or `Design_Graph_Search`. Index by `designSystemRef` (level-1) and by
-`(type, semantic-name, domain)` (level-2/3). The DB is the source of truth.
+Rebuild every iteration from DB (source of truth). Query fresh via
+`Get_all_Design_By_Label` before generating nodes.
+
+**Flow Registry:**
+
+Query `Get_all_Design_By_Label` (label=`Flow`). Index by
+`(name, modality)`. Used in Step 3b to avoid duplicating flows
+across scenarios.
+
+**Page Registry:**
+
+Query `Get_all_Design_By_Label` (label=`Page`). Index by
+`(name, pageType, modality)`. Used in Step 3b to avoid duplicating pages
+across scenarios.
+
+**Component Registry:**
+
+Query `Get_all_Design_By_Label` (label=`Component`) or `Design_Graph_Search`.
+Index by `designSystemRef` (level-1) and by `(type, semantic-name, domain)`
+(level-2/3). Used in Step 3c for component reuse.
 
 | Level    | Scope              |
 | -------- | ------------------ |
@@ -145,6 +162,38 @@ A Step maps to Flow OR Page, never both.
 | Process spanning multiple screens | Form, list, detail, or dashboard |
 
 Create separate Flow/Page for EACH selected modality.
+
+**Flow Deduplication (LINK before CREATE):**
+
+Before creating a Flow, check the flow registry from Step 2b for an existing
+flow with the same `(name, modality)`. If a match is found:
+
+- Do NOT create a new Flow or its child Pages
+- LINK: issue an `Update_Design_Node` call to append the current step's UUID
+  to the existing flow's `stepIds[]`
+- In the bulk payload, omit this flow entirely (it and its pages/components
+  already exist)
+- In the preview (Step 4), show the flow under "REUSE EXISTING" rather than
+  "NEW"
+
+A flow contains multiple pages that together complete the flow. Reusing a
+flow automatically reuses all its pages and their components.
+
+**Page Deduplication (LINK before CREATE):**
+
+Before creating a Page, check the page registry from Step 2b for an existing
+page with the same `(name, pageType, modality)`. If a match is found:
+
+- Do NOT create a new Page
+- LINK: issue an `Update_Design_Node` call to append the current step's UUID
+  to the existing page's `stepIds[]`
+- In the bulk payload, omit this page (and its components — they already
+  exist on the page)
+- In the preview (Step 4), show the page under "REUSE EXISTING" rather than
+  "NEW"
+
+This prevents the same page (e.g., "Patient Dashboard") from being duplicated
+when multiple scenarios reference it.
 
 ### 3c. Component Reuse Resolution (REUSE FIRST)
 
