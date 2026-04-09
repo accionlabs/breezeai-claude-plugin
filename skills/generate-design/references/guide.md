@@ -21,12 +21,12 @@ Fetches scenarios from the functional graph with pagination and filtering.
 
 **Filter Examples:**
 
-| Filter | Description |
-|--------|-------------|
+| Filter                                  | Description              |
+| --------------------------------------- | ------------------------ |
 | `filters[isDesignGenerated][$eq]=false` | Scenarios without design |
-| `filters[isDesignGenerated][$eq]=true` | Scenarios with design |
-| `filters[name][$contains]=<text>` | Filter by scenario name |
-| `filters[status][$eq]=<status>` | Filter by status |
+| `filters[isDesignGenerated][$eq]=true`  | Scenarios with design    |
+| `filters[name][$contains]=<text>`       | Filter by scenario name  |
+| `filters[status][$eq]=<status>`         | Filter by status         |
 
 #### Get_all_steps_actions_for_a_scenario_id
 
@@ -64,7 +64,9 @@ Updates a functional graph node (used to mark scenarios as processed).
   "id": "<scenario UUID>",
   "data": {
     "isDesignGenerated": true
-  }
+  },
+  "citations": [],
+  "citationsIds": []
 }
 ```
 
@@ -109,19 +111,19 @@ Query design nodes with various filters. This is the most flexible query tool.
 
 **Query Parameter Examples:**
 
-| Use Case | Query Params |
-|----------|--------------|
-| Get by specific ID | `id=uj-123` |
-| Get by multiple IDs | `id=uj-123&id=uj-456` |
-| Get Flows by UserJourney | `userJourneyId=uj-123` |
-| Get Pages by Flow | `flowId=flow-123` |
-| Get Components by Page | `pageId=page-123` |
-| Get Components by parent | `parentComponentId=comp-123` |
-| Get Components by type | `type=ORGANISM` or `type=MOLECULE` or `type=ATOM` |
-| Get Pages by pageType | `pageType=form` or `pageType=list` |
-| Get by modality | `modality=web` or `modality=mobile` |
-| Combine filters | `pageId=page-123&type=ORGANISM` |
-| With pagination | `page=1&limit=50&sortName=name&sortOrder=asc` |
+| Use Case                 | Query Params                                      |
+| ------------------------ | ------------------------------------------------- |
+| Get by specific ID       | `id=uj-123`                                       |
+| Get by multiple IDs      | `id=uj-123&id=uj-456`                             |
+| Get Flows by UserJourney | `userJourneyId=uj-123`                            |
+| Get Pages by Flow        | `flowId=flow-123`                                 |
+| Get Components by Page   | `pageId=page-123`                                 |
+| Get Components by parent | `parentComponentId=comp-123`                      |
+| Get Components by type   | `type=ORGANISM` or `type=MOLECULE` or `type=ATOM` |
+| Get Pages by pageType    | `pageType=form` or `pageType=list`                |
+| Get by modality          | `modality=web` or `modality=mobile`               |
+| Combine filters          | `pageId=page-123&type=ORGANISM`                   |
+| With pagination          | `page=1&limit=50&sortName=name&sortOrder=asc`     |
 
 **Use when:** You need to query nodes by specific relationships or properties.
 
@@ -184,7 +186,10 @@ This reuses the entire flow including all its pages and components.
   "label": "Flow",
   "nodeId": "<existing flow UUID>",
   "data": {
-    "stepIds": ["<existing step-uuid-1>", "<new step-uuid-from-current-scenario>"]
+    "stepIds": [
+      "<existing step-uuid-1>",
+      "<new step-uuid-from-current-scenario>"
+    ]
   }
 }
 ```
@@ -202,7 +207,10 @@ instead of creating a duplicate page.
   "label": "Page",
   "nodeId": "<existing page UUID>",
   "data": {
-    "stepIds": ["<existing step-uuid-1>", "<new step-uuid-from-current-scenario>"]
+    "stepIds": [
+      "<existing step-uuid-1>",
+      "<new step-uuid-from-current-scenario>"
+    ]
   }
 }
 ```
@@ -257,7 +265,11 @@ deduplication (upsert by `designSystemRef`) automatically.
                   "layoutType": "vertical",
                   "slots": ["header", "body", "footer"],
                   "actionIds": ["action-uuid-1"],
-                  "supportingComponents": ["EmailInput", "PasswordInput", "SubmitButton"]
+                  "supportingComponents": [
+                    "EmailInput",
+                    "PasswordInput",
+                    "SubmitButton"
+                  ]
                 }
               ]
             },
@@ -304,12 +316,12 @@ deduplication (upsert by `designSystemRef`) automatically.
 Every non-ATOM component MUST include a `supportingComponents` array listing its direct
 child components:
 
-| Component Type | `supportingComponents` value                 |
-|----------------|----------------------------------------------|
-| TEMPLATE       | Names of ORGANISMs it contains               |
-| ORGANISM       | Names of MOLECULEs and/or ATOMs it contains  |
-| MOLECULE       | Names of ATOMs it contains                   |
-| ATOM           | `[]` (leaf node — no supportingComponents)   |
+| Component Type | `supportingComponents` value                |
+| -------------- | ------------------------------------------- |
+| TEMPLATE       | Names of ORGANISMs it contains              |
+| ORGANISM       | Names of MOLECULEs and/or ATOMs it contains |
+| MOLECULE       | Names of ATOMs it contains                  |
+| ATOM           | `[]` (leaf node — no supportingComponents)  |
 
 **Example composition:**
 
@@ -369,12 +381,12 @@ Proceed with deletion? (Yes/No)
 
 **Deletion Impact:**
 
-| Node Type | Impact of Deletion |
-|-----------|-------------------|
-| UserJourney | Orphans child Flows |
-| Flow | Orphans child Pages |
-| Page | Orphans child Components |
-| Component | Orphans child Components (if ORGANISM with supportingComponents) |
+| Node Type   | Impact of Deletion                                               |
+| ----------- | ---------------------------------------------------------------- |
+| UserJourney | Orphans child Flows                                              |
+| Flow        | Orphans child Pages                                              |
+| Page        | Orphans child Components                                         |
+| Component   | Orphans child Components (if ORGANISM with supportingComponents) |
 
 ### Cascade Delete Option
 
@@ -407,12 +419,12 @@ Select option: (1/2/3)
 
 **Cascade Delete by Node Type:**
 
-| Node Type | Cascade Deletes | Preserved (Not Deleted) |
-|-----------|-----------------|------------------------|
-| UserJourney | Flows → Pages | All Components |
-| Flow | Pages | All Components |
-| Page | (none) | All Components |
-| Component | (not supported) | - |
+| Node Type   | Cascade Deletes | Preserved (Not Deleted) |
+| ----------- | --------------- | ----------------------- |
+| UserJourney | Flows → Pages   | All Components          |
+| Flow        | Pages           | All Components          |
+| Page        | (none)          | All Components          |
+| Component   | (not supported) | -                       |
 
 ---
 
@@ -1371,14 +1383,14 @@ PAGE ORGANISMS (built from domain organisms):
 
 ### Action → Component Type Mapping
 
-| Action Pattern          | Component Type                  | Example                                                |
-| ----------------------- | ------------------------------- | ------------------------------------------------------ |
+| Action Pattern          | Component Type                              | Example                                                |
+| ----------------------- | ------------------------------------------- | ------------------------------------------------------ |
 | Multiple related inputs | ORGANISM with MOLECULE supportingComponents | "Record Patient Information" → Patient Form (ORGANISM) |
-| Single input action     | MOLECULE or ATOM                | "Enter patient name" → Name Input (ATOM)               |
-| Selection action        | ATOM (select/dropdown)          | "Select gender" → Gender Select (ATOM)                 |
-| Submit/trigger action   | ATOM (button)                   | "Submit form" → Submit Button (ATOM)                   |
-| Display action          | MOLECULE or ORGANISM            | "View results" → Results Panel (ORGANISM)              |
-| Date/time entry         | MOLECULE                        | "Enter admission date" → DateTime Picker (MOLECULE)    |
+| Single input action     | MOLECULE or ATOM                            | "Enter patient name" → Name Input (ATOM)               |
+| Selection action        | ATOM (select/dropdown)                      | "Select gender" → Gender Select (ATOM)                 |
+| Submit/trigger action   | ATOM (button)                               | "Submit form" → Submit Button (ATOM)                   |
+| Display action          | MOLECULE or ORGANISM                        | "View results" → Results Panel (ORGANISM)              |
+| Date/time entry         | MOLECULE                                    | "Enter admission date" → DateTime Picker (MOLECULE)    |
 
 ### Payload Structure
 
