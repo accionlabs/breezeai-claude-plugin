@@ -61,7 +61,7 @@ Updates a functional graph node (used to mark scenarios as processed).
   "uuid": "<projectUuid>",
   "apiKey": "<apiKey>",
   "label": "Scenario",
-  "id": "<scenario UUID>",
+  "id": "<scenario id>",
   "data": {
     "isDesignGenerated": true
   },
