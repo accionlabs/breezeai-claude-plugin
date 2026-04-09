@@ -173,6 +173,147 @@ Updates an existing design node.
 
 > **Note:** Always append to existing arrays, don't replace them. First fetch the current node to get current values.
 
+#### Bulk_Update_Design_Nodes
+
+Creates the entire UserJourney tree for a scenario in one call using a nested
+payload. The backend handles hierarchy creation, ID linking, and component
+deduplication (upsert by `designSystemRef`) automatically.
+
+**Inputs:**
+
+- `uuid` (required): Project UUID
+- `apiKey` (required): API key from .breeze.json
+- `data` (required): Nested tree object (see payload structure below)
+
+**Payload Structure:**
+
+```json
+{
+  "userJourneys": [
+    {
+      "name": "User Registration Journey",
+      "description": "End-to-end registration flow",
+      "scenarioId": "scenario-uuid-from-functional-graph",
+      "flows": [
+        {
+          "name": "Sign Up Flow",
+          "description": "New user sign up process",
+          "modality": "WEB",
+          "entryPoint": "page-id-1",
+          "exitPoint": "page-id-3",
+          "stepIds": ["step-uuid-1", "step-uuid-2"],
+          "pages": [
+            {
+              "name": "Registration Page",
+              "description": "User fills in registration details",
+              "pageType": "form",
+              "requiresAuth": false,
+              "allowedRoles": [],
+              "stepIds": ["step-uuid-1"],
+              "components": [
+                {
+                  "name": "RegistrationForm",
+                  "type": "ORGANISM",
+                  "description": "Main registration form with validation",
+                  "designSystemRef": "ds-form-ref",
+                  "props": "{\"variant\": \"primary\"}",
+                  "states": ["idle", "loading", "error", "success"],
+                  "layoutType": "vertical",
+                  "slots": ["header", "body", "footer"],
+                  "actionIds": ["action-uuid-1"],
+                  "children": [
+                    {
+                      "name": "EmailInput",
+                      "type": "ATOM",
+                      "description": "Email input field",
+                      "designSystemRef": "ds://inputs/TextInput@1.0",
+                      "actionIds": ["action-uuid-2"]
+                    },
+                    {
+                      "name": "PasswordInput",
+                      "type": "ATOM",
+                      "description": "Password input with strength meter",
+                      "designSystemRef": "ds://inputs/PasswordInput@1.0"
+                    },
+                    {
+                      "name": "SubmitButton",
+                      "type": "ATOM",
+                      "description": "Submit registration button",
+                      "designSystemRef": "ds://buttons/Button@1.0",
+                      "actionIds": ["action-uuid-3"]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "Confirmation Page",
+              "description": "Email verification confirmation",
+              "pageType": "info",
+              "requiresAuth": false,
+              "stepIds": ["step-uuid-2"],
+              "components": [
+                {
+                  "name": "ConfirmationMessage",
+                  "type": "MOLECULE",
+                  "description": "Displays confirmation message",
+                  "designSystemRef": "ds://feedback/Alert@1.0"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Payload Rules:**
+
+- **One UserJourney per call** — each call handles one scenario. Do NOT batch
+  multiple scenarios.
+- **Nesting = hierarchy** — Flows nest under UserJourney, Pages under Flows,
+  Components under Pages, child Components under parent Components via
+  `children`.
+- **Component children** — ORGANISM lists MOLECULE/ATOM children, MOLECULE
+  lists ATOM children, ATOM has no children (omit or `[]`).
+- **Upsert for reuse** — include reusable components with their
+  `designSystemRef`. If a component with the same ref exists, the backend
+  appends new `actionIds` instead of duplicating.
+- **Multi-modality** — include separate Flow entries per modality under the
+  same UserJourney, each with its own `modality` field.
+
+**Children Array (Component Composition):**
+
+Every non-ATOM component MUST include a `children` array listing its direct
+child components:
+
+| Component Type | `children` value                             |
+|----------------|----------------------------------------------|
+| TEMPLATE       | Names of ORGANISMs it contains               |
+| ORGANISM       | Names of MOLECULEs and/or ATOMs it contains  |
+| MOLECULE       | Names of ATOMs it contains                   |
+| ATOM           | `[]` (leaf node — no children)               |
+
+**Example composition:**
+
+```
+TEMPLATE "RegistrationPageLayout"
+  children: ["HeaderBar", "PatientRegistrationForm", "FooterActions"]
+
+ORGANISM "PatientRegistrationForm"
+  children: ["FullNameField", "EmailField", "PhoneField", "DatePickerField", "GenderSelect", "SubmitButton"]
+
+MOLECULE "FullNameField"
+  children: ["TextLabel", "TextInput", "ValidationMessage"]
+
+ATOM "TextInput"
+  children: []
+```
+
+Order within `children` reflects visual/logical order on the page.
+
 #### Delete_Design_Node
 
 Deletes a design node from the graph.

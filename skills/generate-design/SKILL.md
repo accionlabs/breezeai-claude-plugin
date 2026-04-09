@@ -7,14 +7,9 @@ description: >
   "map functional to design graph".
 ---
 
-## Reference
+## Resources
 
-Consult `references/guide.md` for:
-
-- API tools documentation (Query & Mutation tools)
-- Detailed mapping rules and payload structures
-- Component types and reusability patterns
-- designSystemRef lookup tables
+- For API tools, mapping rules, payload structures, bulk upsert format, component types, children array, reusability patterns, and designSystemRef lookup tables, read [references/guide.md](references/guide.md)
 
 ---
 
@@ -23,19 +18,19 @@ Consult `references/guide.md` for:
 Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
 Extract `apiKey` and `projectUuid`.
 
-> 💡 **Parameter naming hint:** All Breeze MCP tools require the project ID
+> **Parameter naming hint:** All Breeze MCP tools require the project ID
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
 > `projectUuid`). When calling any Breeze MCP tool, pass the value from
 > `.breeze.json`'s `projectUuid` field as the `uuid` argument. Using any other
 > name will fail with `Required → at uuid`.
 >
-> 💡 **Scenario ID hint:** When calling
+> **Scenario ID hint:** When calling
 > `Get_all_steps_actions_for_a_scenario_id`, the scenario ID parameter MUST
 > be named **`parameters0_Value`** (NOT `scenarioId`, `id`, or `scenario_id`).
 > It maps to `filters[id][$eq]` on the backend. Using any other name fails
 > with `Required → at parameters0_Value`.
 >
-> 💡 **Design-by-label hint:** When calling `Get_all_Design_By_Label`, pass
+> **Design-by-label hint:** When calling `Get_all_Design_By_Label`, pass
 > the node label as **`label`** (e.g., `label: "Component"`), NOT as
 > `parameters0_Value`. The `parameters0_Value` naming is specific to
 > `Get_all_steps_actions_for_a_scenario_id` — do not generalize it. Using
@@ -68,27 +63,18 @@ Ask user which modalities to generate design nodes for:
 
 Process scenarios one at a time (incremental batch processing).
 
-> ⛔ **MANDATORY — DO NOT BULK FETCH THE FUNCTIONAL GRAPH.**
+> **MANDATORY — DO NOT BULK FETCH THE FUNCTIONAL GRAPH.**
 > NEVER call `Get_complete_functional_graph` or any tool that returns the entire
-> functional graph in one shot. Functional graphs can be arbitrarily large and
-> bulk fetching WILL blow the context window. You cannot know the size in
-> advance, so always assume it is large and fetch incrementally per scenario
-> using the loop below. This rule has no exceptions, even for "small" projects.
+> functional graph in one shot. Always fetch incrementally per scenario.
 
 **Required incremental fetch sequence (per iteration):**
 
-1. `Get_scenarios_by_uuid` — fetch ONE unprocessed scenario directly using:
-   - `uuid`: projectUuid from `.breeze.json`
-   - `limit`: 1
-   - `page`: 1
-   - `filters[isDesignGenerated][$eq]=false`
-     This returns the next scenario whose design graph has not yet been generated.
-     Do NOT walk personas → outcomes → scenarios; call this tool directly.
-2. `Get_all_steps_actions_for_a_scenario_id` — fetch steps + actions for ONLY
-   that one scenario
+1. `Get_scenarios_by_uuid` — fetch ONE unprocessed scenario (`limit: 1`,
+   `page: 1`, `filters[isDesignGenerated][$eq]=false`)
+2. `Get_all_steps_actions_for_a_scenario_id` — fetch steps + actions for
+   ONLY that scenario
 3. Generate design nodes for that scenario
-4. Mark the scenario as processed by setting `isDesignGenerated=true` (this is
-   what makes the next `Get_scenarios_by_uuid` call return the next one)
+4. Mark scenario as processed (`isDesignGenerated=true`)
 5. Drop the scenario's data from working memory and repeat
 
 **Processing Loop:**
@@ -96,38 +82,14 @@ Process scenarios one at a time (incremental batch processing).
 ```
 LOOP:
   1. Fetch ONE scenario where isDesignGenerated=false
-     Get_scenarios_by_uuid(uuid, limit=1, page=1,
-       filters[isDesignGenerated][$eq]=false)
-
-  2. IF no scenario found:
-       Show: "All scenarios processed. Design generation complete."
-       EXIT
-
+  2. IF no scenario found → EXIT
   3. Fetch steps and actions for THIS scenario ONLY
-     (Get_all_steps_actions_for_a_scenario_id)
-
-  4. Show progress:
-       Processing scenario: "Patient Registration"
-         ├── Found 4 steps, 12 actions
-         └── Processing...
-
+  4. Show progress
   5. Execute Steps 2-5 for this scenario
-
-  6. Mark scenario as processed (isDesignGenerated=true)
-
-  7. Show: "Completed scenario: Patient Registration"
-
-  8. REPEAT from step 1
+  6. Mark scenario as processed
+  7. REPEAT from step 1
 END LOOP
 ```
-
-**Why incremental is mandatory:**
-
-- Bulk fetches can exceed the context window on large projects
-- You cannot determine graph size before fetching it
-- Per-scenario fetching keeps memory bounded regardless of project size
-- Allows resumption if interrupted
-- Maintains data consistency per scenario
 
 ---
 
@@ -145,27 +107,15 @@ Query existing design nodes to find what's already mapped:
 
 ### 2b. Build Reusable Component Registry
 
-Analyze actions and identify reusable patterns:
+Rebuild every iteration — query `Get_all_Design_By_Label` (label=`Component`)
+or `Design_Graph_Search`. Index by `designSystemRef` (level-1) and by
+`(type, semantic-name, domain)` (level-2/3). The DB is the source of truth.
 
-| Level    | Scope              | Examples                   |
-| -------- | ------------------ | -------------------------- |
-| `GLOBAL` | Entire application | TextInput, Button, Select  |
-| `DOMAIN` | Business domain    | PatientCard, VitalsDisplay |
-| `PAGE`   | Single page        | Specific layout component  |
-
-Build map: `{ designSystemRef → existingComponentId or "CREATE_NEW" }`
-
-> ⚠️ **Registry must be rebuilt every iteration.** Do NOT cache the
-> component registry across scenarios. At the start of each scenario
-> iteration (after Step 1 fetches the scenario, before Step 3 generates
-> nodes), query the design graph fresh via `Get_all_Design_By_Label`
-> (label=`Component`) or, for large projects, `Design_Graph_Search`
-> scoped to the current scenario's action vocabulary. The DB is the
-> source of truth — this is what makes reuse work both across loop
-> iterations within a run AND across separate runs of the skill
-> (e.g., when a new scenario is added later). Index the result by
-> `designSystemRef` (level-1 match) and by `(type, semantic-name,
-domain)` (level-2/3 matches).
+| Level    | Scope              |
+| -------- | ------------------ |
+| `GLOBAL` | Entire application |
+| `DOMAIN` | Business domain    |
+| `PAGE`   | Single page        |
 
 ### 2c. For Existing Mappings, Ask User
 
@@ -181,19 +131,12 @@ domain)` (level-2/3 matches).
 
 ### 3a. Scenario → UserJourney
 
-Create one UserJourney per Scenario with `scenarioId` link.
-
-**Naming convention:** UserJourney `name` MUST end with the suffix
-`Journey`. Derive it from the scenario name and append `Journey` if not
-already present.
-
-- Scenario `Patient Registration` → UserJourney `Patient Registration Journey`
-- Scenario `Checkout` → UserJourney `Checkout Journey`
-- Scenario `Onboarding Journey` → keep as-is (already ends in `Journey`)
+One UserJourney per Scenario with `scenarioId` link.
+Name MUST end with `Journey` suffix.
 
 ### 3b. Step → Flow OR Page (Exclusive)
 
-> A Step maps to Flow OR Page, never both.
+A Step maps to Flow OR Page, never both.
 
 | Choose Flow When                  | Choose Page When                 |
 | --------------------------------- | -------------------------------- |
@@ -201,67 +144,25 @@ already present.
 | Reusable sub-journey pattern      | Data entry/display on one screen |
 | Process spanning multiple screens | Form, list, detail, or dashboard |
 
-**Create separate Flow/Page for EACH selected modality.**
+Create separate Flow/Page for EACH selected modality.
 
 ### 3c. Component Reuse Resolution (REUSE FIRST)
 
-Before creating any new Component, walk this priority order and stop at the
-first match. Always prefer reuse over creation.
+Walk this priority order, stop at the first match:
 
-1. **Exact `designSystemRef` match** — a component already exists in the
-   registry with the same `designSystemRef` (e.g., `ds://forms/TextInput@1.0`).
-   REUSE: append the new `actionId` to its `actionIds[]`.
-2. **Semantic + type match in same domain** — same component `type`
-   (ATOM/MOLECULE) and semantically equivalent purpose within the same
-   business domain (e.g., two "Patient name" inputs in the Patient domain).
-   REUSE the existing DOMAIN-level component.
-3. **Global atom/molecule match** — a `GLOBAL`-scoped ATOM or MOLECULE
-   exists that satisfies the action regardless of domain (TextInput, Button,
-   Select, Checkbox, DatePicker). REUSE the global component.
-4. **Template/layout match** — for TEMPLATE-level reuse, an existing
-   template matches the target `pageType` and modality. REUSE the template,
-   only its slotted children differ.
-5. **Create new** — no match above. Create with the narrowest reusability
-   scope that is still correct: `GLOBAL` > `DOMAIN` > `PAGE`.
+1. **Exact `designSystemRef` match** → REUSE (append `actionId`)
+2. **Semantic + type match in same domain** → REUSE
+3. **Global atom/molecule match** → REUSE
+4. **Template/layout match** → REUSE
+5. **Create new** → narrowest correct scope (`GLOBAL` > `DOMAIN` > `PAGE`)
 
 **Hard rules:**
 
-- Always check the registry built in Step 2b BEFORE creating.
-- ORGANISM containers are page-specific — always CREATE NEW at level 5,
-  never reuse across pages. Their MOLECULE/ATOM children still follow
-  rules 1–3.
-- Merge near-duplicates (e.g., "Email Field" and "EmailInput" with same
-  `designSystemRef`) — pick one canonical name and reuse it.
-- Never downgrade scope on reuse: if a component is `GLOBAL`, do not
-  create a `DOMAIN` copy of it for a new action — just append the
-  `actionId`.
-- If two candidates tie, prefer the one with the higher reusability scope
-  (GLOBAL > DOMAIN > PAGE) and the more `actionIds[]` already linked.
-
-### 3c-bis. Action → Component (mechanics)
-
-```
-For each Action:
-    │
-    ├─► 1. Determine designSystemRef from action content
-    │
-    ├─► 2. Check Registry: Does component exist?
-    │       │
-    │       ├─► YES → REUSE: Add actionId to existing component
-    │       │
-    │       └─► NO → CREATE NEW with reusability level
-    │
-    └─► 3. ORGANISM containers: Always create new (page-specific)
-            But children (MOLECULE/ATOM) can be reused
-```
-
-**What gets REUSED vs CREATED NEW:**
-
-| Component Type           | Reuse? | Reason                            |
-| ------------------------ | ------ | --------------------------------- |
-| ATOM (TextInput, Button) | REUSE  | Same UI element, different labels |
-| MOLECULE (FormField)     | REUSE  | Same pattern, different config    |
-| ORGANISM (PatientForm)   | NEW    | Page-specific containers          |
+- Always check registry from Step 2b BEFORE creating
+- ORGANISM containers are page-specific — always CREATE NEW; children follow rules 1–3
+- Merge near-duplicates with same `designSystemRef`
+- Never downgrade scope on reuse
+- Ties: prefer higher scope and more `actionIds[]` linked
 
 ### 3d. Template Generation (Optional)
 
@@ -275,71 +176,11 @@ Preserve `order` field from functional graph in design nodes.
 
 ## Step 4: User Confirmation (Per Scenario)
 
-Before creating any nodes, show user a complete preview for the current scenario.
+Before creating nodes, show a preview for the current scenario covering:
+UserJourneys, Flows, Pages, Components (new + reused). Include a summary
+with total nodes to create and actions to link.
 
-### Preview Format
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 DESIGN NODES PREVIEW - Scenario: "Patient Registration"
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔹 UserJourney (1 node)
-┌─────────────────────────────────────────────────────────────────┐
-│ Name                      │ Mapped From                         │
-├───────────────────────────┼─────────────────────────────────────┤
-│ Patient Registration      │ Scenario: Patient Registration      │
-└─────────────────────────────────────────────────────────────────┘
-
-🔹 Flows (2 nodes)
-┌─────────────────────────────────────────────────────────────────┐
-│ Name                      │ Modality │ Mapped From              │
-├───────────────────────────┼──────────┼──────────────────────────┤
-│ Registration Flow (web)   │ web      │ Step: Complete Registration│
-│ Registration Flow (mobile)│ mobile   │ Step: Complete Registration│
-└─────────────────────────────────────────────────────────────────┘
-
-🔹 Pages (4 nodes)
-┌─────────────────────────────────────────────────────────────────┐
-│ Name                      │ Modality │ PageType │ Mapped From   │
-├───────────────────────────┼──────────┼──────────┼───────────────┤
-│ Patient Form (web)        │ web      │ form     │ Step: Enter Info│
-│ Patient Form (mobile)     │ mobile   │ form     │ Step: Enter Info│
-│ Confirmation (web)        │ web      │ detail   │ Step: Confirm   │
-│ Confirmation (mobile)     │ mobile   │ detail   │ Step: Confirm   │
-└─────────────────────────────────────────────────────────────────┘
-
-🔹 Components - NEW (3 nodes)
-┌─────────────────────────────────────────────────────────────────┐
-│ Name                │ Type     │ Reuse  │ Mapped From           │
-├─────────────────────┼──────────┼────────┼───────────────────────┤
-│ PatientForm         │ ORGANISM │ PAGE   │ (container)           │
-│ DatePickerField     │ MOLECULE │ GLOBAL │ Action: Select DOB    │
-│ GenderSelect        │ ATOM     │ GLOBAL │ Action: Select Gender │
-└─────────────────────────────────────────────────────────────────┘
-
-🔹 Components - REUSE EXISTING (5 links)
-┌─────────────────────────────────────────────────────────────────┐
-│ Existing Component  │ Type     │ Action to Link                 │
-├─────────────────────┼──────────┼────────────────────────────────┤
-│ TextInputField      │ MOLECULE │ Action: Enter Name             │
-│ TextInputField      │ MOLECULE │ Action: Enter Email            │
-│ TextInputField      │ MOLECULE │ Action: Enter Phone            │
-│ Button              │ ATOM     │ Action: Submit Form            │
-│ Button              │ ATOM     │ Action: Cancel                 │
-└─────────────────────────────────────────────────────────────────┘
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 SUMMARY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Total nodes to CREATE: 10 (1 UserJourney + 2 Flows + 4 Pages + 3 Components)
-Total actions to LINK: 5 (reusing existing components)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-### Confirmation Options
-
-Ask user: **"Proceed with creating these design nodes for this scenario?"**
+Ask: **"Proceed with creating these design nodes for this scenario?"**
 
 | Option     | Action                                   |
 | ---------- | ---------------------------------------- |
@@ -347,73 +188,57 @@ Ask user: **"Proceed with creating these design nodes for this scenario?"**
 | **No**     | Skip this scenario, move to next         |
 | **Modify** | Let user specify changes before creating |
 
-### If User Selects "Modify"
-
-Allow user to:
-
-- Remove specific nodes from creation
-- Change node names
-- Change component reusability level
-- Skip certain mappings
-- Change modality assignment
-
-After modifications, show updated preview and ask for confirmation again.
+If "Modify": allow removing nodes, changing names, reusability levels,
+modality assignments. Show updated preview and re-confirm.
 
 ---
 
-## Step 5: Create Design Nodes
+## Step 5: Create Design Nodes (Bulk Upsert)
 
-> ⛔ **MANDATORY — DO NOT BULK CREATE.** Bulk/nested create payloads are NOT
-> allowed. Create each node with its own single Breeze MCP call. Walk the
-> tree top-down (UserJourney → Flow → Page → Component → child Component)
-> and issue one create call per node, passing the parent ID returned from
-> the previous call as the explicit parent reference on the child.
+Use `Bulk_Update_Design_Nodes` to create the entire UserJourney tree for the
+current scenario in **one call**. See [references/guide.md](references/guide.md)
+for the full payload structure, children array rules, and examples.
 
-### 5a. Per-Node Create Sequence
+### 5a. Build the Bulk Payload
 
-For the current scenario, in order:
+Assemble the nested tree from the confirmed preview: UserJourney → Flows →
+Pages → Components (with `children`). One UserJourney per call (one scenario).
 
-1. Create the **UserJourney** (1 call) — pass `scenarioId`. Capture its
-   returned `uuid`.
-2. For each **Flow** under it: 1 call, passing `userJourneyId` = the
-   UserJourney `uuid` from step 1, plus `stepIds[]` and `modality`.
-3. For each **Page** under a Flow (or directly under the UserJourney if no
-   Flow): 1 call, passing `flowId` (or `userJourneyId`), `pageType`,
-   `stepIds[]`.
-4. For each **Component** on a Page: 1 call, passing `pageId` and
-   `actionIds[]`. For nested children (MOLECULE/ATOM inside an ORGANISM),
-   pass `parentComponentId` = the parent component `uuid` from the prior
-   call.
+### 5b. Payload Rules
 
-Each call is a single create — never combine multiple nodes into one
-payload, and never use a nested `children`/`pages`/`flows` array on a
-parent create.
+- **Nesting = hierarchy** — backend wires parent-child relationships
+- **Component children** — ORGANISM → MOLECULE/ATOM, MOLECULE → ATOM, ATOM → `[]`
+- **Reused components** — include with `designSystemRef`; backend deduplicates via upsert
+- **Multi-modality** — separate Flow entries per modality under the same UserJourney
 
-### 5b. Link Actions to Existing Components
+### 5c. Make the Call
 
-For components being reused (from Step 2b registry — created in this run or
-a prior run), do NOT create a new component. Issue a single update call to
-append the new action UUIDs to the existing component's `actionIds[]`.
+```
+Bulk_Update_Design_Nodes(
+  uuid: <projectUuid>,
+  apiKey: <apiKey>,
+  data: <nested payload>
+)
+```
 
-### 5c. Hierarchy
+### 5d. Error Handling
 
-Hierarchy is established **explicitly** via parent-id fields on each create
-call (`userJourneyId`, `flowId`, `pageId`, `parentComponentId`). You must
-wait for each parent create to return its `uuid` before issuing the child
-create — these calls are sequential, not parallel.
+| Failure Point              | Recovery Action                              |
+| -------------------------- | -------------------------------------------- |
+| Entire bulk call fails     | Retry once; if still fails, report to user   |
+| Partial failure (returned) | Log failed nodes, report to user for review  |
 
-### 5e. Error Handling
+### 5e. Mark Scenario as Processed
 
-| Failure Point        | Recovery Action                        |
-| -------------------- | -------------------------------------- |
-| UserJourney creation | Cannot proceed - critical failure      |
-| Flow/Page creation   | Skip dependent components, log warning |
-| Component creation   | Continue with other components         |
-| Reuse update fails   | Create new component instead           |
-
-### 5e. Mark Scenarios as Processed
-
-After successful creation, update scenario with `isDesignGenerated: true`.
+```
+Update_Functional_Node(
+  uuid: <projectUuid>,
+  apiKey: <apiKey>,
+  label: "Scenario",
+  id: <scenario UUID>,
+  data: { "isDesignGenerated": true }
+)
+```
 
 ---
 
