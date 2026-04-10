@@ -39,7 +39,27 @@ Extract `apiKey` and `projectUuid`.
 
 ---
 
-## Step 0: Select Target Modalities
+## Step 0: Select Target Modalities & Processing Mode
+
+### 0a. Processing Mode
+
+Ask user which processing mode to use:
+
+| Mode       | Description                                                        |
+| ---------- | ------------------------------------------------------------------ |
+| `confirm`  | Show preview and ask for confirmation before each scenario (default) |
+| `auto`     | Skip per-scenario confirmation; process all unprocessed scenarios automatically |
+
+**Question:** "Do you want to confirm each scenario before creating design nodes, or process all automatically? (`confirm` / `auto`)"
+
+- Default: `confirm` if user doesn't specify
+- In `auto` mode:
+  - Skip Step 5 (User Confirmation) entirely
+  - Log a one-line progress update per scenario instead (e.g., `"[12/700] Processing: Login Scenario → 3 Flows, 5 Pages, 14 Components"`)
+  - On error: log the failure, skip the scenario, and continue to the next one
+  - Show a final summary at the end (Step 7)
+
+### 0b. Modalities
 
 Ask user which modalities to generate design nodes for:
 
@@ -157,16 +177,24 @@ Process scenarios one at a time (incremental batch processing).
 
 **Processing Loop:**
 
+Before entering the loop, fetch the total count of unprocessed scenarios
+using `Get_scenarios_by_uuid(uuid, page: "1", limit: "1", isDesignGenerated: "false")`
+and read the `total` from the response. Store as `totalScenarios` for
+progress tracking.
+
 ```
+counter = 0
 LOOP:
   1. Fetch ONE scenario where isDesignGenerated=false
   2. IF no scenario found → EXIT
-  3. Fetch steps and actions for THIS scenario ONLY
-  4. Show progress
-  5. Execute Steps 3-6 for this scenario
-  6. Mark scenario as processed
-  7. Append newly created components to existingcomponents.json
-  8. REPEAT from step 1
+  3. counter += 1
+  4. Fetch steps and actions for THIS scenario ONLY
+  5. Show progress: "[counter/totalScenarios] Scenario: <name>"
+  6. Execute Steps 3-6 for this scenario
+     (In `auto` mode: skip Step 5 user confirmation)
+  7. Mark scenario as processed
+  8. Append newly created components to existingcomponents.json
+  9. REPEAT from step 1
 END LOOP
 ```
 
@@ -307,6 +335,14 @@ Preserve `order` field from functional graph in design nodes.
 
 ## Step 5: User Confirmation (Per Scenario)
 
+> **Skip this step entirely when processing mode is `auto`.**
+> In `auto` mode, proceed directly to Step 6 after generating the design
+> nodes. Print a single progress line instead:
+>
+> `"[{current}/{total}] Processing: {scenarioName} → {flowCount} Flows, {pageCount} Pages, {componentCount} Components"`
+
+### `confirm` mode (default):
+
 Before creating nodes, show a preview for the current scenario covering:
 UserJourneys, Flows, Pages, Components (new + reused). Include a summary
 with total nodes to create and actions to link.
@@ -354,10 +390,14 @@ Bulk_Update_Design_Nodes(
 
 ### 6d. Error Handling
 
-| Failure Point              | Recovery Action                              |
-| -------------------------- | -------------------------------------------- |
-| Entire bulk call fails     | Retry once; if still fails, report to user   |
-| Partial failure (returned) | Log failed nodes, report to user for review  |
+| Failure Point              | `confirm` mode                               | `auto` mode                                      |
+| -------------------------- | -------------------------------------------- | ------------------------------------------------ |
+| Entire bulk call fails     | Retry once; if still fails, report to user   | Retry once; if still fails, log error and skip scenario (continue loop) |
+| Partial failure (returned) | Log failed nodes, report to user for review  | Log failed nodes, continue to next scenario      |
+
+In `auto` mode, collect all errors in a `failedScenarios` list
+(`{ scenarioId, scenarioName, error }`) and include them in the Step 7
+summary.
 
 ### 6e. Update `existingcomponents.json`
 
@@ -392,6 +432,25 @@ Update_Functional_Node(
 ---
 
 ## Step 7: Output Summary
+
+**Processing Summary** (`auto` mode only)
+
+| Metric              | Count |
+| ------------------- | ----- |
+| Total scenarios     | N     |
+| Processed           | N     |
+| Skipped (errors)    | N     |
+
+**Failed Scenarios** (`auto` mode, only if errors occurred)
+
+| Scenario | Error |
+| -------- | ----- |
+| Name     | ...   |
+
+> Failed scenarios remain `isDesignGenerated=false` and will be picked
+> up on the next run.
+
+---
 
 **Design Graph Generated (by Modality)**
 
