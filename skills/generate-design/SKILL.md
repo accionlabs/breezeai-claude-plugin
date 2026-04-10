@@ -270,6 +270,8 @@ A Step maps to Flow OR Page, never both.
 | Process spanning multiple screens | Form, list, detail, or dashboard |
 
 Create separate Flow/Page for EACH selected modality.
+**Name MUST include modality** — format: `{Step} {Modality} Flow` / `{Step} {Modality} Page`
+(e.g., "Sign Up Web Flow", "Sign Up Mobile Flow", "Registration Web Page", "Registration Mobile Page").
 
 **Flow Deduplication (LINK before CREATE):**
 
