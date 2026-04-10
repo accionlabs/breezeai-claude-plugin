@@ -15,18 +15,20 @@ Fetches scenarios from the functional graph with pagination and filtering.
 **Inputs:**
 
 - `uuid` (required): Project UUID
-- `limit` (optional): Number of results per page
-- `page` (optional): Page number for pagination
-- `filters` (optional): Filter string for conditional queries
+- `page` (optional): Page number for pagination (e.g. `"1"`)
+- `limit` (optional): Number of results per page (e.g. `"10"`)
+- `isDesignGenerated` (optional): `"false"` to get scenarios without design, `"true"` for scenarios with design
 
-**Filter Examples:**
+**Example call (unprocessed scenarios):**
 
-| Filter                                  | Description              |
-| --------------------------------------- | ------------------------ |
-| `filters[isDesignGenerated][$eq]=false` | Scenarios without design |
-| `filters[isDesignGenerated][$eq]=true`  | Scenarios with design    |
-| `filters[name][$contains]=<text>`       | Filter by scenario name  |
-| `filters[status][$eq]=<status>`         | Filter by status         |
+```
+Get_scenarios_by_uuid(
+  uuid: "<projectUuid>",
+  page: "1",
+  limit: "10",
+  isDesignGenerated: "false"
+)
+```
 
 #### Get_all_steps_actions_for_a_scenario_id
 

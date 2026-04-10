@@ -69,8 +69,7 @@ Process scenarios one at a time (incremental batch processing).
 
 **Required incremental fetch sequence (per iteration):**
 
-1. `Get_scenarios_by_uuid` — fetch ONE unprocessed scenario (`limit: 1`,
-   `page: 1`, `filters[isDesignGenerated][$eq]=false`)
+1. `Get_scenarios_by_uuid(uuid: "<projectUuid>", page: "1", limit: "1", isDesignGenerated: "false")` — fetch ONE unprocessed scenario
 2. `Get_all_steps_actions_for_a_scenario_id` — fetch steps + actions for
    ONLY that scenario
 3. Generate design nodes for that scenario
