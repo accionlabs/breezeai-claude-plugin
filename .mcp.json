@@ -2,7 +2,7 @@
   "mcpServers": {
     "breeze-mcp": {
       "type": "http",
-      "url": "https://breezeai-mcp-python.accionbreeze.com/mcp"
+      "url": "https://n8n.accionbreeze.com/mcp/onboard-v2"
     }
   }
 }

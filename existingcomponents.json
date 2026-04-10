@@ -329,6 +329,12 @@
       "scope": "GLOBAL",
       "id": "1775839752684-okd0lcd",
       "supportingComponents": []
+    },
+    "ThumbsRatingButton": {
+      "designSystemRef": "Button",
+      "scope": "GLOBAL",
+      "id": "1775840938199-g9uzaf7",
+      "supportingComponents": []
     }
   },
   "MOLECULE": {
@@ -1217,6 +1223,102 @@
       "scope": "PAGE",
       "id": "1775839752679-08ah1e0",
       "supportingComponents": ["EmailFormField", "UpdateButton", "SuccessSnackbar"]
+    },
+    "ExportQuotaExceededPanel": {
+      "designSystemRef": "ExportQuotaExceededPanel",
+      "scope": "PAGE",
+      "id": "1775840163175-gkjdmjj",
+      "supportingComponents": ["FieldLabel", "CreditUsageLabel", "CancelButton"]
+    },
+    "NoteFormDismissPanel": {
+      "designSystemRef": "NoteFormDismissPanel",
+      "scope": "PAGE",
+      "id": "1775840240585-movjg9c",
+      "supportingComponents": ["CancelButton"]
+    },
+    "ProjectOverviewPanel": {
+      "designSystemRef": "ProjectOverviewPanel",
+      "scope": "PAGE",
+      "id": "1775840591918-la02tzq",
+      "supportingComponents": ["CompanyInfoSection", "FieldLabel"]
+    },
+    "ProjectFeaturesAccordion": {
+      "designSystemRef": "ProjectFeaturesAccordion",
+      "scope": "PAGE",
+      "id": "1775840591920-sw1fzxi",
+      "supportingComponents": ["FieldLabel"]
+    },
+    "KeyAccountCompanyAddPanel": {
+      "designSystemRef": "KeyAccountCompanyAddPanel",
+      "scope": "PAGE",
+      "id": "1775840720357-c0zvqa1",
+      "supportingComponents": ["TeamMemberSelect", "FolderListItem", "SaveButton"]
+    },
+    "NotificationBrowsePanel": {
+      "designSystemRef": "NotificationBrowsePanel",
+      "scope": "PAGE",
+      "id": "1775840815608-zlydirk",
+      "supportingComponents": ["ProjectListItem", "PaginationButton"]
+    },
+    "FeatureFeedbackForm": {
+      "designSystemRef": "FeatureFeedbackForm",
+      "scope": "PAGE",
+      "id": "1775840901093-tk8uwfv",
+      "supportingComponents": ["TaskFormFields", "RadioButton", "SaveButton"]
+    },
+    "SuccessTrackerInsightPanel": {
+      "designSystemRef": "SuccessTrackerInsightPanel",
+      "scope": "PAGE",
+      "id": "1775841053264-gz372cd",
+      "supportingComponents": ["StageSummaryCard", "ProjectListItem", "TeamMemberSelect"]
+    },
+    "KeyAccountCompanyRemovePanel": {
+      "designSystemRef": "KeyAccountCompanyRemovePanel",
+      "scope": "PAGE",
+      "id": "1775841214375-75wdovr",
+      "supportingComponents": ["DeleteButton", "CancelButton"]
+    },
+    "PartnerNetworkPanel": {
+      "designSystemRef": "PartnerNetworkPanel",
+      "scope": "PAGE",
+      "id": "1775841406010-z2k909z",
+      "supportingComponents": ["RoleGroupAccordion", "ProjectListItem", "DeleteButton", "ArchivedItemsLink"]
+    },
+    "SuccessTrackerDrawerForm": {
+      "designSystemRef": "SuccessTrackerDrawerForm",
+      "scope": "PAGE",
+      "id": "1775841549009-obskuow",
+      "supportingComponents": ["TaskFormFields", "ActiveToggle", "TeamMemberSelect", "TextArea", "TextInput", "SaveButton"]
+    },
+    "CompanyFolderMovePanel": {
+      "designSystemRef": "CompanyFolderMovePanel",
+      "scope": "PAGE",
+      "id": "1775841638775-rso19wr",
+      "supportingComponents": ["TeamMemberSelect", "SaveButton"]
+    },
+    "MultiOwnerPipelineAssignmentPanel": {
+      "designSystemRef": "MultiOwnerPipelineAssignmentPanel",
+      "scope": "PAGE",
+      "id": "1775841759897-37d3d2f",
+      "supportingComponents": ["TeamMemberSelect", "FolderListItem", "Checkbox", "SaveButton"]
+    },
+    "ExportTemplateCancelPanel": {
+      "designSystemRef": "ExportTemplateCancelPanel",
+      "scope": "PAGE",
+      "id": "1775842110099-0e2wrwv",
+      "supportingComponents": ["ModalTitle", "FieldLabel", "SaveButton", "CancelButton"]
+    },
+    "OpportunityDetailForm": {
+      "designSystemRef": "OpportunityDetailForm",
+      "scope": "PAGE",
+      "id": "1775842331658-s7nwae6",
+      "supportingComponents": ["TaskFormFields", "TeamMemberSelect", "ActiveToggle", "SaveButton"]
+    },
+    "TrackerFolderTogglePanel": {
+      "designSystemRef": "TrackerFolderTogglePanel",
+      "scope": "PAGE",
+      "id": "1775842438246-rdbg8ki",
+      "supportingComponents": ["FolderTypeSelector", "SaveButton", "DeleteButton"]
     }
   },
   "TEMPLATE": {
