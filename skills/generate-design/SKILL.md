@@ -64,54 +64,75 @@ Ask user which modalities to generate design nodes for:
 
 > **MANDATORY — DO NOT RELY ON CACHING FOR COMPONENT REUSABILITY.**
 > At the start of every generate-design run, create (or overwrite) a local
-> `existingcomponents.md` file in the project root. This file is the single
+> `existingcomponents.json` file in the project root. This file is the single
 > source of truth for component reuse decisions across scenarios.
 
-### 1a. Check if `existingcomponents.md` Exists
+### 1a. Check if `existingcomponents.json` Exists
 
-Look for `existingcomponents.md` in the project root. If it does **not**
-exist, create it with the empty template shown in Step 1b before proceeding.
+Look for `existingcomponents.json` in the project root. If it does **not**
+exist, create it with the empty structure before proceeding:
+
+```json
+{
+  "ATOM": {},
+  "MOLECULE": {},
+  "ORGANISM": {},
+  "TEMPLATE": {}
+}
+```
 
 ### 1b. Query All Existing Components
 
 Call `Get_all_Design_By_Label` (label=`Component`) to fetch all components
 already in the design graph.
 
-### 1c. Write `existingcomponents.md`
+### 1c. Write `existingcomponents.json`
 
-Create (or overwrite) the file with this structure:
+Populate (or overwrite) the file. The structure uses **component name as
+key** for fast lookup. Each entry must have:
 
-```markdown
-# Existing Components
+| Field                  | Description                                      |
+| ---------------------- | ------------------------------------------------ |
+| `designSystemRef`      | Design system reference key                      |
+| `scope`                | `GLOBAL`, `DOMAIN`, or `PAGE`                    |
+| `id`                   | Node UUID from the design graph                  |
+| `supportingComponents` | Array of child component names (empty for ATOMs) |
 
-## ATOM
-- ComponentName | designSystemRef: ds-ref | scope: GLOBAL | id: <uuid>
-- ...
+**Example:**
 
-## MOLECULE
-- ComponentName | designSystemRef: ds-ref | scope: DOMAIN | id: <uuid>
-- ...
-
-## ORGANISM
-- ComponentName | designSystemRef: ds-ref | scope: PAGE | id: <uuid>
-- ...
-
-## TEMPLATE
-- ComponentName | designSystemRef: ds-ref | scope: GLOBAL | id: <uuid>
-- ...
+```json
+{
+  "ATOM": {
+    "Label": { "designSystemRef": "ds-label", "scope": "GLOBAL", "id": "uuid-1", "supportingComponents": [] },
+    "TextInput": { "designSystemRef": "ds-text-input", "scope": "GLOBAL", "id": "uuid-2", "supportingComponents": [] },
+    "SubmitButton": { "designSystemRef": "ds-submit-btn", "scope": "GLOBAL", "id": "uuid-3", "supportingComponents": [] },
+    "ErrorMessage": { "designSystemRef": "ds-error-msg", "scope": "GLOBAL", "id": "uuid-4", "supportingComponents": [] }
+  },
+  "MOLECULE": {
+    "TextInputField": { "designSystemRef": "ds-text-input-field", "scope": "GLOBAL", "id": "uuid-5", "supportingComponents": ["Label", "TextInput", "ErrorMessage"] },
+    "SearchInput": { "designSystemRef": "ds-search-input", "scope": "GLOBAL", "id": "uuid-6", "supportingComponents": ["TextInput", "SearchButton"] }
+  },
+  "ORGANISM": {
+    "RegistrationForm": { "designSystemRef": "ds-registration-form", "scope": "PAGE", "id": "uuid-7", "supportingComponents": ["TextInputField", "SelectField", "DatePickerField", "SubmitButton", "CancelButton"] }
+  },
+  "TEMPLATE": {
+    "FormPageLayout": { "designSystemRef": "ds-form-page-layout", "scope": "GLOBAL", "id": "uuid-8", "supportingComponents": ["PageHeader", "FormSection", "FormActions"] }
+  }
+}
 ```
-
-Each entry should include: **name**, **designSystemRef**, **scope**
-(`GLOBAL`/`DOMAIN`/`PAGE`), and **id** (node UUID).
 
 ### 1d. Usage Rules
 
 - **Before creating any component** in Step 4c onward, read
-  `existingcomponents.md` and check for a match (by `designSystemRef` first,
-  then by name + type)
-- **After each scenario's bulk upsert succeeds** (Step 6e), append all newly
-  created components to `existingcomponents.md` under their respective type
-  section
+  `existingcomponents.json` and check for a match — lookup by name is
+  instant: `ATOM["Label"]`, `MOLECULE["TextInputField"]`, etc.
+- **Check by `designSystemRef` too** for components that may have been
+  renamed but share the same design system reference
+- **Use `supportingComponents`** to know what's already inside a component
+  when deciding whether to reuse it or create a variant
+- **After each scenario's bulk upsert succeeds** (Step 6e), add all newly
+  created components as new keys in the appropriate type object in
+  `existingcomponents.json`
 - This ensures every subsequent scenario sees components created by prior
   scenarios — no caching, no stale state
 
@@ -144,7 +165,7 @@ LOOP:
   4. Show progress
   5. Execute Steps 3-6 for this scenario
   6. Mark scenario as processed
-  7. Append newly created components to existingcomponents.md
+  7. Append newly created components to existingcomponents.json
   8. REPEAT from step 1
 END LOOP
 ```
@@ -180,11 +201,11 @@ across scenarios.
 **Component Registry:**
 
 > **DO NOT query the DB for components every iteration.**
-> Read `existingcomponents.md` (created in Step 1) instead. This file is the
+> Read `existingcomponents.json` (created in Step 1) instead. This file is the
 > single source of truth for component reuse. It was seeded from the DB at
 > startup and is kept up-to-date after each scenario's bulk upsert.
 
-Read `existingcomponents.md` and index by `designSystemRef` (level-1) and
+Read `existingcomponents.json` and index by `designSystemRef` (level-1) and
 by `(type, name, scope)` (level-2/3). Used in Step 4c for component reuse.
 
 | Level    | Scope              |
@@ -256,11 +277,11 @@ when multiple scenarios reference it.
 
 ### 4c. Component Reuse Resolution (REUSE FIRST)
 
-> **Always read `existingcomponents.md` before creating any component.**
+> **Always read `existingcomponents.json` before creating any component.**
 
 Walk this priority order, stop at the first match:
 
-1. **Exact `designSystemRef` match** in `existingcomponents.md` → REUSE (append `actionId`)
+1. **Exact `designSystemRef` match** in `existingcomponents.json` → REUSE (append `actionId`)
 2. **Semantic + type match in same domain** → REUSE
 3. **Global atom/molecule match** → REUSE
 4. **Template/layout match** → REUSE
@@ -268,7 +289,7 @@ Walk this priority order, stop at the first match:
 
 **Hard rules:**
 
-- Always check `existingcomponents.md` BEFORE creating
+- Always check `existingcomponents.json` BEFORE creating
 - ORGANISM containers are page-specific — always CREATE NEW; supportingComponents follow rules 1–3
 - Merge near-duplicates with same `designSystemRef`
 - Never downgrade scope on reuse
@@ -338,14 +359,19 @@ Bulk_Update_Design_Nodes(
 | Entire bulk call fails     | Retry once; if still fails, report to user   |
 | Partial failure (returned) | Log failed nodes, report to user for review  |
 
-### 6e. Update `existingcomponents.md`
+### 6e. Update `existingcomponents.json`
 
-After a successful bulk upsert, append all **newly created** components from
-this scenario to `existingcomponents.md` under their respective type section
-(ATOM, MOLECULE, ORGANISM, TEMPLATE). Use the same format:
+After a successful bulk upsert, read `existingcomponents.json`, add all
+**newly created** components as new keys in the appropriate type object,
+and write the file back. Each new entry:
 
-```
-- ComponentName | designSystemRef: ds-ref | scope: SCOPE | id: <uuid>
+```json
+"ComponentName": {
+  "designSystemRef": "ds-ref",
+  "scope": "SCOPE",
+  "id": "uuid",
+  "supportingComponents": ["ChildA", "ChildB"]
+}
 ```
 
 This ensures the next scenario iteration sees these components for reuse

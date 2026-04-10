@@ -407,7 +407,7 @@ ORGANISM: LoginForm
 | TEMPLATE | **Always generic.** Name after the layout pattern.             | `FormPageLayout`, `DashboardLayout`             |
 
 **Ask this before creating any ATOM:**
-*"Does an atom of this element type already exist in `existingcomponents.md`?"*
+*"Does an atom of this element type already exist in `existingcomponents.json`?"*
 - If YES → **REUSE** (link the existing atom, do not create a new one)
 - If NO → **CREATE** with a generic name (e.g., `Label`, not `NameLabel`)
 
@@ -521,7 +521,7 @@ ATOM: Label  ← created once, reused 3 times
 
 **Rule:** ATOMs are named after WHAT they are (Label, Button, TextInput),
 never after WHERE they are used (NameLabel, SubmitButton). Check
-`existingcomponents.md` before creating any atom.
+`existingcomponents.json` before creating any atom.
 
 ---
 
@@ -705,7 +705,7 @@ TEMPLATE (1 new):
 
 #### Scenario 2: "Schedule Appointment"
 
-**Check `existingcomponents.md` first!**
+**Check `existingcomponents.json` first!**
 
 ```
 ATOMs:
@@ -825,7 +825,7 @@ Without reuse: 72 components. With reuse: 44 unique components.
 **28 components saved (39% reduction).**
 
 As more scenarios are processed, the reuse rate climbs because the
-foundational atoms and molecules are already in `existingcomponents.md`.
+foundational atoms and molecules are already in `existingcomponents.json`.
 
 ---
 
@@ -834,7 +834,7 @@ foundational atoms and molecules are already in `existingcomponents.md`.
 Before creating a component at any level, walk through this checklist:
 
 ```
-STEP 1: Read existingcomponents.md
+STEP 1: Read existingcomponents.json
 
 STEP 2: For each component you plan to create:
   │
@@ -878,7 +878,7 @@ STEP 2: For each component you plan to create:
 
 This is the baseline set of components that most applications will need.
 When generating design nodes, prefer these standard names over inventing
-new ones. Check `existingcomponents.md` first — if a standard component
+new ones. Check `existingcomponents.json` first — if a standard component
 was already created in a prior scenario, reuse it.
 
 ### Standard ATOMs
@@ -937,7 +937,7 @@ starting point when generating design nodes for a new scenario.
 ### Form Pages (Registration, Edit, Create)
 
 ```
-Highly reusable (check existingcomponents.md first):
+Highly reusable (check existingcomponents.json first):
 ├── TEMPLATE: FormPageLayout          ← likely exists
 ├── ATOMs: Label, TextInput, Select, SubmitButton, CancelButton, ErrorMessage
 │   ← almost certainly exist after first form page
@@ -1029,7 +1029,7 @@ NEW TEMPLATE: AuthPageLayout
 TOTAL NEW: 16 components
 ```
 
-**Update `existingcomponents.md` with all 16.**
+**Update `existingcomponents.json` with all 16.**
 
 ---
 
@@ -1064,7 +1064,7 @@ TOTAL: 12 components needed, 10 reused, 2 new
 REUSE RATE: 83%
 ```
 
-**Update `existingcomponents.md` with 2 new components.**
+**Update `existingcomponents.json` with 2 new components.**
 
 ---
 
