@@ -10,6 +10,7 @@ description: >
 ## Resources
 
 - For API tools, mapping rules, payload structures, bulk upsert format, component types, supportingComponents array, reusability patterns, and designSystemRef lookup tables, read [references/guide.md](references/guide.md)
+- For atomic design theory, component type decision rules, hierarchy examples, full page breakdowns, and common mistakes, read [references/atomic-design-theory.md](references/atomic-design-theory.md)
 
 ---
 
@@ -59,7 +60,64 @@ Ask user which modalities to generate design nodes for:
 
 ---
 
-## Step 1: Batch Process Scenarios
+## Step 1: Initialize Component Registry File
+
+> **MANDATORY — DO NOT RELY ON CACHING FOR COMPONENT REUSABILITY.**
+> At the start of every generate-design run, create (or overwrite) a local
+> `existingcomponents.md` file in the project root. This file is the single
+> source of truth for component reuse decisions across scenarios.
+
+### 1a. Check if `existingcomponents.md` Exists
+
+Look for `existingcomponents.md` in the project root. If it does **not**
+exist, create it with the empty template shown in Step 1b before proceeding.
+
+### 1b. Query All Existing Components
+
+Call `Get_all_Design_By_Label` (label=`Component`) to fetch all components
+already in the design graph.
+
+### 1c. Write `existingcomponents.md`
+
+Create (or overwrite) the file with this structure:
+
+```markdown
+# Existing Components
+
+## ATOM
+- ComponentName | designSystemRef: ds-ref | scope: GLOBAL | id: <uuid>
+- ...
+
+## MOLECULE
+- ComponentName | designSystemRef: ds-ref | scope: DOMAIN | id: <uuid>
+- ...
+
+## ORGANISM
+- ComponentName | designSystemRef: ds-ref | scope: PAGE | id: <uuid>
+- ...
+
+## TEMPLATE
+- ComponentName | designSystemRef: ds-ref | scope: GLOBAL | id: <uuid>
+- ...
+```
+
+Each entry should include: **name**, **designSystemRef**, **scope**
+(`GLOBAL`/`DOMAIN`/`PAGE`), and **id** (node UUID).
+
+### 1d. Usage Rules
+
+- **Before creating any component** in Step 4c onward, read
+  `existingcomponents.md` and check for a match (by `designSystemRef` first,
+  then by name + type)
+- **After each scenario's bulk upsert succeeds** (Step 6e), append all newly
+  created components to `existingcomponents.md` under their respective type
+  section
+- This ensures every subsequent scenario sees components created by prior
+  scenarios — no caching, no stale state
+
+---
+
+## Step 2: Batch Process Scenarios
 
 Process scenarios one at a time (incremental batch processing).
 
@@ -84,17 +142,18 @@ LOOP:
   2. IF no scenario found → EXIT
   3. Fetch steps and actions for THIS scenario ONLY
   4. Show progress
-  5. Execute Steps 2-5 for this scenario
+  5. Execute Steps 3-6 for this scenario
   6. Mark scenario as processed
-  7. REPEAT from step 1
+  7. Append newly created components to existingcomponents.md
+  8. REPEAT from step 1
 END LOOP
 ```
 
 ---
 
-## Step 2: Check Existing Design Coverage
+## Step 3: Check Existing Design Coverage
 
-### 2a. Check Direct Mappings
+### 3a. Check Direct Mappings
 
 Query existing design nodes to find what's already mapped:
 
@@ -104,28 +163,29 @@ Query existing design nodes to find what's already mapped:
 | Step            | Flow/Page   | `stepIds[]`   |
 | Action          | Component   | `actionIds[]` |
 
-### 2b. Build Reusable Registries
-
-Rebuild every iteration from DB (source of truth). Query fresh via
-`Get_all_Design_By_Label` before generating nodes.
+### 3b. Build Reusable Registries
 
 **Flow Registry:**
 
 Query `Get_all_Design_By_Label` (label=`Flow`). Index by
-`(name, modality)`. Used in Step 3b to avoid duplicating flows
+`(name, modality)`. Used in Step 4b to avoid duplicating flows
 across scenarios.
 
 **Page Registry:**
 
 Query `Get_all_Design_By_Label` (label=`Page`). Index by
-`(name, pageType, modality)`. Used in Step 3b to avoid duplicating pages
+`(name, pageType, modality)`. Used in Step 4b to avoid duplicating pages
 across scenarios.
 
 **Component Registry:**
 
-Query `Get_all_Design_By_Label` (label=`Component`) or `Design_Graph_Search`.
-Index by `designSystemRef` (level-1) and by `(type, semantic-name, domain)`
-(level-2/3). Used in Step 3c for component reuse.
+> **DO NOT query the DB for components every iteration.**
+> Read `existingcomponents.md` (created in Step 1) instead. This file is the
+> single source of truth for component reuse. It was seeded from the DB at
+> startup and is kept up-to-date after each scenario's bulk upsert.
+
+Read `existingcomponents.md` and index by `designSystemRef` (level-1) and
+by `(type, name, scope)` (level-2/3). Used in Step 4c for component reuse.
 
 | Level    | Scope              |
 | -------- | ------------------ |
@@ -133,7 +193,7 @@ Index by `designSystemRef` (level-1) and by `(type, semantic-name, domain)`
 | `DOMAIN` | Business domain    |
 | `PAGE`   | Single page        |
 
-### 2c. For Existing Mappings, Ask User
+### 3c. For Existing Mappings, Ask User
 
 | Option      | Action                                         |
 | ----------- | ---------------------------------------------- |
@@ -143,14 +203,14 @@ Index by `designSystemRef` (level-1) and by `(type, semantic-name, domain)`
 
 ---
 
-## Step 3: Generate Design Graph Nodes
+## Step 4: Generate Design Graph Nodes
 
-### 3a. Scenario → UserJourney
+### 4a. Scenario → UserJourney
 
 One UserJourney per Scenario with `scenarioId` link.
 Name MUST end with `Journey` suffix.
 
-### 3b. Step → Flow OR Page (Exclusive)
+### 4b. Step → Flow OR Page (Exclusive)
 
 A Step maps to Flow OR Page, never both.
 
@@ -164,7 +224,7 @@ Create separate Flow/Page for EACH selected modality.
 
 **Flow Deduplication (LINK before CREATE):**
 
-Before creating a Flow, check the flow registry from Step 2b for an existing
+Before creating a Flow, check the flow registry from Step 3b for an existing
 flow with the same `(name, modality)`. If a match is found:
 
 - Do NOT create a new Flow or its child Pages
@@ -172,7 +232,7 @@ flow with the same `(name, modality)`. If a match is found:
   to the existing flow's `stepIds[]`
 - In the bulk payload, omit this flow entirely (it and its pages/components
   already exist)
-- In the preview (Step 4), show the flow under "REUSE EXISTING" rather than
+- In the preview (Step 5), show the flow under "REUSE EXISTING" rather than
   "NEW"
 
 A flow contains multiple pages that together complete the flow. Reusing a
@@ -180,7 +240,7 @@ flow automatically reuses all its pages and their components.
 
 **Page Deduplication (LINK before CREATE):**
 
-Before creating a Page, check the page registry from Step 2b for an existing
+Before creating a Page, check the page registry from Step 3b for an existing
 page with the same `(name, pageType, modality)`. If a match is found:
 
 - Do NOT create a new Page
@@ -188,17 +248,19 @@ page with the same `(name, pageType, modality)`. If a match is found:
   to the existing page's `stepIds[]`
 - In the bulk payload, omit this page (and its components — they already
   exist on the page)
-- In the preview (Step 4), show the page under "REUSE EXISTING" rather than
+- In the preview (Step 5), show the page under "REUSE EXISTING" rather than
   "NEW"
 
 This prevents the same page (e.g., "Patient Dashboard") from being duplicated
 when multiple scenarios reference it.
 
-### 3c. Component Reuse Resolution (REUSE FIRST)
+### 4c. Component Reuse Resolution (REUSE FIRST)
+
+> **Always read `existingcomponents.md` before creating any component.**
 
 Walk this priority order, stop at the first match:
 
-1. **Exact `designSystemRef` match** → REUSE (append `actionId`)
+1. **Exact `designSystemRef` match** in `existingcomponents.md` → REUSE (append `actionId`)
 2. **Semantic + type match in same domain** → REUSE
 3. **Global atom/molecule match** → REUSE
 4. **Template/layout match** → REUSE
@@ -206,23 +268,23 @@ Walk this priority order, stop at the first match:
 
 **Hard rules:**
 
-- Always check registry from Step 2b BEFORE creating
+- Always check `existingcomponents.md` BEFORE creating
 - ORGANISM containers are page-specific — always CREATE NEW; supportingComponents follow rules 1–3
 - Merge near-duplicates with same `designSystemRef`
 - Never downgrade scope on reuse
 - Ties: prefer higher scope and more `actionIds[]` linked
 
-### 3d. Template Generation (Optional)
+### 4d. Template Generation (Optional)
 
 Create TEMPLATE components for consistent page layouts based on pageType.
 
-### 3e. Order Preservation
+### 4e. Order Preservation
 
 Preserve `order` field from functional graph in design nodes.
 
 ---
 
-## Step 4: User Confirmation (Per Scenario)
+## Step 5: User Confirmation (Per Scenario)
 
 Before creating nodes, show a preview for the current scenario covering:
 UserJourneys, Flows, Pages, Components (new + reused). Include a summary
@@ -241,25 +303,25 @@ modality assignments. Show updated preview and re-confirm.
 
 ---
 
-## Step 5: Create Design Nodes (Bulk Upsert)
+## Step 6: Create Design Nodes (Bulk Upsert)
 
 Use `Bulk_Update_Design_Nodes` to create the entire UserJourney tree for the
 current scenario in **one call**. See [references/guide.md](references/guide.md)
 for the full payload structure, supportingComponents array rules, and examples.
 
-### 5a. Build the Bulk Payload
+### 6a. Build the Bulk Payload
 
 Assemble the nested tree from the confirmed preview: UserJourney → Flows →
 Pages → Components (with `supportingComponents`). One UserJourney per call (one scenario).
 
-### 5b. Payload Rules
+### 6b. Payload Rules
 
 - **Nesting = hierarchy** — backend wires parent-child relationships
 - **Component supportingComponents** — ORGANISM → MOLECULE/ATOM, MOLECULE → ATOM, ATOM → `[]`
 - **Reused components** — include with `designSystemRef`; backend deduplicates via upsert
 - **Multi-modality** — separate Flow entries per modality under the same UserJourney
 
-### 5c. Make the Call
+### 6c. Make the Call
 
 ```
 Bulk_Update_Design_Nodes(
@@ -269,14 +331,27 @@ Bulk_Update_Design_Nodes(
 )
 ```
 
-### 5d. Error Handling
+### 6d. Error Handling
 
 | Failure Point              | Recovery Action                              |
 | -------------------------- | -------------------------------------------- |
 | Entire bulk call fails     | Retry once; if still fails, report to user   |
 | Partial failure (returned) | Log failed nodes, report to user for review  |
 
-### 5e. Mark Scenario as Processed
+### 6e. Update `existingcomponents.md`
+
+After a successful bulk upsert, append all **newly created** components from
+this scenario to `existingcomponents.md` under their respective type section
+(ATOM, MOLECULE, ORGANISM, TEMPLATE). Use the same format:
+
+```
+- ComponentName | designSystemRef: ds-ref | scope: SCOPE | id: <uuid>
+```
+
+This ensures the next scenario iteration sees these components for reuse
+without needing to re-query the DB.
+
+### 6f. Mark Scenario as Processed
 
 ```
 Update_Functional_Node(
@@ -290,7 +365,7 @@ Update_Functional_Node(
 
 ---
 
-## Step 6: Output Summary
+## Step 7: Output Summary
 
 **Design Graph Generated (by Modality)**
 
