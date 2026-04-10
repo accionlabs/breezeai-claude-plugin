@@ -111,7 +111,7 @@ After the user confirms the functional graph in Step 3, determine the citation s
 - `"jira"` — Jira ticket URL/key. `reference`: the Jira URL. `inputText`: full ticket content.
 - `"confluence"` — Confluence page URL. `reference`: the URL. `inputText`: full page content.
 - `"figma"` — Figma URL. `reference`: the Figma URL. `inputText`: converted text content.
-- `"exDoc"` — document (PDF, uploaded doc, pasted spec). `name`: document name. `inputText`: full document content.
+- `"exDoc"` — document (PDF, uploaded doc, pasted spec). `name`: the actual file name or title of the document as provided by the user (e.g., "requirements.pdf", "Login Spec v2.docx"). Do NOT generate or summarize a name — use the original document name exactly. `inputText`: full document content.
 - `"code"` — source code or code graph. `reference`: file path. `name`: file path. `inputText`: full file content.
 - `"prompt"` — free-text typed by the user. `name`: generate a unique descriptive name (e.g., "Requirement: <short summary>"). `inputText`: full prompt text.
 
