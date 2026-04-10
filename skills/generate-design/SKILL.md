@@ -190,13 +190,18 @@ LOOP:
   3. counter += 1
   4. Fetch steps and actions for THIS scenario ONLY
   5. Show progress: "[counter/totalScenarios] Scenario: <name>"
-  6. Execute Steps 3-6 for this scenario
+  6. Execute Steps 3-4 for this scenario
      (In `auto` mode: skip Step 5 user confirmation)
-  7. Mark scenario as processed
-  8. Append newly created components to existingcomponents.json
-  9. REPEAT from step 1
+  7. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6b)
+  8. Call Bulk_Update_Design_Nodes (Step 6d) — ONLY after step 7 is done
+  9. Mark scenario as processed (Step 6f)
+  10. REPEAT from step 1
 END LOOP
 ```
+
+> **⛔ The loop order above is non-negotiable.** Step 7 (update
+> `existingcomponents.json`) MUST happen before Step 8 (bulk upsert) on EVERY
+> iteration. Do not reorder, batch, or skip these steps for any reason.
 
 ---
 
@@ -325,9 +330,45 @@ Walk this priority order, stop at the first match:
 - Never downgrade scope on reuse
 - Ties: prefer higher scope and more `actionIds[]` linked
 
-### 4d. Template Generation (Optional)
+### 4d. Template Generation (Mandatory)
 
-Create TEMPLATE components for consistent page layouts based on pageType.
+Every Page MUST be assigned a TEMPLATE. After generating all Pages in the
+current scenario, apply this for each Page:
+
+1. **Determine the layout pattern** from the Page's `pageType`:
+
+   | `pageType`       | Standard TEMPLATE        |
+   | ---------------- | ------------------------ |
+   | form / create / edit / register | `FormPageLayout`   |
+   | list / table / search           | `ListPageLayout`   |
+   | detail / view / profile         | `DetailPageLayout` |
+   | dashboard / overview            | `DashboardLayout`  |
+   | wizard / multi-step             | `WizardLayout`     |
+   | master-detail / split           | `SplitPaneLayout`  |
+   | login / signup / reset          | `AuthPageLayout`   |
+
+   If the page does not match any standard pattern, derive a generic layout
+   name from its structure (e.g., `SettingsPageLayout`). Never name a template
+   after a specific page — use the layout pattern name.
+
+2. **Check `existingcomponents.json` → TEMPLATE section.** If a TEMPLATE
+   with the matching `designSystemRef` already exists → REUSE it (do not
+   create a duplicate). Add the Page's ORGANISMs to its `supportingComponents`
+   if not already present.
+
+3. **If no matching TEMPLATE exists → CREATE one** with:
+   - `scope`: `GLOBAL` (templates are always reusable)
+   - `designSystemRef`: the layout pattern name from the table above
+   - `supportingComponents`: the ORGANISMs that slot into this layout
+
+4. **Register** every new TEMPLATE in `existingcomponents.json` under the
+   `TEMPLATE` key immediately after creation.
+
+**Hard rules:**
+- TEMPLATEs can ONLY contain ORGANISMs — never MOLECULEs or ATOMs directly
+- TEMPLATEs define WHERE things go, not WHAT they are
+- Name generically (`FormPageLayout`), never specifically (`PatientRegistrationTemplate`)
+- One TEMPLATE per layout pattern, reused across all pages sharing that pattern
 
 ### 4e. Order Preservation
 
@@ -341,13 +382,13 @@ Preserve `order` field from functional graph in design nodes.
 > In `auto` mode, proceed directly to Step 6 after generating the design
 > nodes. Print a single progress line instead:
 >
-> `"[{current}/{total}] Processing: {scenarioName} → {flowCount} Flows, {pageCount} Pages, {componentCount} Components"`
+> `"[{current}/{total}] Processing: {scenarioName} → {flowCount} Flows, {pageCount} Pages, {componentCount} Components, {templateCount} Templates"`
 
 ### `confirm` mode (default):
 
 Before creating nodes, show a preview for the current scenario covering:
-UserJourneys, Flows, Pages, Components (new + reused). Include a summary
-with total nodes to create and actions to link.
+UserJourneys, Flows, Pages, Components, Templates (new + reused). Include a
+summary with total nodes to create and actions to link.
 
 Ask: **"Proceed with creating these design nodes for this scenario?"**
 
@@ -371,16 +412,58 @@ for the full payload structure, supportingComponents array rules, and examples.
 ### 6a. Build the Bulk Payload
 
 Assemble the nested tree from the confirmed preview: UserJourney → Flows →
-Pages → Components (with `supportingComponents`). One UserJourney per call (one scenario).
+Pages → Components (with `supportingComponents`) + TEMPLATEs. One UserJourney per call (one scenario).
 
-### 6b. Payload Rules
+Include any new TEMPLATE nodes generated in Step 4d in the payload. TEMPLATEs
+sit at the Page level with their ORGANISM `supportingComponents`. If the
+TEMPLATE already exists (reused), omit it from the payload.
+
+### 6b. Update `existingcomponents.json` (BLOCKING GATE — NEVER SKIP)
+
+> **🚫 HARD STOP: You MUST NOT call `Bulk_Update_Design_Nodes` until
+> `existingcomponents.json` has been updated for this scenario. This is a
+> blocking prerequisite, not a suggestion. Skipping this step — even once,
+> even to "save time", even in `auto` mode — breaks component reuse for ALL
+> subsequent scenarios and causes duplicate components across the design graph.
+> There is NO valid reason to skip this step.**
+
+Before calling `Bulk_Update_Design_Nodes`, update `existingcomponents.json`
+with ALL newly created components (ATOMs, MOLECULEs, ORGANISMs, TEMPLATEs)
+from the current scenario.
+
+1. Read `existingcomponents.json`
+2. For each new component in the current scenario's payload, add it under
+   the appropriate type key (`ATOM`, `MOLECULE`, `ORGANISM`, `TEMPLATE`):
+
+   ```json
+   "ComponentName": {
+     "designSystemRef": "ds-ref",
+     "scope": "SCOPE",
+     "id": "<generated-unique-id>",
+     "supportingComponents": ["ChildA", "ChildB"]
+   }
+   ```
+
+3. Write the file back
+4. **Verify** the file was written successfully before proceeding
+
+**Why before bulk upsert:** If the bulk call fails or partially fails, the
+next retry or the next scenario still sees these components for reuse and
+avoids duplicates. The file is the single source of truth for deduplication
+across scenarios.
+
+**Consequences of skipping:** Molecules and organisms created in scenario N
+will be invisibly duplicated in scenarios N+1, N+2, … resulting in a bloated,
+inconsistent design graph that requires manual cleanup.
+
+### 6c. Payload Rules
 
 - **Nesting = hierarchy** — backend wires parent-child relationships
 - **Component supportingComponents** — ORGANISM → MOLECULE/ATOM, MOLECULE → ATOM, ATOM → `[]`
 - **Reused components** — include with `designSystemRef`; backend deduplicates via upsert
 - **Multi-modality** — separate Flow entries per modality under the same UserJourney
 
-### 6c. Make the Call
+### 6d. Make the Call
 
 ```
 Bulk_Update_Design_Nodes(
@@ -390,7 +473,7 @@ Bulk_Update_Design_Nodes(
 )
 ```
 
-### 6d. Error Handling
+### 6e. Error Handling
 
 | Failure Point              | `confirm` mode                               | `auto` mode                                      |
 | -------------------------- | -------------------------------------------- | ------------------------------------------------ |
@@ -400,24 +483,6 @@ Bulk_Update_Design_Nodes(
 In `auto` mode, collect all errors in a `failedScenarios` list
 (`{ scenarioId, scenarioName, error }`) and include them in the Step 7
 summary.
-
-### 6e. Update `existingcomponents.json`
-
-After a successful bulk upsert, read `existingcomponents.json`, add all
-**newly created** components as new keys in the appropriate type object,
-and write the file back. Each new entry:
-
-```json
-"ComponentName": {
-  "designSystemRef": "ds-ref",
-  "scope": "SCOPE",
-  "id": "uuid",
-  "supportingComponents": ["ChildA", "ChildB"]
-}
-```
-
-This ensures the next scenario iteration sees these components for reuse
-without needing to re-query the DB.
 
 ### 6f. Mark Scenario as Processed
 
@@ -456,11 +521,11 @@ Update_Functional_Node(
 
 **Design Graph Generated (by Modality)**
 
-| Modality  | UserJourneys | Flows | Pages | Components (New) |
-| --------- | ------------ | ----- | ----- | ---------------- |
-| web       | N            | N     | N     | N                |
-| mobile    | N            | N     | N     | N                |
-| **Total** | N            | N     | N     | N                |
+| Modality  | UserJourneys | Flows | Pages | Templates (New/Reused) | Components (New) |
+| --------- | ------------ | ----- | ----- | ---------------------- | ---------------- |
+| web       | N            | N     | N     | N / N                  | N                |
+| mobile    | N            | N     | N     | N / N                  | N                |
+| **Total** | N            | N     | N     | N / N                  | N                |
 
 **Component Reuse Statistics**
 
