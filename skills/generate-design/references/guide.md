@@ -92,6 +92,11 @@ Gets all design nodes of a specific type with pagination.
 
 - `uuid` (required): Project UUID
 - `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
+- `page` (optional): Page number for pagination (e.g. `"1"`, default: `"1"`)
+- `limit` (optional): Number of results per page (e.g. `"50"`, default varies)
+
+**Pagination:** When fetching large sets (e.g., all Components), loop with
+incrementing `page` until the returned count is less than `limit`.
 
 **Use when:** You need to fetch all nodes of a specific type.
 

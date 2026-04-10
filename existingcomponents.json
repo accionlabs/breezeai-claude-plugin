@@ -335,6 +335,30 @@
       "scope": "GLOBAL",
       "id": "1775840938199-g9uzaf7",
       "supportingComponents": []
+    },
+    "FolderAssignmentLabel": {
+      "designSystemRef": "Label",
+      "scope": "GLOBAL",
+      "id": "1775852350102-6iiwy7j",
+      "supportingComponents": []
+    },
+    "FolderAssignmentBadge": {
+      "designSystemRef": "Badge",
+      "scope": "GLOBAL",
+      "id": "1775852350107-daig7d2",
+      "supportingComponents": []
+    },
+    "FolderSelect": {
+      "designSystemRef": "Select",
+      "scope": "GLOBAL",
+      "id": "1775852350128-5cdepbv",
+      "supportingComponents": []
+    },
+    "AssignSaveButton": {
+      "designSystemRef": "Button",
+      "scope": "GLOBAL",
+      "id": "1775852350132-p4pf3fo",
+      "supportingComponents": []
     }
   },
   "MOLECULE": {
@@ -565,6 +589,24 @@
       "scope": "GLOBAL",
       "id": "1775839752686-geeots9",
       "supportingComponents": ["PageLabel"]
+    },
+    "PersonalFolderAssignment": {
+      "designSystemRef": "BadgeWithLabel",
+      "scope": "DOMAIN",
+      "id": "1775852350093-5dk6i0l",
+      "supportingComponents": ["FolderAssignmentLabel", "FolderAssignmentBadge"]
+    },
+    "TeamFolderAssignmentList": {
+      "designSystemRef": "BadgeList",
+      "scope": "DOMAIN",
+      "id": "1775852350098-szqbk11",
+      "supportingComponents": ["FolderAssignmentLabel", "FolderAssignmentBadge"]
+    },
+    "FolderSelectField": {
+      "designSystemRef": "SelectField",
+      "scope": "GLOBAL",
+      "id": "1775852350119-glk6444",
+      "supportingComponents": ["FieldLabel", "FolderSelect"]
     }
   },
   "ORGANISM": {
@@ -1319,6 +1361,18 @@
       "scope": "PAGE",
       "id": "1775842438246-rdbg8ki",
       "supportingComponents": ["FolderTypeSelector", "SaveButton", "DeleteButton"]
+    },
+    "KeyAccountAssignmentPanel": {
+      "designSystemRef": "KeyAccountAssignmentPanel",
+      "scope": "PAGE",
+      "id": "1775852350089-rkepzhi",
+      "supportingComponents": ["PersonalFolderAssignment", "TeamFolderAssignmentList"]
+    },
+    "KeyAccountAssignmentForm": {
+      "designSystemRef": "KeyAccountAssignmentForm",
+      "scope": "PAGE",
+      "id": "1775852350115-m5g12ma",
+      "supportingComponents": ["FolderSelectField", "AssignSaveButton"]
     }
   },
   "TEMPLATE": {
