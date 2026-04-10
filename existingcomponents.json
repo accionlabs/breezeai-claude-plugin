@@ -1,0 +1,51 @@
+{
+  "ATOM": {
+    "ProjectStatus": { "designSystemRef": "Badge", "scope": "GLOBAL", "id": "1775737980198-gzd0z6z", "supportingComponents": [] },
+    "ProjectName": { "designSystemRef": "Label", "scope": "GLOBAL", "id": "1775737980197-rub7bz0", "supportingComponents": [] },
+    "PageLabel": { "designSystemRef": "Label", "scope": "GLOBAL", "id": "1775737980183-0qhg9vz", "supportingComponents": [] },
+    "PaginationButton": { "designSystemRef": "Button", "scope": "GLOBAL", "id": "1775737980182-fy00256", "supportingComponents": [] },
+    "LiteFilterToggle": { "designSystemRef": "Toggle", "scope": "GLOBAL", "id": "1775737980180-wmx49on", "supportingComponents": [] },
+    "SearchInput": { "designSystemRef": "TextInput", "scope": "GLOBAL", "id": "1775737980179-f55pl0e", "supportingComponents": [] },
+    "DragHandle": { "designSystemRef": "Icon", "scope": "GLOBAL", "id": "1775822635474-sqwv75z", "supportingComponents": [] },
+    "FieldLabel": { "designSystemRef": "Label", "scope": "GLOBAL", "id": "1775822635475-x53ahv8", "supportingComponents": [] },
+    "ActiveToggle": { "designSystemRef": "Toggle", "scope": "GLOBAL", "id": "1775822635476-rjrqvlh", "supportingComponents": [] },
+    "ModalTitle": { "designSystemRef": "Label", "scope": "GLOBAL", "id": "1775822712730-xbokymm", "supportingComponents": [] },
+    "CancelButton": { "designSystemRef": "Button", "scope": "GLOBAL", "id": "1775822712730-3ih5l28", "supportingComponents": [] },
+    "TableViewButton": { "designSystemRef": "Button", "scope": "GLOBAL", "id": "1775822792888-lpe5k8q", "supportingComponents": [] },
+    "MapViewButton": { "designSystemRef": "Button", "scope": "GLOBAL", "id": "1775822792888-8u8g3gk", "supportingComponents": [] },
+    "CompanyName": { "designSystemRef": "Label", "scope": "GLOBAL", "id": "1775822869160-fjy8wh2", "supportingComponents": [] },
+    "CompanyStatus": { "designSystemRef": "Badge", "scope": "GLOBAL", "id": "1775822869161-94zztbr", "supportingComponents": [] },
+    "RestoreButton": { "designSystemRef": "Button", "scope": "GLOBAL", "id": "1775822869162-yh5illy", "supportingComponents": [] },
+    "ShowCompaniesButton": { "designSystemRef": "Button", "scope": "GLOBAL", "id": "1775822992393-3p79770", "supportingComponents": [] },
+    "ViewOnMapButton": { "designSystemRef": "Button", "scope": "GLOBAL", "id": "1775822992394-ae6jgru", "supportingComponents": [] },
+    "ExportExcelButton": { "designSystemRef": "Button", "scope": "GLOBAL", "id": "1775822992395-g83a0ah", "supportingComponents": [] },
+    "PrintPreviewButton": { "designSystemRef": "Button", "scope": "GLOBAL", "id": "1775822992397-8cdlgzr", "supportingComponents": [] },
+    "ShareEmailButton": { "designSystemRef": "Button", "scope": "GLOBAL", "id": "1775822992398-3lyx8t6", "supportingComponents": [] }
+  },
+  "MOLECULE": {
+    "ProjectResultCard": { "designSystemRef": "Card", "scope": "GLOBAL", "id": "1775737980181-q7m45ic", "supportingComponents": ["ProjectName", "ProjectStatus"] },
+    "ProjectResultRow": { "designSystemRef": "Card", "scope": "GLOBAL", "id": "1775737980120-sb8fqdb", "supportingComponents": ["ProjectName", "ProjectStatus"] },
+    "CustomFieldRow": { "designSystemRef": "CustomFieldRow", "scope": "GLOBAL", "id": "1775822635443-qoldjnz", "supportingComponents": ["DragHandle", "FieldLabel", "ActiveToggle"] },
+    "ViewModeSelector": { "designSystemRef": "SegmentedControl", "scope": "GLOBAL", "id": "1775822792888-88hgv0a", "supportingComponents": ["TableViewButton", "MapViewButton"] },
+    "ArchivedCompanyRow": { "designSystemRef": "Card", "scope": "GLOBAL", "id": "1775822869159-nukbe5s", "supportingComponents": ["CompanyName", "CompanyStatus"] },
+    "ProjectListItem": { "designSystemRef": "Card", "scope": "GLOBAL", "id": "1775822992387-pnqwgfq", "supportingComponents": ["ProjectName", "ProjectStatus"] },
+    "CategoryDetail": { "designSystemRef": "Card", "scope": "GLOBAL", "id": "1775822992391-bl2dmy4", "supportingComponents": ["FieldLabel"] },
+    "NoteDetail": { "designSystemRef": "Card", "scope": "GLOBAL", "id": "1775822992391-45vdr9l", "supportingComponents": ["FieldLabel"] },
+    "FollowUpTaskDetail": { "designSystemRef": "Card", "scope": "GLOBAL", "id": "1775822992391-903k5ni", "supportingComponents": ["FieldLabel"] }
+  },
+  "ORGANISM": {
+    "CustomFieldManagementPanel": { "designSystemRef": "CustomFieldManagementPanel", "scope": "PAGE", "id": "1775822635442-d85c3ok", "supportingComponents": ["CustomFieldRow"] },
+    "CompanyExportModal": { "designSystemRef": "CompanyExportModal", "scope": "PAGE", "id": "1775822712730-h45ixxi", "supportingComponents": ["ModalTitle", "CancelButton"] },
+    "ProjectViewPanel": { "designSystemRef": "ProjectViewPanel", "scope": "PAGE", "id": "1775822792888-9itzgux", "supportingComponents": ["ViewModeSelector"] },
+    "ArchivedCompaniesPanel": { "designSystemRef": "ArchivedCompaniesPanel", "scope": "PAGE", "id": "1775822869158-r8w6scv", "supportingComponents": ["ArchivedCompanyRow", "RestoreButton"] },
+    "NotificationProjectList": { "designSystemRef": "NotificationProjectList", "scope": "PAGE", "id": "1775822992387-oyklngb", "supportingComponents": ["ProjectListItem"] },
+    "ProjectMetadataPanel": { "designSystemRef": "ProjectMetadataPanel", "scope": "PAGE", "id": "1775822992391-4tyo3yw", "supportingComponents": ["CategoryDetail", "NoteDetail", "FollowUpTaskDetail"] },
+    "ProjectActionsToolbar": { "designSystemRef": "ProjectActionsToolbar", "scope": "PAGE", "id": "1775822992393-rccdl4h", "supportingComponents": ["ShowCompaniesButton", "ViewOnMapButton", "ExportExcelButton", "PrintPreviewButton", "ShareEmailButton"] }
+  },
+  "TEMPLATE": {
+    "SettingsPageLayout": { "designSystemRef": "SettingsPageLayout", "scope": "GLOBAL", "id": "1775822635442-zeyk78s", "supportingComponents": ["CustomFieldManagementPanel"] },
+    "ModalLayout": { "designSystemRef": "ModalLayout", "scope": "GLOBAL", "id": "1775822712730-bwcs804", "supportingComponents": ["CompanyExportModal"] },
+    "ListPageLayout": { "designSystemRef": "ListPageLayout", "scope": "GLOBAL", "id": "1775822792888-4h5bsm3", "supportingComponents": ["ProjectViewPanel"] },
+    "DetailPageLayout": { "designSystemRef": "DetailPageLayout", "scope": "GLOBAL", "id": "1775822992391-frk42nb", "supportingComponents": ["ProjectMetadataPanel"] }
+  }
+}

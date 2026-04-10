@@ -190,13 +190,18 @@ LOOP:
   3. counter += 1
   4. Fetch steps and actions for THIS scenario ONLY
   5. Show progress: "[counter/totalScenarios] Scenario: <name>"
-  6. Execute Steps 3-6 for this scenario
+  6. Execute Steps 3-4 for this scenario
      (In `auto` mode: skip Step 5 user confirmation)
-  7. Mark scenario as processed
-  8. Append newly created components to existingcomponents.json
-  9. REPEAT from step 1
+  7. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6b)
+  8. Call Bulk_Update_Design_Nodes (Step 6d) — ONLY after step 7 is done
+  9. Mark scenario as processed (Step 6f)
+  10. REPEAT from step 1
 END LOOP
 ```
+
+> **⛔ The loop order above is non-negotiable.** Step 7 (update
+> `existingcomponents.json`) MUST happen before Step 8 (bulk upsert) on EVERY
+> iteration. Do not reorder, batch, or skip these steps for any reason.
 
 ---
 
@@ -413,11 +418,18 @@ Include any new TEMPLATE nodes generated in Step 4d in the payload. TEMPLATEs
 sit at the Page level with their ORGANISM `supportingComponents`. If the
 TEMPLATE already exists (reused), omit it from the payload.
 
-### 6b. Update `existingcomponents.json` (MANDATORY — before bulk upsert)
+### 6b. Update `existingcomponents.json` (BLOCKING GATE — NEVER SKIP)
 
-**This step is NOT optional.** Before calling `Bulk_Update_Design_Nodes`,
-update `existingcomponents.json` with ALL newly created components
-(ATOMs, MOLECULEs, ORGANISMs, TEMPLATEs) from the current scenario.
+> **🚫 HARD STOP: You MUST NOT call `Bulk_Update_Design_Nodes` until
+> `existingcomponents.json` has been updated for this scenario. This is a
+> blocking prerequisite, not a suggestion. Skipping this step — even once,
+> even to "save time", even in `auto` mode — breaks component reuse for ALL
+> subsequent scenarios and causes duplicate components across the design graph.
+> There is NO valid reason to skip this step.**
+
+Before calling `Bulk_Update_Design_Nodes`, update `existingcomponents.json`
+with ALL newly created components (ATOMs, MOLECULEs, ORGANISMs, TEMPLATEs)
+from the current scenario.
 
 1. Read `existingcomponents.json`
 2. For each new component in the current scenario's payload, add it under
@@ -433,11 +445,16 @@ update `existingcomponents.json` with ALL newly created components
    ```
 
 3. Write the file back
+4. **Verify** the file was written successfully before proceeding
 
 **Why before bulk upsert:** If the bulk call fails or partially fails, the
 next retry or the next scenario still sees these components for reuse and
 avoids duplicates. The file is the single source of truth for deduplication
 across scenarios.
+
+**Consequences of skipping:** Molecules and organisms created in scenario N
+will be invisibly duplicated in scenarios N+1, N+2, … resulting in a bloated,
+inconsistent design graph that requires manual cleanup.
 
 ### 6c. Payload Rules
 
