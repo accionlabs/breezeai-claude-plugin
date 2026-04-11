@@ -1,0 +1,47 @@
+---
+description: Routes user requests to the correct Breeze skill. Helps Cursor agent pick the right skill when user asks about Breeze capabilities.
+alwaysApply: true
+---
+
+# Breeze Skill Routing
+
+When the user asks about Breeze capabilities or wants to perform a Breeze task, route to the correct skill:
+
+| User wants to... | Skill |
+|---|---|
+| First-time setup, init, API key | `/breeze:setup-project` |
+| Upload/onboard a source repo | `/breeze:onboard-repository` |
+| Search features, code, "how does X work" | `/breeze:search` |
+| Analyze a requirement, check coverage | `/breeze:analyze-functional` |
+| Check architecture impact | `/breeze:analyze-architecture` |
+| Analyze a Figma design | `/breeze:analyze-design` |
+| Generate functional graph from frontend | `/breeze:generate-functional-from-ui` |
+| Generate functional graph from backend | `/breeze:generate-functional-from-backend` |
+| Detect personas from UI code | `/breeze:detect-personas` |
+| Add/update nodes in functional graph | `/breeze:update-functional-graph` |
+| Validate graph quality | `/breeze:validate-functional-graph` |
+| Generate code from graph | `/breeze:generate-code` |
+| Export functional spec document | `/breeze:generate-spec` |
+| Convert designs to user stories | `/breeze:visual-to-text` |
+| Generate design graph from functional | `/breeze:generate-design` |
+
+## Recommended Pipelines
+
+**Brownfield (existing code):**
+1. `/breeze:setup-project`
+2. `/breeze:onboard-repository` (once per repo)
+3. `/breeze:generate-functional-from-ui` (frontend)
+4. `/breeze:generate-functional-from-backend` (each backend)
+5. `/breeze:validate-functional-graph`
+6. `/breeze:generate-spec`
+
+**Greenfield (from designs/docs):**
+1. `/breeze:setup-project`
+2. `/breeze:visual-to-text` (Figma/PDF/images)
+3. `/breeze:analyze-functional` (requirement documents)
+
+**New feature:**
+1. `/breeze:analyze-functional`
+2. `/breeze:analyze-architecture`
+3. `/breeze:update-functional-graph`
+4. `/breeze:generate-code`

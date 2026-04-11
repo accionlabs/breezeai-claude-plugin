@@ -1,0 +1,17 @@
+---
+description: Pre-execution guard for all Breeze skills. Validates .breeze.json credentials before any Breeze MCP tool or skill is used.
+alwaysApply: true
+---
+
+# Breeze Pre-Execution Guard
+
+Before executing ANY Breeze skill or using any breeze-mcp tool:
+
+1. Read `.breeze.json` from the project root.
+2. If `.breeze.json` is missing, tell the user: "Run `/breeze:setup-project` first to set up your Breeze workspace." and STOP.
+3. Verify `.breeze.json` contains `apiKey`. If missing: "`.breeze.json` is missing `apiKey`. Run `/breeze:setup-project` to complete setup." and STOP.
+4. Verify `.breeze.json` contains `projectUuid`. If missing: "`.breeze.json` is missing `projectUuid`. Run `/breeze:setup-project` to link a project." and STOP.
+
+**Exception:** Skip this guard for `/breeze:setup-project` itself (it creates `.breeze.json`).
+
+**Security:** Never print API keys or AWS credentials in output. Store credentials only in `.breeze.json`.

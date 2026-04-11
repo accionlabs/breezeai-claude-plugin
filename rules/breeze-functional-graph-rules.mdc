@@ -1,0 +1,55 @@
+---
+description: Shared rules for Breeze functional graph node creation and validation. Enforces persona resolution, outcome naming, action persona-awareness, and node validation when using Call_Create_Functional_Node_ or Call_Update_Functional_Node_.
+alwaysApply: true
+---
+
+# Breeze Functional Graph — Shared Rules
+
+## Node Validation
+
+When calling `Call_Create_Functional_Node_` or `Call_Update_Functional_Node_`:
+
+- **label** must be one of: `Persona`, `Outcome`, `Scenario`, `Step`, `Action`
+- **Forbidden persona names — NEVER use:** Developer, Engineer, Programmer, Architect, API, Service, Component, Module, Worker, Backend, Frontend, Database, Controller, Handler, Repository
+- **Technical outcome names blocked:** "Handle API", "Process Database", "Render Component", "Execute Query" — use business capability names
+- **Parent IDs required:** Outcome needs `personaId`, Scenario needs `outcomeId`, Step needs `scenarioId`, Action needs `stepId`
+- **Scenario requires `description`**
+- **Action requires `description`** (can be null for human persona trivial actions)
+
+## Persona Resolution (REUSE FIRST)
+
+Priority order:
+1. **Named human role** (Admin, Fund Manager, Compliance Officer)
+2. **Generic human role** ("User", "Customer", "Visitor")
+3. **External System** — trigger from outside app boundary (webhooks, partner APIs)
+4. **System** — fully internal automation (background jobs, queue workers, schedulers)
+
+Rules:
+- Check existing Personas FIRST before creating new ones
+- Merge similar roles ("Admin User" + "Administrator" → one)
+- Ambiguous User vs System? "Does a human decide?" YES → human, NO → System
+- Default to "User" when truly ambiguous
+
+## Action Rules (PERSONA-AWARE)
+
+### Human Persona Actions
+- Platform-agnostic (web, mobile, CLI, voice)
+- **FORBIDDEN:** click, tap, swipe, hover, scroll, drag, drop, toggle, button, dropdown, modal, dialog, popup, panel, checkbox, radio, slider, tooltip, menu, sidebar, navbar, tab, icon
+- **USE:** Provide, Choose, Confirm, Review, Dismiss, Open, Close, Submit, Cancel, Specify
+- description = null unless constraint exists
+
+### System Persona Actions
+- description **REQUIRED**: formula, threshold, field names, condition, error message, data format, or I/O shape
+
+### External System Actions
+- description = endpoint, payload shape, or auth mechanism
+
+## Data Model
+
+- **Persona**: `{ persona: <string> }`
+- **Outcome**: `{ outcome: <string>, description: <string>, personaId: <id> }`
+- **Scenario**: `{ scenario: <string>, description: <string>, outcomeId: <id> }`
+- **Step**: `{ step: <string>, scenarioId: <id> }`
+- **Action**: `{ action: <string>, description: <string or null>, stepId: <id> }`
+
+Creation order: Persona → Outcome → Scenario → Step → Action (wait for each parent ID)
