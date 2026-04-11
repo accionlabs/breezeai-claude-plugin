@@ -25,10 +25,10 @@ Design Ontology
 
 **Hierarchy rules:**
 - **Scenario → UserJourney** — 1:1 mapping, always
-- **UserJourney → Flow(s)** — one or many flows per journey.
-  Flows represent **different ways/paths to complete that journey**,
-  discovered from the UI code (e.g. social login vs email registration,
-  bulk edit vs single edit, wizard vs quick-form).
+- **UserJourney → Flow(s)** — one or many flows per journey, discovered
+  from the UI code. The functional graph captures WHAT the user does;
+  the UI code reveals HOW MANY WAYS they can do it. These don't always
+  align. Each flow is also multiplied per selected modality.
 - **Flow → Page(s)** — one or many pages per flow. A simple flow
   may complete on a single page; a complex flow requires navigating
   through multiple pages in sequence.
@@ -233,7 +233,6 @@ key** for fast lookup:
     "Label": {
       "designSystemRef": "ds-label",
       "scope": "GLOBAL",
-      "id": "uuid-1",
       "supportingComponents": []
     }
   },
@@ -498,37 +497,84 @@ paths/flows exist in the UI for completing this scenario.
 
 ### 3b. Discover flows (distinct paths) from UI code
 
-Read the page code and look for signals that indicate **multiple
-ways to complete this journey**:
+Read the page code identified in 3a and detect how many distinct
+ways a user can complete this journey. Each distinct path becomes
+a Flow (multiplied per modality).
 
-| UI Signal | Indicates | Example |
+**Procedure — grep then classify:**
+
+**1. Grep for conditional path indicators in the page directory:**
+
+```
+# Conditional rendering / branching
+grep -rn "? <\|: <\|&&\s*<" --include="*.tsx" --include="*.jsx"
+
+# Tab/stepper variants
+grep -rn "<Tab\|<Tabs\|<Stepper\|<Step\|activeStep\|activeTab\|TabPanel" --include="*.tsx"
+
+# Auth method switches
+grep -rn "authMethod\|loginType\|signInWith\|provider\|OAuth\|SSO\|socialLogin" --include="*.tsx"
+
+# Feature flags / mode toggles
+grep -rn "isAdvanced\|viewMode\|editMode\|quickMode\|expressMode\|isBulk" --include="*.tsx"
+
+# Route-level variants (same outcome, different entry)
+grep -rn "from=\|returnUrl\|redirectTo\|entryPoint\|source=" --include="*.tsx"
+
+# Modal vs page alternatives
+grep -rn "openModal\|showDrawer\|useDisclosure\|isInline\|isFullPage" --include="*.tsx"
+```
+
+**2. Read each hit and classify as a flow-splitting signal or not:**
+
+| Pattern Found | Is It a Separate Flow? | Example |
 |---|---|---|
-| Conditional rendering by auth method | Separate auth flows | Social login vs email/password |
-| Tab groups / stepper variants | Alternative paths | Quick form vs wizard mode |
-| Feature flags / A-B switches | Variant flows | New UI vs legacy UI |
-| Different routes to same outcome | Navigation variants | Create from list vs create from detail |
-| Modal vs full-page for same action | Interaction variants | Inline edit vs edit page |
-| Bulk vs single operation | Scale variants | Bulk delete vs single delete |
+| Ternary rendering two completely different component trees | **Yes** — each tree is a distinct flow | `isOAuth ? <SocialAuth/> : <EmailForm/>` |
+| Tab group where each tab is a self-contained form/workflow | **Yes** — each tab is a distinct flow | `<Tab label="Import CSV">` / `<Tab label="Manual Entry">` |
+| Stepper/wizard with a "skip" or "express" mode | **Yes** — full wizard vs express are distinct flows | `quickMode ? skipToStep3() : showAllSteps()` |
+| Modal vs full-page for the same operation | **Yes** — modal flow (1 page) vs multi-page flow | `isInline ? <InlineEditor/> : <navigate("/edit")>` |
+| Bulk vs single operation on the same page | **Yes** — different action sets and potentially different pages | `isBulk ? <BulkDeleteForm/> : <SingleDeleteConfirm/>` |
+| Simple show/hide of optional fields | **No** — same flow, optional components | `showAdvanced && <AdvancedOptions/>` |
+| Loading/error states | **No** — states, not paths | `isLoading ? <Spinner/> : <Content/>` |
+| Permission-gated sections | **No** — same flow, fewer components | `canEdit && <EditButton/>` |
+| Responsive layout switches | **No** — modality handles this | `isMobile ? <MobileLayout/> : <DesktopLayout/>` |
 
-For each distinct path discovered → one Flow.
-If only one path exists → one Flow (the default/only way).
+**3. Build the flow list:**
+
+- Start with one default flow: `"{Scenario} {Modality} Flow"`
+- For each confirmed flow-splitting signal, create an additional
+  named flow: `"{Path Description} {Modality} Flow"`
+  (e.g. "Email Registration Web Flow", "Social Login Web Flow")
+- If no flow-splitting signals found → single default flow
+- Multiply all flows by each selected modality
+
+**4. Record for each flow:**
+- Flow name and description
+- Which UI components belong to this path (the component tree
+  rendered in this branch)
+- Which steps/actions from the functional data map to this flow
 
 ### 3c. Map steps/actions to UI files per flow
 
 For each discovered flow:
 1. Identify which **steps** belong to this flow path
    - Record mapping: `stepId → page directory path`
+   - Shared steps (e.g. "View confirmation page") can appear in
+     multiple flows' `stepIds[]`
 2. Identify which **actions** correspond to which UI components
+   in this flow's component tree
    - Record mapping: `actionId → component file path`
 
 ### 3d. Build the file reading list
 
-Collect all files that need to be read for this scenario:
+Collect all files that need to be read for this scenario (across
+all discovered flows):
 - Page entry components (`index.tsx`, `page.tsx`)
 - Widget/component directories (`widgets/*`, `components/*`)
 - Form components, modals, dialogs
 - Shared components imported by the page
-- Alternative-path components (e.g. `SocialLoginForm` vs `EmailLoginForm`)
+- Flow-specific components (e.g. `SocialAuthPanel`, `EmailForm`,
+  `BulkDeleteForm`, `WizardStepper`)
 
 ---
 
@@ -600,24 +646,65 @@ Map actual JSX children to `supportingComponents` arrays:
 | MOLECULE | ATOM names only |
 | ATOM | `[]` (empty) |
 
-### 5c. Component reuse resolution
+### 5c. Component naming (USE REPO NAMES)
+
+> **CRITICAL: Use the actual component names from the codebase.**
+> This is the key advantage of this skill over `generate-design` —
+> design nodes should match the real code, not invented generic names.
+
+**Naming priority:**
+
+1. **Use the exact exported component name from the repo** — if the
+   code has `export const SearchFilterPanel`, the design node name is
+   `SearchFilterPanel`
+2. **Use the file name** if the component is a default export with no
+   explicit name — e.g. `search-filter-panel.tsx` → `SearchFilterPanel`
+3. **Use PascalCase** — convert kebab-case or snake_case file names to
+   PascalCase for the design node name
+
+**Examples — repo name → design node name:**
+
+| Code / File | Design Node Name | Type |
+|---|---|---|
+| `export const DataTable` | `DataTable` | ORGANISM |
+| `export const SearchFilterPanel` | `SearchFilterPanel` | ORGANISM |
+| `export const TextInputField` | `TextInputField` | MOLECULE |
+| `export const IconButton` | `IconButton` | ATOM |
+| `<Button>` from `ui/button.tsx` | `Button` | ATOM |
+| `<DateRangePicker>` from `date-range-picker.tsx` | `DateRangePicker` | MOLECULE |
+| `default export` in `project-card.tsx` | `ProjectCard` | MOLECULE |
+| Layout in `page-layout.tsx` | `PageLayout` | TEMPLATE |
+
+**When the repo doesn't have a named component:**
+- HTML elements used directly (`<input>`, `<button>`, `<div>`) →
+  use the design system name if from a library (e.g. MUI `TextField`
+  → `TextField`), or standard name (`TextInput`, `Button`) if raw HTML
+- Third-party library components → use the library's component name
+  (e.g. `AgGridReact`, `ReactSelect`, `ChakraModal`)
+
+**Reuse matching:**
+When checking `existingcomponents.json` for reuse, match by the
+**repo component name** first. Two scenarios using the same
+`<SearchFilterPanel>` component should map to the same design node.
+
+### 5d. Component reuse resolution
 
 > **Always read `existingcomponents.json` before creating any component.**
 
 Walk this priority order, stop at first match:
 
-1. **Exact `designSystemRef` match** → REUSE
-2. **Semantic + type match in same domain** → REUSE
-3. **Global atom/molecule match** → REUSE
+1. **Exact name match** in `existingcomponents.json` → REUSE
+   (same repo component = same design node)
+2. **Exact `designSystemRef` match** → REUSE
+3. **Semantic + type match in same domain** → REUSE
 4. **Template/layout match** → REUSE
 5. **Create new** → narrowest correct scope (GLOBAL > DOMAIN > PAGE)
 
-**Naming rules (CRITICAL):**
-- ATOMs and MOLECULEs: **generic names** (`TextInput`, not
-  `PatientNameInput`)
+**Scope rules:**
 - ORGANISMs: page-specific → always CREATE NEW, reuse children
 - TEMPLATEs: named by layout pattern (`FormPageLayout`), never by
-  page name
+  page name — this is the one exception where we use a generic name
+  since templates are layout patterns, not code components
 
 ---
 
@@ -918,30 +1005,36 @@ Bulk_Update_Design_Nodes(
 
 **One call per scenario.** Never batch multiple scenarios.
 
-### 6h. Post-upsert: sync ALL registries from MCP
+### 6h. Post-upsert: update Flow & Page registries
 
-After `Bulk_Update_Design_Nodes` succeeds, update **all three
-registries** with real IDs so the next scenario can reuse them:
+After `Bulk_Update_Design_Nodes` succeeds, update the **Flow and Page
+registries** with real IDs so subsequent scenarios can LINK to them
+via `Update_Design_Node(nodeId)`.
 
-**1. Component Registry (`existingcomponents.json`):**
-- Fetch newly created components via `Get_all_Design_By_Label(uuid, label: "Component")`
-- Update entries with real `id` values
-- Write the updated file
+**Flow Registry:**
+- For each new flow in the payload, fetch its real ID from the
+  `Bulk_Update_Design_Nodes` response (or query
+  `Design_Graph_Search` for the flow name)
+- Add to registry:
+  `{ name, modality, id: <real UUID>, stepIds }`
 
-**2. Flow Registry (in-memory):**
-- For each new flow in the payload, add to the registry:
-  `{ name, modality, id: <real UUID from response>, stepIds }`
-- Next scenario can now LINK to this flow instead of recreating it
+**Page Registry:**
+- For each new page in the payload, fetch its real ID
+- Add to registry:
+  `{ name, pageType, modality, id: <real UUID>, stepIds }`
 
-**3. Page Registry (in-memory):**
-- For each new page in the payload, add to the registry:
-  `{ name, pageType, modality, id: <real UUID from response>, stepIds }`
-- Next scenario can now LINK to this page instead of recreating it
+> **Why Flows/Pages need IDs but Components don't:**
+> - **Flows/Pages** — when reused across scenarios, we call
+>   `Update_Design_Node(nodeId, data: { stepIds: [...] })` to append
+>   new stepIds. This requires the node's real UUID.
+> - **Components** — reuse is handled by including the same
+>   `designSystemRef` in the bulk payload. The backend deduplicates
+>   automatically via upsert. No `Update_Design_Node` call needed,
+>   so no ID needed in `existingcomponents.json`.
 
-> **Why all three?** Components are persisted to disk because they
-> accumulate across sessions. Flows and Pages are kept in-memory
-> within a session and rebuilt from DB at startup (Step 1d). All three
-> are needed for cross-scenario reusability within the processing loop.
+**`existingcomponents.json`** does NOT need a post-upsert ID sync.
+It was already updated before the bulk call (Step 6d) with names and
+designSystemRefs — that's all it needs for reuse resolution.
 
 ### 6i. Mark scenario as processed
 
