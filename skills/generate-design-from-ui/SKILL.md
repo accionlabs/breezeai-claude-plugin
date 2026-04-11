@@ -807,9 +807,27 @@ For each flow discovered from UI code (Step 3b):
    - `Flow.stepIds` = stepIds that belong to this path
    - After upsert, add to Flow Registry for future scenarios
 
-**Example:** Scenario "Purchase Item" has a "Checkout Web Flow". If a
-prior scenario already created "Checkout Web Flow", just link the new
-stepIds — don't recreate all checkout pages and components.
+**Example — two scenarios sharing the same flow:**
+
+```
+Scenario 1: "Generate User Stories"
+  → Type A discovery finds: navigate("/ticket/:id") in projects.tsx
+  → Creates flow: "Projects List to Ticket Web Flow"
+     Pages: Projects List Page → Ticket Page
+  → Flow Registry: { "Projects List to Ticket Web Flow|WEB": { id: "flow-123", ... } }
+
+Scenario 2: "Edit Ticket Details"     (processed later)
+  → Type A discovery also finds: navigate("/ticket/:id") in projects.tsx
+  → Check Flow Registry for ("Projects List to Ticket Web Flow", "WEB")
+  → MATCH FOUND → REUSE:
+     Call Update_Design_Node(nodeId: "flow-123", data: { stepIds: [...existing, ...new] })
+     Omit flow from bulk payload — pages and components already exist
+     Only create the UserJourney + link to existing flow
+```
+
+The flow, its pages, and all components are created once. Every
+subsequent scenario that uses the same navigation path just links
+its stepIds to the existing flow.
 
 ---
 
