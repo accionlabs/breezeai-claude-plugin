@@ -45,10 +45,10 @@ Extract `apiKey` and `projectUuid`.
 
 Ask user which processing mode to use:
 
-| Mode       | Description                                                        |
-| ---------- | ------------------------------------------------------------------ |
-| `confirm`  | Show preview and ask for confirmation before each scenario (default) |
-| `auto`     | Skip per-scenario confirmation; process all unprocessed scenarios automatically |
+| Mode      | Description                                                                     |
+| --------- | ------------------------------------------------------------------------------- |
+| `confirm` | Show preview and ask for confirmation before each scenario (default)            |
+| `auto`    | Skip per-scenario confirmation; process all unprocessed scenarios automatically |
 
 **Question:** "Do you want to confirm each scenario before creating design nodes, or process all automatically? (`confirm` / `auto`)"
 
@@ -63,14 +63,11 @@ Ask user which processing mode to use:
 
 Ask user which modalities to generate design nodes for:
 
-| Modality  | Description               |
-| --------- | ------------------------- |
-| `web`     | Browser-based interface   |
-| `mobile`  | Native mobile application |
-| `desktop` | Desktop application       |
-| `api`     | Backend/Integration layer |
-| `voice`   | Voice-based interface     |
-| `chatbot` | Conversational interface  |
+| Modality        | Description                        |
+| --------------- | ---------------------------------- |
+| `web`           | Browser-based interface            |
+| `mobile/tablet` | Native mobile & tablet application |
+| `desktop`       | Desktop application                |
 
 **Question:** "Which modalities do you want to create design for? (Select one or more)"
 
@@ -101,10 +98,35 @@ exist, create it with the empty structure before proceeding:
 }
 ```
 
-### 1b. Query All Existing Components
+### 1b. Query All Existing Components (Paginated)
 
-Call `Get_all_Design_By_Label` (label=`Component`) to fetch all components
-already in the design graph.
+Fetch **all** components already in the design graph by paginating through
+`Get_all_Design_By_Label`. The tool may return a limited number of results
+per call, so you MUST loop until every component has been fetched.
+
+```
+allComponents = []
+page = 1
+limit = 50
+
+LOOP:
+  1. Call Get_all_Design_By_Label(
+       uuid: <projectUuid>,
+       label: "Component",
+       page: "<page>",
+       limit: "<limit>"
+     )
+  2. Append returned nodes to allComponents
+  3. IF returned count < limit → EXIT (no more pages)
+  4. page += 1
+  5. REPEAT
+END LOOP
+```
+
+> **Why paginate?** A single call may not return all components if the design
+> graph is large. Skipping pagination silently drops components from the
+> registry, causing false "create new" decisions and duplicate components
+> downstream.
 
 ### 1c. Write `existingcomponents.json`
 
@@ -123,20 +145,66 @@ key** for fast lookup. Each entry must have:
 ```json
 {
   "ATOM": {
-    "Label": { "designSystemRef": "ds-label", "scope": "GLOBAL", "id": "uuid-1", "supportingComponents": [] },
-    "TextInput": { "designSystemRef": "ds-text-input", "scope": "GLOBAL", "id": "uuid-2", "supportingComponents": [] },
-    "SubmitButton": { "designSystemRef": "ds-submit-btn", "scope": "GLOBAL", "id": "uuid-3", "supportingComponents": [] },
-    "ErrorMessage": { "designSystemRef": "ds-error-msg", "scope": "GLOBAL", "id": "uuid-4", "supportingComponents": [] }
+    "Label": {
+      "designSystemRef": "ds-label",
+      "scope": "GLOBAL",
+      "id": "uuid-1",
+      "supportingComponents": []
+    },
+    "TextInput": {
+      "designSystemRef": "ds-text-input",
+      "scope": "GLOBAL",
+      "id": "uuid-2",
+      "supportingComponents": []
+    },
+    "SubmitButton": {
+      "designSystemRef": "ds-submit-btn",
+      "scope": "GLOBAL",
+      "id": "uuid-3",
+      "supportingComponents": []
+    },
+    "ErrorMessage": {
+      "designSystemRef": "ds-error-msg",
+      "scope": "GLOBAL",
+      "id": "uuid-4",
+      "supportingComponents": []
+    }
   },
   "MOLECULE": {
-    "TextInputField": { "designSystemRef": "ds-text-input-field", "scope": "GLOBAL", "id": "uuid-5", "supportingComponents": ["Label", "TextInput", "ErrorMessage"] },
-    "SearchInput": { "designSystemRef": "ds-search-input", "scope": "GLOBAL", "id": "uuid-6", "supportingComponents": ["TextInput", "SearchButton"] }
+    "TextInputField": {
+      "designSystemRef": "ds-text-input-field",
+      "scope": "GLOBAL",
+      "id": "uuid-5",
+      "supportingComponents": ["Label", "TextInput", "ErrorMessage"]
+    },
+    "SearchInput": {
+      "designSystemRef": "ds-search-input",
+      "scope": "GLOBAL",
+      "id": "uuid-6",
+      "supportingComponents": ["TextInput", "SearchButton"]
+    }
   },
   "ORGANISM": {
-    "RegistrationForm": { "designSystemRef": "ds-registration-form", "scope": "PAGE", "id": "uuid-7", "supportingComponents": ["TextInputField", "SelectField", "DatePickerField", "SubmitButton", "CancelButton"] }
+    "RegistrationForm": {
+      "designSystemRef": "ds-registration-form",
+      "scope": "PAGE",
+      "id": "uuid-7",
+      "supportingComponents": [
+        "TextInputField",
+        "SelectField",
+        "DatePickerField",
+        "SubmitButton",
+        "CancelButton"
+      ]
+    }
   },
   "TEMPLATE": {
-    "FormPageLayout": { "designSystemRef": "ds-form-page-layout", "scope": "GLOBAL", "id": "uuid-8", "supportingComponents": ["PageHeader", "FormSection", "FormActions"] }
+    "FormPageLayout": {
+      "designSystemRef": "ds-form-page-layout",
+      "scope": "GLOBAL",
+      "id": "uuid-8",
+      "supportingComponents": ["PageHeader", "FormSection", "FormActions"]
+    }
   }
 }
 ```
@@ -158,17 +226,67 @@ key** for fast lookup. Each entry must have:
 
 ---
 
-## Step 2: Batch Process Scenarios
-
-Process scenarios one at a time (incremental batch processing).
+## Step 2: Select Scenarios & Process
 
 > **MANDATORY — DO NOT BULK FETCH THE FUNCTIONAL GRAPH.**
 > NEVER call `Get_complete_functional_graph` or any tool that returns the entire
 > functional graph in one shot. Always fetch incrementally per scenario.
 
+### 2a. Scenario Selection Mode
+
+Ask the user how they want to select scenarios for design generation:
+
+**Question:** "How would you like to select scenarios?\n\n1. **Browse & Pick** — I'll show you 10 scenarios at a time, you pick which ones to process\n2. **Search & Generate** — Search for a scenario by name, then generate design for it\n3. **Process All** — Process all unprocessed scenarios one by one (batch mode)\n\nChoose 1, 2, or 3:"
+
+---
+
+#### Option 1: Browse & Pick
+
+1. Fetch a page of scenarios:
+   `Get_scenarios_by_uuid(uuid: "<projectUuid>", page: "<currentPage>", limit: "10", isDesignGenerated: "false")`
+2. Display a numbered list with scenario name, outcome, and persona:
+
+   ```
+   Unprocessed Scenarios (Page 1 of N — showing 10 of <total>):
+
+   1. Login with Email — Persona: End User
+   2. Register New Account — Persona: End User
+   3. Reset Password — Persona: End User
+   ...
+   10. View Dashboard — Persona: Admin
+
+   Actions: Enter number(s) to select (e.g. "1,3,5"), "next" for next page, "all" to select all on this page
+   ```
+
+3. User selects scenarios by number (comma-separated), or:
+   - `next` / `prev` — paginate through scenarios
+   - `all` — select all scenarios on the current page
+4. Collect selected scenarios into a `selectedScenarios` list
+5. Ask: **"You selected {count} scenario(s). Proceed?"**
+6. Process only the selected scenarios using the Processing Loop below
+
+#### Option 2: Search & Generate
+
+1. Ask: **"Enter scenario name (or keyword) to search:"**
+2. Call `Functional_Graph_Search(query: "<userInput>", project_uuid: "<projectUuid>", includeLabels: "[\"Scenario\"]")` to find matching scenarios
+3. If multiple matches found, display numbered list and let user pick one or more (same format as Option 1)
+4. If exactly one match, confirm: **"Found: '{scenarioName}'. Generate design for this scenario?"**
+5. If no matches, inform user and ask to try again or switch to another selection mode
+6. Process selected scenario(s) using the Processing Loop below
+
+#### Option 3: Process All (Default)
+
+This is the batch mode. All unprocessed scenarios (`isDesignGenerated=false`) are processed one by one. This is the default if the user doesn't specify.
+
+---
+
+### 2b. Processing Loop
+
+Process selected scenarios one at a time (incremental batch processing).
+
 **Required incremental fetch sequence (per iteration):**
 
-1. `Get_scenarios_by_uuid(uuid: "<projectUuid>", page: "1", limit: "1", isDesignGenerated: "false")` — fetch ONE unprocessed scenario
+1. Fetch the scenario (for Option 3: `Get_scenarios_by_uuid(uuid, page: "1", limit: "1", isDesignGenerated: "false")`; for Options 1 & 2: use the already-fetched scenario from the selected list)
 2. `Get_all_steps_actions_for_a_scenario_id` — fetch steps + actions for
    ONLY that scenario
 3. Generate design nodes for that scenario
@@ -177,16 +295,18 @@ Process scenarios one at a time (incremental batch processing).
 
 **Processing Loop:**
 
-Before entering the loop, fetch the total count of unprocessed scenarios
-using `Get_scenarios_by_uuid(uuid, page: "1", limit: "1", isDesignGenerated: "false")`
-and read the `total` from the response. Store as `totalScenarios` for
-progress tracking.
+Before entering the loop, determine `totalScenarios`:
+
+- **Option 1 & 2:** count of user-selected scenarios
+- **Option 3:** fetch total using `Get_scenarios_by_uuid(uuid, page: "1", limit: "1", isDesignGenerated: "false")` and read `total` from response
 
 ```
 counter = 0
 LOOP:
-  1. Fetch ONE scenario where isDesignGenerated=false
-  2. IF no scenario found → EXIT
+  1. Get next scenario to process
+     - Option 3: Fetch ONE scenario where isDesignGenerated=false
+     - Option 1/2: Take next from selectedScenarios list
+  2. IF no scenario remaining → EXIT
   3. counter += 1
   4. Fetch steps and actions for THIS scenario ONLY
   5. Show progress: "[counter/totalScenarios] Scenario: <name>"
@@ -337,8 +457,8 @@ current scenario, apply this for each Page:
 
 1. **Determine the layout pattern** from the Page's `pageType`:
 
-   | `pageType`       | Standard TEMPLATE        |
-   | ---------------- | ------------------------ |
+   | `pageType`                      | Standard TEMPLATE  |
+   | ------------------------------- | ------------------ |
    | form / create / edit / register | `FormPageLayout`   |
    | list / table / search           | `ListPageLayout`   |
    | detail / view / profile         | `DetailPageLayout` |
@@ -365,6 +485,7 @@ current scenario, apply this for each Page:
    `TEMPLATE` key immediately after creation.
 
 **Hard rules:**
+
 - TEMPLATEs can ONLY contain ORGANISMs — never MOLECULEs or ATOMs directly
 - TEMPLATEs define WHERE things go, not WHAT they are
 - Name generically (`FormPageLayout`), never specifically (`PatientRegistrationTemplate`)
@@ -475,10 +596,10 @@ Bulk_Update_Design_Nodes(
 
 ### 6e. Error Handling
 
-| Failure Point              | `confirm` mode                               | `auto` mode                                      |
-| -------------------------- | -------------------------------------------- | ------------------------------------------------ |
-| Entire bulk call fails     | Retry once; if still fails, report to user   | Retry once; if still fails, log error and skip scenario (continue loop) |
-| Partial failure (returned) | Log failed nodes, report to user for review  | Log failed nodes, continue to next scenario      |
+| Failure Point              | `confirm` mode                              | `auto` mode                                                             |
+| -------------------------- | ------------------------------------------- | ----------------------------------------------------------------------- |
+| Entire bulk call fails     | Retry once; if still fails, report to user  | Retry once; if still fails, log error and skip scenario (continue loop) |
+| Partial failure (returned) | Log failed nodes, report to user for review | Log failed nodes, continue to next scenario                             |
 
 In `auto` mode, collect all errors in a `failedScenarios` list
 (`{ scenarioId, scenarioName, error }`) and include them in the Step 7
@@ -502,11 +623,11 @@ Update_Functional_Node(
 
 **Processing Summary** (`auto` mode only)
 
-| Metric              | Count |
-| ------------------- | ----- |
-| Total scenarios     | N     |
-| Processed           | N     |
-| Skipped (errors)    | N     |
+| Metric           | Count |
+| ---------------- | ----- |
+| Total scenarios  | N     |
+| Processed        | N     |
+| Skipped (errors) | N     |
 
 **Failed Scenarios** (`auto` mode, only if errors occurred)
 
