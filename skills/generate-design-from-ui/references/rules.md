@@ -15,10 +15,10 @@ Design Ontology
 ### Hierarchy Rules
 
 - **Scenario → UserJourney** — 1:1 mapping, always
-- **UserJourney → Flow(s)** — one or many flows per journey. Flows
-  represent **different ways/paths to complete that journey**, discovered
-  from the UI code (e.g. social login vs email registration, bulk edit
-  vs single edit, wizard vs quick-form)
+- **UserJourney → Flow(s)** — one or many flows per journey, discovered
+  from the UI code by grepping for conditional path indicators
+  (branching component trees, tab workflows, auth method switches,
+  modal-vs-page alternatives). Each flow is multiplied per modality
 - **Flow → Page(s)** — one or many pages per flow. A simple flow may
   complete on a single page; a complex flow requires navigating through
   multiple pages in sequence
@@ -44,20 +44,46 @@ Design Ontology
 
 ### How Flows Are Discovered from UI Code
 
-Flows are NOT mapped 1:1 from functional steps. They are discovered by
-reading the UI code and identifying distinct paths:
+The functional graph captures WHAT the user does. The UI code reveals
+HOW MANY WAYS they can do it. There are **two types** of flow discovery:
 
-| UI Signal | Indicates | Example |
-|---|---|---|
-| Conditional rendering by auth method | Separate auth flows | Social login vs email/password |
-| Tab groups / stepper variants | Alternative paths | Quick form vs wizard mode |
-| Feature flags / A-B switches | Variant flows | New UI vs legacy UI |
-| Different routes to same outcome | Navigation variants | Create from list vs create from detail |
-| Modal vs full-page for same action | Interaction variants | Inline edit vs edit page |
-| Bulk vs single operation | Scale variants | Bulk delete vs single delete |
+#### Type A: Entry-point flows (different ways to reach the target page)
 
-If only one path exists in the UI → one Flow (the default/only way).
-If multiple paths → multiple Flows under the same UserJourney.
+Grep the ENTIRE repo for `navigate()`, `<Link>`, `router.push()` calls
+pointing to the scenario's target route. Each hit identifies a source
+page. Classify:
+
+| Pattern | Separate Flow? |
+|---|---|
+| Different source pages with different preceding steps | **Yes** |
+| Dashboard shortcut that skips listing page | **Yes** |
+| Deep link with different page behavior | **Yes** |
+| Same source page, different trigger component | **No** |
+| Breadcrumb/back navigation | **No** |
+
+Also check if the target page reads `from`, `source`, `location.state`
+to render differently per entry point — confirms separate flows.
+
+#### Type B: On-page flows (conditional paths on the target page)
+
+Grep the page directory for branching patterns. Classify:
+
+| Pattern | Separate Flow? |
+|---|---|
+| Ternary rendering different component trees | **Yes** |
+| Tab group with self-contained workflows | **Yes** |
+| Wizard with express/skip mode | **Yes** |
+| Modal vs full-page for same operation | **Yes** |
+| Bulk vs single operation | **Yes** |
+| Show/hide optional fields | **No** |
+| Loading/error states | **No** |
+| Permission-gated sections | **No** |
+| Responsive layout switches | **No** |
+
+#### Combine Type A + Type B
+
+Entry-point flows × on-page flows × modalities = total flows.
+If no signals from either type → one default flow per modality.
 
 ---
 
@@ -83,6 +109,39 @@ atomic design theory:
 | `Code_Graph_Search` on the UI repo | **Optional accelerator** — locate pages or trace imports | Faster than blind globbing, but always confirm by `Read` |
 | `Design_Graph_Search` | **Dedup check only** — never as source of UI knowledge | Step 2 dedup |
 | Functional graph tools | **Scenario/step/action structure** — the skeleton to enrich | Fetch incrementally per scenario |
+
+---
+
+## Persona Filtering
+
+**Only human persona scenarios are eligible for design generation.**
+
+| Persona Type | Process? | Reason |
+|---|---|---|
+| Human roles (User, Admin, etc.) | **Yes** | Has UI to design |
+| System | **No — skip** | Background jobs, no UI |
+| External System | **No — skip** | Webhooks/integrations, no UI |
+
+**How to filter (blocklist approach) — ⛔ BLOCKING GATE:**
+
+> You MUST NOT fetch, display, or process any scenario until the
+> blocklist is fully built. No exceptions.
+
+The hierarchy is `Persona → Outcome → Scenario`.
+`Get_scenarios_by_uuid` has no persona filter parameter, so build a
+blocklist of outcome IDs from non-human personas:
+
+1. `Get_all_personas(uuid)` — get all personas
+2. Identify non-human personas: `System`, `External System`
+3. For each non-human persona:
+   `Get_all_outcomes_for_a_persona_id(uuid, personaId)` → collect
+   outcome IDs
+4. Store all collected outcome IDs in `blockedOutcomeIds` set
+5. **Verify** the set was built — if zero personas returned, STOP
+6. When processing any scenario, check its `outcomeId`:
+   - `outcomeId` in `blockedOutcomeIds` → **skip**, show user:
+     `"Skipping '{name}' — belongs to non-human persona (no UI)"`
+   - `outcomeId` not in `blockedOutcomeIds` → **proceed**
 
 ---
 
@@ -132,20 +191,32 @@ structure, not just their name:
 
 ## Component Naming Conventions
 
-**CRITICAL:** ATOMs and MOLECULEs must be named **generically**.
+**CRITICAL: Use the actual component names from the codebase.**
 
-| Wrong (instance-specific) | Right (generic) |
-|---|---|
-| `PatientNameInput` | `TextInput` |
-| `FundAllocationTable` | `DataTable` |
-| `LoginSubmitButton` | `SubmitButton` |
-| `DashboardHeading` | `Heading` |
+Since this skill reads the real UI repo, design node names should
+match the code — not be invented generic names. This is the key
+difference from `generate-design`.
 
-**When to create variants (distinct styling/behavior):**
-- Button: `SubmitButton`, `CancelButton`, `DeleteButton`, `IconButton`
-- Input: `TextInput`, `PasswordInput`, `EmailInput`, `NumberInput`,
-  `TextArea`
-- Label: Single generic reuse
+**Naming priority:**
+
+1. **Exact exported component name** from the repo
+   (`export const SearchFilterPanel` → `SearchFilterPanel`)
+2. **File name in PascalCase** for default exports
+   (`search-filter-panel.tsx` → `SearchFilterPanel`)
+3. **Library component name** for third-party components
+   (`AgGridReact`, `ReactSelect`, `ChakraModal`)
+4. **Standard name** only for raw HTML elements with no wrapper
+   (`<input>` → `TextInput`, `<button>` → `Button`)
+
+**Reuse matching by repo name:**
+
+Two scenarios that both use `<SearchFilterPanel>` from the same file
+must map to the **same** design node. Match by actual component name
+first in `existingcomponents.json`.
+
+**TEMPLATEs are the exception** — named by layout pattern
+(`FormPageLayout`, `ListPageLayout`) since they represent layout
+structure, not a specific code component.
 
 **ORGANISM containers are page-specific** — always create new, but
 reuse their children (molecules/atoms).
@@ -220,22 +291,28 @@ Every Page MUST have a TEMPLATE.
 
 ---
 
-## Flow Discovery Rules
+## Flow Rules
 
-A Flow represents a **distinct path/way to complete the journey**.
-Flows are discovered from UI code, not mapped from functional steps.
+A Flow represents a **distinct path/way to complete the journey**,
+discovered from the UI code.
 
-**Every UserJourney has at least one Flow.** If only one path exists,
-create one Flow as the default path.
+**Every UserJourney has at least one Flow.** If no flow-splitting
+signals are found in the UI code, create one default Flow.
 
-**When multiple Flows exist:**
-- Each flow gets its own subset of stepIds (shared steps can repeat)
-- Each flow has its own sequence of Pages
-- Flows are named descriptively:
-  `{Path Description} {Modality} Flow`
+**Naming:**
+- Single flow: `"{Scenario Name} {Modality} Flow"`
+- Multiple flows: `"{Path Description} {Modality} Flow"`
   (e.g. "Email Registration Web Flow", "Social Login Web Flow")
 
-Create separate Flows for EACH selected modality.
+**Multiply by modalities:**
+- Each discovered flow × each selected modality = total flows
+- modalities = `[web]`, 2 paths → 2 Flows
+- modalities = `[web, mobile]`, 2 paths → 4 Flows
+
+**Step distribution:**
+- Each flow gets the stepIds for the steps it covers
+- Shared steps (e.g. "View confirmation") can appear in multiple
+  flows' `stepIds[]`
 
 ### Pages within a Flow
 
@@ -307,12 +384,17 @@ if semantically the same**.
 
 ```
 Before bulk upsert:
-  ⛔ Update existingcomponents.json (BLOCKING GATE for components)
+  ⛔ Update existingcomponents.json with names + designSystemRefs
+     (BLOCKING GATE — needed for component reuse in next scenario)
 
 After bulk upsert:
-  → Sync existingcomponents.json with real IDs from MCP
-  → Add new Flows to Flow Registry (in-memory)
-  → Add new Pages to Page Registry (in-memory)
+  → Add new Flows to Flow Registry with real IDs (in-memory)
+  → Add new Pages to Page Registry with real IDs (in-memory)
+     (IDs needed for Update_Design_Node linking in next scenario)
+
+NOT needed after bulk upsert:
+  ✗ existingcomponents.json ID sync — backend deduplicates
+    components by designSystemRef automatically, no ID needed
 ```
 
 ### Flow & Page Deduplication
@@ -377,8 +459,10 @@ multiple scenarios in one call.
 **`existingcomponents.json` update is a BLOCKING GATE** — must
 complete before every `Bulk_Update_Design_Nodes` call.
 
-**Post-upsert:** sync component registry from MCP to get real
-node UUIDs.
+**Post-upsert:** update Flow & Page registries with real IDs (needed
+for `Update_Design_Node` linking). Component registry does NOT need
+ID sync — reuse is by name/designSystemRef, backend deduplicates
+automatically via bulk upsert.
 
 **Mark processed:** `Update_Functional_Node` with
 `isDesignGenerated: true` after successful upsert.
@@ -391,7 +475,7 @@ node UUIDs.
 |---|---|---|
 | Reading only `index.tsx` | < 3 components per page | Glob the page dir, read 4-10 files |
 | Skipping component drill-down | Wrapper components hide sub-components | Follow import tree |
-| Instance-specific atom names | Duplicate atoms across scenarios | Use generic names |
+| Inventing generic names instead of repo names | Design graph doesn't match codebase | Use actual exported component names |
 | Missing TEMPLATE | Page has no layout structure | Mandatory for every Page |
 | Skipping existingcomponents.json update | Duplicate components | BLOCKING GATE |
 | Batching multiple scenarios | Low per-scenario quality | One bulk call per scenario |
@@ -405,4 +489,4 @@ node UUIDs.
 | Orphaned stepIds/actionIds | Functional IDs not linked to design | Every ID must appear in at least one design node |
 | Skipping Flow Registry check | Duplicate flows across scenarios | LINK before CREATE — check (name, modality) |
 | Skipping Page Registry check | Duplicate pages across flows | LINK before CREATE — check (name, pageType, modality) |
-| Not syncing registries post-upsert | Next scenario can't reuse | Update all 3 registries after every successful upsert |
+| Not syncing Flow/Page registries post-upsert | Next scenario can't LINK to existing flows/pages | Update Flow & Page registries with real IDs after upsert |

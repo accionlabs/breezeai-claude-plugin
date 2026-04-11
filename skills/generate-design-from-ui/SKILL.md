@@ -25,10 +25,10 @@ Design Ontology
 
 **Hierarchy rules:**
 - **Scenario → UserJourney** — 1:1 mapping, always
-- **UserJourney → Flow(s)** — one or many flows per journey.
-  Flows represent **different ways/paths to complete that journey**,
-  discovered from the UI code (e.g. social login vs email registration,
-  bulk edit vs single edit, wizard vs quick-form).
+- **UserJourney → Flow(s)** — one or many flows per journey, discovered
+  from the UI code. The functional graph captures WHAT the user does;
+  the UI code reveals HOW MANY WAYS they can do it. These don't always
+  align. Each flow is also multiplied per selected modality.
 - **Flow → Page(s)** — one or many pages per flow. A simple flow
   may complete on a single page; a complex flow requires navigating
   through multiple pages in sequence.
@@ -233,7 +233,6 @@ key** for fast lookup:
     "Label": {
       "designSystemRef": "ds-label",
       "scope": "GLOBAL",
-      "id": "uuid-1",
       "supportingComponents": []
     }
   },
@@ -286,6 +285,52 @@ pattern as `existingcomponents.json` for Components.
 > entire functional graph in one shot. Always fetch incrementally per
 > scenario.
 
+> **SKIP SYSTEM PERSONA SCENARIOS.**
+> This skill generates design nodes for UI — System and External System
+> persona scenarios have no user interface and MUST be excluded.
+> See Step 2a-pre below for how to build the blocklist.
+
+### 2a-pre. Build non-human outcome blocklist ⛔ BLOCKING GATE
+
+> **⛔ HARD STOP: You MUST NOT proceed to scenario selection or
+> processing until the blocklist is fully built. This gate ensures no
+> System/External System scenario is ever processed. There is NO valid
+> reason to skip this step — even in `auto` mode, even to "save time".**
+
+The functional graph hierarchy is **Persona → Outcome → Scenario**.
+`Get_scenarios_by_uuid` does not have a persona filter, so we build
+a blocklist of outcome IDs belonging to non-human personas and check
+each scenario against it.
+
+**Steps:**
+
+1. Call `Get_all_personas(uuid: "<projectUuid>")`
+2. From the response, identify non-human personas:
+   - `System` → non-human
+   - `External System` → non-human
+   - Everything else (User, Admin, named roles) → human
+3. For each **non-human persona**, call
+   `Get_all_outcomes_for_a_persona_id(uuid, personaId: "<id>")`
+4. Collect all outcome IDs from these calls into a
+   `blockedOutcomeIds` set
+5. **Verify** the set was built — if `Get_all_personas` returned
+   zero personas, STOP and tell user to run
+   `/breeze:generate-functional-from-ui` first
+6. Log: `"Blocklist built: {N} non-human outcome(s) from {M} non-human persona(s) will be excluded"`
+
+**⛔ Gate check:** `blockedOutcomeIds` must exist before ANY scenario
+is fetched, displayed, or processed. If this step fails, do not
+continue.
+
+**Usage during scenario processing:**
+
+When fetching scenarios (Browse & Pick, Search, or Process All),
+each scenario has an `outcomeId`. Check it against `blockedOutcomeIds`:
+
+- `outcomeId` **in** `blockedOutcomeIds` → **skip** — show user:
+  `"Skipping '{scenarioName}' — belongs to non-human persona (no UI)"`
+- `outcomeId` **not in** `blockedOutcomeIds` → **proceed** normally
+
 ### 2a. Scenario Selection Mode
 
 Ask the user how they want to select scenarios for design generation:
@@ -298,7 +343,9 @@ Ask the user how they want to select scenarios for design generation:
 
 1. Fetch a page of scenarios:
    `Get_scenarios_by_uuid(uuid: "<projectUuid>", page: "<currentPage>", limit: "10", isDesignGenerated: "false")`
-2. Display a numbered list with scenario name, outcome, and persona:
+2. For each scenario, check `outcomeId` against `blockedOutcomeIds`
+   (from Step 2a-pre) — exclude matches from the display list
+3. Display only human-persona scenarios:
 
    ```
    Unprocessed Scenarios (Page 1 of N — showing 10 of <total>):
@@ -309,13 +356,15 @@ Ask the user how they want to select scenarios for design generation:
    ...
    10. View Dashboard — Persona: Admin
 
+   (N system persona scenarios excluded)
+
    Actions: Enter number(s) to select (e.g. "1,3,5"), "next" for next page, "all" to select all on this page
    ```
 
-3. User selects scenarios by number (comma-separated), or:
+4. User selects scenarios by number (comma-separated), or:
    - `next` / `prev` — paginate through scenarios
    - `all` — select all scenarios on the current page
-4. Collect selected scenarios into a `selectedScenarios` list
+5. Collect selected scenarios into a `selectedScenarios` list
 5. Ask: **"You selected {count} scenario(s). Proceed?"**
 6. Process only the selected scenarios using the Processing Loop below
 
@@ -323,17 +372,20 @@ Ask the user how they want to select scenarios for design generation:
 
 1. Ask: **"Enter scenario name (or keyword) to search:"**
 2. Call `Functional_Graph_Search(query: "<userInput>", project_uuid: "<projectUuid>", includeLabels: "[\"Scenario\"]")` to find matching scenarios
-3. If multiple matches found, display numbered list and let user pick
+3. Filter results: exclude any scenario whose `outcomeId` is in
+   `blockedOutcomeIds`
+4. If multiple matches found, display numbered list and let user pick
    one or more (same format as Option 1)
-4. If exactly one match, confirm: **"Found: '{scenarioName}'. Generate design for this scenario?"**
-5. If no matches, inform user and ask to try again or switch to another
+5. If exactly one match, confirm: **"Found: '{scenarioName}'. Generate design for this scenario?"**
+6. If no matches, inform user and ask to try again or switch to another
    selection mode
-6. Process selected scenario(s) using the Processing Loop below
+7. Process selected scenario(s) using the Processing Loop below
 
 #### Option 3: Process All (Default)
 
 Batch mode. All unprocessed scenarios (`isDesignGenerated=false`) are
-processed one by one. This is the default if the user doesn't specify.
+processed one by one, **skipping any whose `outcomeId` is in
+`blockedOutcomeIds`**. This is the default if the user doesn't specify.
 
 ---
 
@@ -347,26 +399,32 @@ Before entering the loop, determine `totalScenarios`:
 
 ```
 counter = 0
+skippedSystem = 0
 LOOP:
   1. Get next scenario to process
      - Option 3: Fetch ONE scenario where isDesignGenerated=false
      - Option 1/2: Take next from selectedScenarios list
   2. IF no scenario remaining → EXIT
-  3. counter += 1
-  4. Fetch steps and actions for THIS scenario ONLY
+  3. Check scenario's outcomeId against blockedOutcomeIds:
+     - IF outcomeId IN blockedOutcomeIds →
+       Show: "Skipping '{scenarioName}' — belongs to non-human persona (no UI)"
+       skippedSystem += 1
+       REPEAT from step 1
+  4. counter += 1
+  5. Fetch steps and actions for THIS scenario ONLY
      → Get_all_steps_actions_for_a_scenario_id(uuid, parameters0_Value: <scenarioId>)
      → Extract and store:
         - scenarioId (the scenario UUID)
         - For each step: stepId (UUID), step name, step order
         - For each action under each step: actionId (UUID), action name, action description
      → These IDs are REQUIRED for linking design nodes to functional nodes
-  5. Show progress: "[counter/totalScenarios] Scenario: <name>"
-  6. Execute Steps 3-7 for this scenario
+  6. Show progress: "[counter/totalScenarios] Scenario: <name>"
+  7. Execute Steps 3-7 for this scenario
      (In `auto` mode: skip user confirmation in Step 6)
-  7. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6d)
-  8. Call Bulk_Update_Design_Nodes (Step 6f) — ONLY after step 7 is done
-  9. Mark scenario as processed (Step 6i)
-  10. REPEAT from step 1
+  8. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6d)
+  9. Call Bulk_Update_Design_Nodes (Step 6f) — ONLY after step 8 is done
+  10. Mark scenario as processed (Step 6i)
+  11. REPEAT from step 1
 END LOOP
 ```
 
@@ -439,37 +497,150 @@ paths/flows exist in the UI for completing this scenario.
 
 ### 3b. Discover flows (distinct paths) from UI code
 
-Read the page code and look for signals that indicate **multiple
-ways to complete this journey**:
+Detect how many distinct ways a user can complete this journey.
+There are **two types** of flow discovery:
 
-| UI Signal | Indicates | Example |
+- **Type A: Entry-point flows** — different navigation paths TO the
+  target page (e.g. reaching `/ticket/:id` from project list vs
+  dashboard vs sidebar)
+- **Type B: On-page flows** — conditional rendering ON the target page
+  that creates different component trees (e.g. social login vs email
+  form)
+
+---
+
+#### Type A: Discover entry-point flows (different ways to reach the page)
+
+**1. Identify the target route/page for this scenario** from Step 3a
+(e.g. `/ticket/:id`, `/settings/profile`).
+
+**2. Grep the ENTIRE UI repo for all navigation calls to that route:**
+
+```
+# React Router
+grep -rn "navigate\(.*ticket\|<Link.*ticket\|to=.*ticket\|push\(.*ticket" --include="*.tsx" --include="*.jsx"
+
+# Next.js
+grep -rn "router\.push\(.*ticket\|<Link.*href=.*ticket" --include="*.tsx"
+
+# Vue Router
+grep -rn "router\.push\(.*ticket\|\$router\.push\(.*ticket\|<router-link.*ticket" --include="*.vue" --include="*.ts"
+
+# Angular
+grep -rn "routerLink=.*ticket\|router\.navigate\(.*ticket" --include="*.ts" --include="*.html"
+
+# Generic
+grep -rn "href=.*ticket\|window\.location.*ticket" --include="*.tsx" --include="*.ts"
+```
+
+**3. For each hit, identify the source page/component:**
+- Which page/route does this `navigate()` or `<Link>` live in?
+- Record: `{ sourcePage, sourceComponent, targetRoute }`
+
+**4. Classify each entry point as a distinct flow or not:**
+
+| Pattern | Separate Flow? | Why |
 |---|---|---|
-| Conditional rendering by auth method | Separate auth flows | Social login vs email/password |
-| Tab groups / stepper variants | Alternative paths | Quick form vs wizard mode |
-| Feature flags / A-B switches | Variant flows | New UI vs legacy UI |
-| Different routes to same outcome | Navigation variants | Create from list vs create from detail |
-| Modal vs full-page for same action | Interaction variants | Inline edit vs edit page |
-| Bulk vs single operation | Scale variants | Bulk delete vs single delete |
+| Different source pages with different preceding steps | **Yes** | User navigates through different pages to get there |
+| Same source page, different trigger components (sidebar vs card vs button) | **No** — same flow, different UI trigger | All start from the same page |
+| Dashboard shortcut that skips listing page | **Yes** | Different page sequence (1 page vs 2 pages) |
+| Breadcrumb/back navigation | **No** | Return path, not a forward flow |
+| Deep link / direct URL | **Yes** — if the page behaves differently with no prior context | Different entry context |
 
-For each distinct path discovered → one Flow.
-If only one path exists → one Flow (the default/only way).
+**5. Check if target page behaves differently per entry point:**
+- Grep the target page for `from`, `source`, `returnUrl`,
+  `searchParams`, `location.state` — does it read where the user
+  came from?
+- If YES and renders differently → confirms separate flows
+- If NO and renders identically → entry points share the same
+  flow (different entry points don't create different page sequences)
+
+---
+
+#### Type B: Discover on-page flows (conditional paths on the target page)
+
+**1. Grep the target page directory for branching patterns:**
+
+```
+# Conditional rendering / branching
+grep -rn "? <\|: <\|&&\s*<" --include="*.tsx" --include="*.jsx"
+
+# Tab/stepper variants
+grep -rn "<Tab\|<Tabs\|<Stepper\|<Step\|activeStep\|activeTab\|TabPanel" --include="*.tsx"
+
+# Auth method switches
+grep -rn "authMethod\|loginType\|signInWith\|provider\|OAuth\|SSO\|socialLogin" --include="*.tsx"
+
+# Feature flags / mode toggles
+grep -rn "isAdvanced\|viewMode\|editMode\|quickMode\|expressMode\|isBulk" --include="*.tsx"
+
+# Modal vs page alternatives
+grep -rn "openModal\|showDrawer\|useDisclosure\|isInline\|isFullPage" --include="*.tsx"
+```
+
+**2. Read each hit and classify:**
+
+| Pattern Found | Separate Flow? | Example |
+|---|---|---|
+| Ternary rendering different component trees | **Yes** | `isOAuth ? <SocialAuth/> : <EmailForm/>` |
+| Tab group with self-contained workflows | **Yes** | `<Tab label="Import CSV">` / `<Tab label="Manual">` |
+| Wizard with express/skip mode | **Yes** | `quickMode ? skipToStep3() : showAll()` |
+| Modal vs full-page for same operation | **Yes** | `isInline ? <InlineEditor/> : navigate("/edit")` |
+| Bulk vs single operation | **Yes** | `isBulk ? <BulkForm/> : <SingleConfirm/>` |
+| Show/hide optional fields | **No** | `showAdvanced && <AdvancedOptions/>` |
+| Loading/error states | **No** | `isLoading ? <Spinner/> : <Content/>` |
+| Permission-gated sections | **No** | `canEdit && <EditButton/>` |
+| Responsive layout switches | **No** | `isMobile ? <MobileLayout/> : <DesktopLayout/>` |
+
+---
+
+#### Combine Type A + Type B results
+
+**Build the flow list:**
+
+1. Start with discovered entry-point flows (Type A) — each distinct
+   navigation path with different page sequences becomes a flow
+2. Within each entry-point flow, check for on-page branching (Type B)
+   — if found, split further
+3. If no Type A or Type B signals → one default flow
+4. Name each flow descriptively:
+   - Type A: `"Generate User Stories from Dashboard Web Flow"`,
+     `"Generate User Stories from Projects List Web Flow"`
+   - Type B: `"Email Registration Web Flow"`,
+     `"Social Login Web Flow"`
+   - Combined: `"CSV Import via Settings Web Flow"`
+5. Multiply all flows by each selected modality
+
+**Record for each flow:**
+- Flow name and description
+- Entry point (which page the user starts from)
+- Exit point (where the user ends up after completing the flow)
+- Page sequence (which pages the user navigates through)
+- Which UI components belong to this path
+- Which steps/actions from the functional data map to this flow
 
 ### 3c. Map steps/actions to UI files per flow
 
 For each discovered flow:
 1. Identify which **steps** belong to this flow path
    - Record mapping: `stepId → page directory path`
+   - Shared steps (e.g. "View confirmation page") can appear in
+     multiple flows' `stepIds[]`
 2. Identify which **actions** correspond to which UI components
+   in this flow's component tree
    - Record mapping: `actionId → component file path`
 
 ### 3d. Build the file reading list
 
-Collect all files that need to be read for this scenario:
+Collect all files that need to be read for this scenario (across
+all discovered flows):
 - Page entry components (`index.tsx`, `page.tsx`)
 - Widget/component directories (`widgets/*`, `components/*`)
 - Form components, modals, dialogs
 - Shared components imported by the page
-- Alternative-path components (e.g. `SocialLoginForm` vs `EmailLoginForm`)
+- Source pages for entry-point flows (the pages users navigate FROM)
+- Flow-specific components (e.g. `SocialAuthPanel`, `EmailForm`,
+  `BulkDeleteForm`, `WizardStepper`)
 
 ---
 
@@ -541,24 +712,65 @@ Map actual JSX children to `supportingComponents` arrays:
 | MOLECULE | ATOM names only |
 | ATOM | `[]` (empty) |
 
-### 5c. Component reuse resolution
+### 5c. Component naming (USE REPO NAMES)
+
+> **CRITICAL: Use the actual component names from the codebase.**
+> This is the key advantage of this skill over `generate-design` —
+> design nodes should match the real code, not invented generic names.
+
+**Naming priority:**
+
+1. **Use the exact exported component name from the repo** — if the
+   code has `export const SearchFilterPanel`, the design node name is
+   `SearchFilterPanel`
+2. **Use the file name** if the component is a default export with no
+   explicit name — e.g. `search-filter-panel.tsx` → `SearchFilterPanel`
+3. **Use PascalCase** — convert kebab-case or snake_case file names to
+   PascalCase for the design node name
+
+**Examples — repo name → design node name:**
+
+| Code / File | Design Node Name | Type |
+|---|---|---|
+| `export const DataTable` | `DataTable` | ORGANISM |
+| `export const SearchFilterPanel` | `SearchFilterPanel` | ORGANISM |
+| `export const TextInputField` | `TextInputField` | MOLECULE |
+| `export const IconButton` | `IconButton` | ATOM |
+| `<Button>` from `ui/button.tsx` | `Button` | ATOM |
+| `<DateRangePicker>` from `date-range-picker.tsx` | `DateRangePicker` | MOLECULE |
+| `default export` in `project-card.tsx` | `ProjectCard` | MOLECULE |
+| Layout in `page-layout.tsx` | `PageLayout` | TEMPLATE |
+
+**When the repo doesn't have a named component:**
+- HTML elements used directly (`<input>`, `<button>`, `<div>`) →
+  use the design system name if from a library (e.g. MUI `TextField`
+  → `TextField`), or standard name (`TextInput`, `Button`) if raw HTML
+- Third-party library components → use the library's component name
+  (e.g. `AgGridReact`, `ReactSelect`, `ChakraModal`)
+
+**Reuse matching:**
+When checking `existingcomponents.json` for reuse, match by the
+**repo component name** first. Two scenarios using the same
+`<SearchFilterPanel>` component should map to the same design node.
+
+### 5d. Component reuse resolution
 
 > **Always read `existingcomponents.json` before creating any component.**
 
 Walk this priority order, stop at first match:
 
-1. **Exact `designSystemRef` match** → REUSE
-2. **Semantic + type match in same domain** → REUSE
-3. **Global atom/molecule match** → REUSE
+1. **Exact name match** in `existingcomponents.json` → REUSE
+   (same repo component = same design node)
+2. **Exact `designSystemRef` match** → REUSE
+3. **Semantic + type match in same domain** → REUSE
 4. **Template/layout match** → REUSE
 5. **Create new** → narrowest correct scope (GLOBAL > DOMAIN > PAGE)
 
-**Naming rules (CRITICAL):**
-- ATOMs and MOLECULEs: **generic names** (`TextInput`, not
-  `PatientNameInput`)
+**Scope rules:**
 - ORGANISMs: page-specific → always CREATE NEW, reuse children
 - TEMPLATEs: named by layout pattern (`FormPageLayout`), never by
-  page name
+  page name — this is the one exception where we use a generic name
+  since templates are layout patterns, not code components
 
 ---
 
@@ -595,9 +807,27 @@ For each flow discovered from UI code (Step 3b):
    - `Flow.stepIds` = stepIds that belong to this path
    - After upsert, add to Flow Registry for future scenarios
 
-**Example:** Scenario "Purchase Item" has a "Checkout Web Flow". If a
-prior scenario already created "Checkout Web Flow", just link the new
-stepIds — don't recreate all checkout pages and components.
+**Example — two scenarios sharing the same flow:**
+
+```
+Scenario 1: "Generate User Stories"
+  → Type A discovery finds: navigate("/ticket/:id") in projects.tsx
+  → Creates flow: "Projects List to Ticket Web Flow"
+     Pages: Projects List Page → Ticket Page
+  → Flow Registry: { "Projects List to Ticket Web Flow|WEB": { id: "flow-123", ... } }
+
+Scenario 2: "Edit Ticket Details"     (processed later)
+  → Type A discovery also finds: navigate("/ticket/:id") in projects.tsx
+  → Check Flow Registry for ("Projects List to Ticket Web Flow", "WEB")
+  → MATCH FOUND → REUSE:
+     Call Update_Design_Node(nodeId: "flow-123", data: { stepIds: [...existing, ...new] })
+     Omit flow from bulk payload — pages and components already exist
+     Only create the UserJourney + link to existing flow
+```
+
+The flow, its pages, and all components are created once. Every
+subsequent scenario that uses the same navigation path just links
+its stepIds to the existing flow.
 
 ---
 
@@ -859,30 +1089,36 @@ Bulk_Update_Design_Nodes(
 
 **One call per scenario.** Never batch multiple scenarios.
 
-### 6h. Post-upsert: sync ALL registries from MCP
+### 6h. Post-upsert: update Flow & Page registries
 
-After `Bulk_Update_Design_Nodes` succeeds, update **all three
-registries** with real IDs so the next scenario can reuse them:
+After `Bulk_Update_Design_Nodes` succeeds, update the **Flow and Page
+registries** with real IDs so subsequent scenarios can LINK to them
+via `Update_Design_Node(nodeId)`.
 
-**1. Component Registry (`existingcomponents.json`):**
-- Fetch newly created components via `Get_all_Design_By_Label(uuid, label: "Component")`
-- Update entries with real `id` values
-- Write the updated file
+**Flow Registry:**
+- For each new flow in the payload, fetch its real ID from the
+  `Bulk_Update_Design_Nodes` response (or query
+  `Design_Graph_Search` for the flow name)
+- Add to registry:
+  `{ name, modality, id: <real UUID>, stepIds }`
 
-**2. Flow Registry (in-memory):**
-- For each new flow in the payload, add to the registry:
-  `{ name, modality, id: <real UUID from response>, stepIds }`
-- Next scenario can now LINK to this flow instead of recreating it
+**Page Registry:**
+- For each new page in the payload, fetch its real ID
+- Add to registry:
+  `{ name, pageType, modality, id: <real UUID>, stepIds }`
 
-**3. Page Registry (in-memory):**
-- For each new page in the payload, add to the registry:
-  `{ name, pageType, modality, id: <real UUID from response>, stepIds }`
-- Next scenario can now LINK to this page instead of recreating it
+> **Why Flows/Pages need IDs but Components don't:**
+> - **Flows/Pages** — when reused across scenarios, we call
+>   `Update_Design_Node(nodeId, data: { stepIds: [...] })` to append
+>   new stepIds. This requires the node's real UUID.
+> - **Components** — reuse is handled by including the same
+>   `designSystemRef` in the bulk payload. The backend deduplicates
+>   automatically via upsert. No `Update_Design_Node` call needed,
+>   so no ID needed in `existingcomponents.json`.
 
-> **Why all three?** Components are persisted to disk because they
-> accumulate across sessions. Flows and Pages are kept in-memory
-> within a session and rebuilt from DB at startup (Step 1d). All three
-> are needed for cross-scenario reusability within the processing loop.
+**`existingcomponents.json`** does NOT need a post-upsert ID sync.
+It was already updated before the bulk call (Step 6d) with names and
+designSystemRefs — that's all it needs for reuse resolution.
 
 ### 6i. Mark scenario as processed
 
