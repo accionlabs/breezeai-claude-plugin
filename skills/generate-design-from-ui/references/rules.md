@@ -45,36 +45,45 @@ Design Ontology
 ### How Flows Are Discovered from UI Code
 
 The functional graph captures WHAT the user does. The UI code reveals
-HOW MANY WAYS they can do it. Flows are discovered by grepping the
-page code for conditional path indicators.
+HOW MANY WAYS they can do it. There are **two types** of flow discovery:
 
-**Procedure:**
-1. Grep the page directory for branching patterns (ternaries rendering
-   different component trees, tab groups, stepper variants, auth method
-   switches, modal-vs-page alternatives, bulk-vs-single toggles)
-2. Read each hit and classify — is it a genuinely different path with
-   different components/pages, or just a show/hide/state variation?
-3. Each confirmed distinct path → one Flow (multiplied per modality)
-4. No branching found → one default Flow per modality
+#### Type A: Entry-point flows (different ways to reach the target page)
 
-**Flow-splitting signals (YES = separate flow):**
+Grep the ENTIRE repo for `navigate()`, `<Link>`, `router.push()` calls
+pointing to the scenario's target route. Each hit identifies a source
+page. Classify:
 
-| Pattern | Example |
+| Pattern | Separate Flow? |
 |---|---|
-| Ternary rendering different component trees | `isOAuth ? <SocialAuth/> : <EmailForm/>` |
-| Tab group with self-contained workflows | `<Tab label="CSV Import">` / `<Tab label="Manual">` |
-| Wizard with express/skip mode | `quickMode ? skipToStep3() : showAll()` |
-| Modal vs full-page for same operation | `isInline ? <InlineEditor/> : navigate("/edit")` |
-| Bulk vs single operation | `isBulk ? <BulkForm/> : <SingleConfirm/>` |
+| Different source pages with different preceding steps | **Yes** |
+| Dashboard shortcut that skips listing page | **Yes** |
+| Deep link with different page behavior | **Yes** |
+| Same source page, different trigger component | **No** |
+| Breadcrumb/back navigation | **No** |
 
-**NOT flow-splitting (same flow, ignore):**
+Also check if the target page reads `from`, `source`, `location.state`
+to render differently per entry point — confirms separate flows.
 
-| Pattern | Why |
+#### Type B: On-page flows (conditional paths on the target page)
+
+Grep the page directory for branching patterns. Classify:
+
+| Pattern | Separate Flow? |
 |---|---|
-| Show/hide optional fields | Same flow, optional components |
-| Loading/error states | States, not paths |
-| Permission-gated sections | Same flow, fewer components |
-| Responsive layout switches | Handled by modality, not separate flows |
+| Ternary rendering different component trees | **Yes** |
+| Tab group with self-contained workflows | **Yes** |
+| Wizard with express/skip mode | **Yes** |
+| Modal vs full-page for same operation | **Yes** |
+| Bulk vs single operation | **Yes** |
+| Show/hide optional fields | **No** |
+| Loading/error states | **No** |
+| Permission-gated sections | **No** |
+| Responsive layout switches | **No** |
+
+#### Combine Type A + Type B
+
+Entry-point flows × on-page flows × modalities = total flows.
+If no signals from either type → one default flow per modality.
 
 ---
 

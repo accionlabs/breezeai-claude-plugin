@@ -497,13 +497,69 @@ paths/flows exist in the UI for completing this scenario.
 
 ### 3b. Discover flows (distinct paths) from UI code
 
-Read the page code identified in 3a and detect how many distinct
-ways a user can complete this journey. Each distinct path becomes
-a Flow (multiplied per modality).
+Detect how many distinct ways a user can complete this journey.
+There are **two types** of flow discovery:
 
-**Procedure — grep then classify:**
+- **Type A: Entry-point flows** — different navigation paths TO the
+  target page (e.g. reaching `/ticket/:id` from project list vs
+  dashboard vs sidebar)
+- **Type B: On-page flows** — conditional rendering ON the target page
+  that creates different component trees (e.g. social login vs email
+  form)
 
-**1. Grep for conditional path indicators in the page directory:**
+---
+
+#### Type A: Discover entry-point flows (different ways to reach the page)
+
+**1. Identify the target route/page for this scenario** from Step 3a
+(e.g. `/ticket/:id`, `/settings/profile`).
+
+**2. Grep the ENTIRE UI repo for all navigation calls to that route:**
+
+```
+# React Router
+grep -rn "navigate\(.*ticket\|<Link.*ticket\|to=.*ticket\|push\(.*ticket" --include="*.tsx" --include="*.jsx"
+
+# Next.js
+grep -rn "router\.push\(.*ticket\|<Link.*href=.*ticket" --include="*.tsx"
+
+# Vue Router
+grep -rn "router\.push\(.*ticket\|\$router\.push\(.*ticket\|<router-link.*ticket" --include="*.vue" --include="*.ts"
+
+# Angular
+grep -rn "routerLink=.*ticket\|router\.navigate\(.*ticket" --include="*.ts" --include="*.html"
+
+# Generic
+grep -rn "href=.*ticket\|window\.location.*ticket" --include="*.tsx" --include="*.ts"
+```
+
+**3. For each hit, identify the source page/component:**
+- Which page/route does this `navigate()` or `<Link>` live in?
+- Record: `{ sourcePage, sourceComponent, targetRoute }`
+
+**4. Classify each entry point as a distinct flow or not:**
+
+| Pattern | Separate Flow? | Why |
+|---|---|---|
+| Different source pages with different preceding steps | **Yes** | User navigates through different pages to get there |
+| Same source page, different trigger components (sidebar vs card vs button) | **No** — same flow, different UI trigger | All start from the same page |
+| Dashboard shortcut that skips listing page | **Yes** | Different page sequence (1 page vs 2 pages) |
+| Breadcrumb/back navigation | **No** | Return path, not a forward flow |
+| Deep link / direct URL | **Yes** — if the page behaves differently with no prior context | Different entry context |
+
+**5. Check if target page behaves differently per entry point:**
+- Grep the target page for `from`, `source`, `returnUrl`,
+  `searchParams`, `location.state` — does it read where the user
+  came from?
+- If YES and renders differently → confirms separate flows
+- If NO and renders identically → entry points share the same
+  flow (different entry points don't create different page sequences)
+
+---
+
+#### Type B: Discover on-page flows (conditional paths on the target page)
+
+**1. Grep the target page directory for branching patterns:**
 
 ```
 # Conditional rendering / branching
@@ -518,40 +574,49 @@ grep -rn "authMethod\|loginType\|signInWith\|provider\|OAuth\|SSO\|socialLogin" 
 # Feature flags / mode toggles
 grep -rn "isAdvanced\|viewMode\|editMode\|quickMode\|expressMode\|isBulk" --include="*.tsx"
 
-# Route-level variants (same outcome, different entry)
-grep -rn "from=\|returnUrl\|redirectTo\|entryPoint\|source=" --include="*.tsx"
-
 # Modal vs page alternatives
 grep -rn "openModal\|showDrawer\|useDisclosure\|isInline\|isFullPage" --include="*.tsx"
 ```
 
-**2. Read each hit and classify as a flow-splitting signal or not:**
+**2. Read each hit and classify:**
 
-| Pattern Found | Is It a Separate Flow? | Example |
+| Pattern Found | Separate Flow? | Example |
 |---|---|---|
-| Ternary rendering two completely different component trees | **Yes** — each tree is a distinct flow | `isOAuth ? <SocialAuth/> : <EmailForm/>` |
-| Tab group where each tab is a self-contained form/workflow | **Yes** — each tab is a distinct flow | `<Tab label="Import CSV">` / `<Tab label="Manual Entry">` |
-| Stepper/wizard with a "skip" or "express" mode | **Yes** — full wizard vs express are distinct flows | `quickMode ? skipToStep3() : showAllSteps()` |
-| Modal vs full-page for the same operation | **Yes** — modal flow (1 page) vs multi-page flow | `isInline ? <InlineEditor/> : <navigate("/edit")>` |
-| Bulk vs single operation on the same page | **Yes** — different action sets and potentially different pages | `isBulk ? <BulkDeleteForm/> : <SingleDeleteConfirm/>` |
-| Simple show/hide of optional fields | **No** — same flow, optional components | `showAdvanced && <AdvancedOptions/>` |
-| Loading/error states | **No** — states, not paths | `isLoading ? <Spinner/> : <Content/>` |
-| Permission-gated sections | **No** — same flow, fewer components | `canEdit && <EditButton/>` |
-| Responsive layout switches | **No** — modality handles this | `isMobile ? <MobileLayout/> : <DesktopLayout/>` |
+| Ternary rendering different component trees | **Yes** | `isOAuth ? <SocialAuth/> : <EmailForm/>` |
+| Tab group with self-contained workflows | **Yes** | `<Tab label="Import CSV">` / `<Tab label="Manual">` |
+| Wizard with express/skip mode | **Yes** | `quickMode ? skipToStep3() : showAll()` |
+| Modal vs full-page for same operation | **Yes** | `isInline ? <InlineEditor/> : navigate("/edit")` |
+| Bulk vs single operation | **Yes** | `isBulk ? <BulkForm/> : <SingleConfirm/>` |
+| Show/hide optional fields | **No** | `showAdvanced && <AdvancedOptions/>` |
+| Loading/error states | **No** | `isLoading ? <Spinner/> : <Content/>` |
+| Permission-gated sections | **No** | `canEdit && <EditButton/>` |
+| Responsive layout switches | **No** | `isMobile ? <MobileLayout/> : <DesktopLayout/>` |
 
-**3. Build the flow list:**
+---
 
-- Start with one default flow: `"{Scenario} {Modality} Flow"`
-- For each confirmed flow-splitting signal, create an additional
-  named flow: `"{Path Description} {Modality} Flow"`
-  (e.g. "Email Registration Web Flow", "Social Login Web Flow")
-- If no flow-splitting signals found → single default flow
-- Multiply all flows by each selected modality
+#### Combine Type A + Type B results
 
-**4. Record for each flow:**
+**Build the flow list:**
+
+1. Start with discovered entry-point flows (Type A) — each distinct
+   navigation path with different page sequences becomes a flow
+2. Within each entry-point flow, check for on-page branching (Type B)
+   — if found, split further
+3. If no Type A or Type B signals → one default flow
+4. Name each flow descriptively:
+   - Type A: `"Generate User Stories from Dashboard Web Flow"`,
+     `"Generate User Stories from Projects List Web Flow"`
+   - Type B: `"Email Registration Web Flow"`,
+     `"Social Login Web Flow"`
+   - Combined: `"CSV Import via Settings Web Flow"`
+5. Multiply all flows by each selected modality
+
+**Record for each flow:**
 - Flow name and description
-- Which UI components belong to this path (the component tree
-  rendered in this branch)
+- Entry point (which page the user starts from)
+- Exit point (where the user ends up after completing the flow)
+- Page sequence (which pages the user navigates through)
+- Which UI components belong to this path
 - Which steps/actions from the functional data map to this flow
 
 ### 3c. Map steps/actions to UI files per flow
@@ -573,6 +638,7 @@ all discovered flows):
 - Widget/component directories (`widgets/*`, `components/*`)
 - Form components, modals, dialogs
 - Shared components imported by the page
+- Source pages for entry-point flows (the pages users navigate FROM)
 - Flow-specific components (e.g. `SocialAuthPanel`, `EmailForm`,
   `BulkDeleteForm`, `WizardStepper`)
 
