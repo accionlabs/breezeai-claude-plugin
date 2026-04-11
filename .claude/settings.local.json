@@ -14,7 +14,8 @@
       "mcp__plugin_breeze_breeze-mcp__get_design_by_label",
       "mcp__plugin_breeze_breeze-mcp__bulk_update_design_nodes",
       "mcp__plugin_breeze_breeze-mcp__update_functional_node",
-      "mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search"
+      "mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search",
+      "Bash(grep -E \"\\\\.\\(md|json|js\\)$\")"
     ]
   },
   "disabledMcpjsonServers": [
