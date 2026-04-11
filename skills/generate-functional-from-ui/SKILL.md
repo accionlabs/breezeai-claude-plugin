@@ -78,8 +78,15 @@ graph as the only common surface (idempotent merge by outcome name).
 
 ## Phase 0 — Discover entry points
 
-If `entrypoints.json` already exists, read it and skip to the
-per-EP loop (resuming). Do not overwrite.
+If `entrypoints.json` already exists in the UI repo directory:
+1. Read it and display a resume summary: completed EPs, remaining
+   EPs, next EP to process
+2. If user specified a specific EP (e.g., "start with EP 4"), jump
+   to that EP
+3. Otherwise, pick the next EP from `remaining[]`
+4. Skip all sub-steps below and go directly to the per-EP loop
+
+Do not overwrite an existing `entrypoints.json`.
 
 ---
 
@@ -98,16 +105,27 @@ per-EP loop (resuming). Do not overwrite.
 
 ### Sub-step 0.2 — Discover and confirm personas ⛔ HARD GATE
 
-1. Find the auth model in the UI repo — grep for JWT decoders, route
-   guard components, conditional rendering keyed off role flags, auth
-   feature directories
-2. Extract **literal** role identifiers from those files
-3. Capture source location for each candidate (file:line)
-4. Distinguish roles from subscription tiers / feature flags
-5. Load existing personas: `Get_all_personas(projectUuid)`
-6. Present discovered list to user with source locations
-7. Wait for user confirmation
-8. Record confirmed set in `entrypoints.json` under `personas[]`
+**First check if personas already exist in the graph:**
+
+1. Call `Get_all_personas(projectUuid)`
+2. **If personas exist (≥1):**
+   - Present them to the user
+   - Ask: _"These personas are already in the graph. Want to use
+     them, or should I re-detect from code using `/breeze:detect-personas`?"_
+   - If user accepts → use existing personas, skip to step 6
+   - If user wants recheck → proceed to step 3
+3. **If no personas exist, or user requested recheck:**
+   - Run `/breeze:detect-personas` against the target UI repo
+   - `/breeze:detect-personas` will output an analysis-only persona
+     matrix (it does NOT write to the graph)
+   - Use its output as the candidate list
+4. Present the detected personas to the user with source locations
+5. Wait for user confirmation
+6. Record confirmed set in `entrypoints.json` under `personas[]`
+7. Personas are created in the graph as part of the first EP
+   upsert payload (the upsert endpoint creates personas by name
+   if they don't exist yet — idempotent merge). The
+   `entrypoints.json` carries persona data across sessions.
 
 > **Rules:** see [rules.md](references/rules.md) → "Persona rules (UI pass
 > specific)". This is a **closed set** — do not proceed until user
@@ -463,8 +481,32 @@ multiple sessions.
 
 ## Multi-session resume
 
-When context budget hits ~75%: flush current EP's checkpoint, stop
-and report. To resume: **"continue UI pass from entrypoints.json"**.
+When context budget hits ~75%, or after completing 3-5 EPs: flush
+current EP's checkpoint, stop, and report progress.
+
+**Recommend the user to start a fresh session** with a ready-to-paste
+command like:
+
+```
+/breeze:generate-functional-from-ui continue from entrypoints.json in repo <uiRepo path>
+```
+
+If complex EPs are next (e.g., project detail pages with many
+sub-components), recommend starting those in a fresh session for
+maximum quality:
+
+_"EP N (Page Name) is a complex page with many sub-components.
+I recommend processing it in a fresh session for best quality.
+To resume, paste:"_
+
+```
+/breeze:generate-functional-from-ui continue from entrypoints.json in repo <path>, start with EP N
+```
+
+**Batching guidance to share with user:**
+- Complex EPs (project detail, company detail): 1 per session
+- Medium EPs (pipeline, search, key accounts): 2-3 per session
+- Simple EPs (change password, settings, fair usage): 4-5 per session
 
 ## When NOT to use
 

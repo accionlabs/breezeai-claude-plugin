@@ -96,7 +96,15 @@ For each role found:
 - **Where it's ACTUALLY CHECKED in the codebase** (not just defined) — count real usages
 - **What it gates** (which features, form fields, UI elements)
 
-**Critical check:** Count actual usages of each role check variable (excluding the definition itself). Roles that are defined but **never checked** (zero usages) should be flagged as "defined but unused in frontend".
+**Mandatory verification — grep EACH role variable individually:**
+
+For each role check variable found (e.g., `isMaster`, `isManager`, `isMember`):
+1. Grep for that SINGLE variable name alone (NOT combined with others via `|`)
+2. Exclude the definition file (e.g., `constants.ts`) and import lines
+3. Record the count of ACTUAL usage sites per variable
+4. If a role variable has 0 usages outside its definition + imports → mark as "defined but unused" and EXCLUDE it from persona generation
+
+NEVER grep multiple role variables in a single pattern (e.g., `isMaster|isManager|isMember`) to count usages — this masks dead-code roles behind active ones. Each must be counted separately.
 
 ### 2.4 Feature Flags & Module Toggles
 
@@ -141,11 +149,14 @@ Classify the relationship:
 
 A persona is **distinct** if it has a **meaningfully different feature set** — not just a different label.
 
+**Pre-check before recommending role-based personas:**
+Only create a separate persona for a role if that role's check variable has ≥3 usage sites outside its definition and imports. If a role enum/constant exists but its check is never evaluated in component/page code, it is dead code and MUST NOT produce a persona.
+
 Apply these rules:
 
 1. **If tiers define different route sets** → each tier is a candidate persona
-2. **If roles gate different features AND are actually checked** → role is a persona modifier
-3. **If roles are defined but never checked** → collapse roles (they're identical in practice)
+2. **If roles gate different features AND are actually checked (≥3 usages)** → role is a persona modifier
+3. **If roles are defined but never checked (0 usages outside definition/imports)** → collapse roles (they're identical in practice). Do NOT create separate personas for unused roles
 4. **If a role only matters in one tier** (e.g., Admin powers only relevant in Core) → create a separate persona only for that tier×role combo
 5. **If feature flags are tier-dependent** → they're part of the tier, not separate personas
 6. **If feature flags are independently toggled** → note them as persona modifiers, not separate personas
@@ -200,43 +211,45 @@ A comprehensive table showing features × personas (✅/❌), similar to:
 
 ---
 
-## Step 6: Create or update personas in Breeze (optional)
+## Step 6: Compare with existing graph personas
 
-Ask the user:
-_"Would you like me to create these personas in the Breeze functional graph? I can:"_
-- **Create new** — add personas that don't exist yet
-- **Compare** — check against existing personas in the graph and highlight differences
-- **Skip** — just use the analysis as documentation
-
-### If the user wants to create/update:
+This skill is **analysis-only** — it does NOT write personas to the
+graph. Graph writes are the responsibility of downstream skills
+(e.g., `/breeze:generate-functional-from-ui`) that consume this
+skill's output as input.
 
 1. Call `Get_all_personas` to fetch existing personas from the graph
-2. For each detected persona, check if a matching persona already exists:
-   - Match by name (exact or semantic similarity)
-   - If exists → report it and ask whether to skip or update
-   - If new → confirm with user before creating
-3. For each confirmed new persona, call `Call_Create_Functional_Node_` with:
+2. Present a side-by-side comparison table:
+
+| Detected from code | Exists in graph? | Match | Notes |
+|---|---|---|---|
+| APAC Core Admin | ✅ "Admin" | Partial — graph persona is broader | Consider renaming |
+| US Tall User | ❌ | — | New persona detected |
+
+3. Summarize recommendations:
+   - Which detected personas are new (not in graph)
+   - Which existing personas are too broad or too narrow
+   - Which existing personas have no code evidence (possible stale data)
+
+**If the user explicitly asks to create/update personas in the graph**,
+then proceed with graph writes:
+
+1. For each confirmed new persona, call `Call_Create_Functional_Node_` with:
    ```
    label: "Persona"
    data: { persona: "<persona name>" }
    uuid: <projectUuid>
    ```
-4. Prepare a citation for the analysis:
+2. Prepare a citation for the analysis:
    - type: `"code"`
    - name: `"Persona detection from frontend UI"`
    - reference: path to the main route file(s) analyzed
    - inputText: summary of the detection analysis
-5. Attach the citation to each created persona node
+3. Attach the citation to each created persona node
 
-### If the user wants to compare:
-
-1. Call `Get_all_personas` to fetch existing personas
-2. Present a side-by-side table:
-
-| Detected from code | Exists in graph? | Match | Action needed |
-|---|---|---|---|
-| APAC Core Admin | ✅ "Admin" | Partial — graph persona is broader | Discuss |
-| US Tall User | ❌ | — | Create? |
+Otherwise, end with the analysis output. Other skills (like
+`/breeze:generate-functional-from-ui`) will use the persona matrix
+to populate the graph as part of their own workflow.
 
 ---
 

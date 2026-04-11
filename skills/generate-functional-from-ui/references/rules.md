@@ -107,11 +107,16 @@ If no frontend router file found, stop and suggest
 ### Persona rules (UI pass specific)
 
 - The UI pass writes **only human personas** — never `System`
-- Read the auth model (route guards, JWT claims, role decorators)
-  and use named human roles when present
+- **Prefer `/breeze:detect-personas` output** over manual grep — it
+  performs individual-variable usage counting and eliminates
+  dead-code roles automatically
 - Fall back to `User` only when the repo's domain has no role
   distinctions
 - Never invent roles — extract literal names from code only
+- **Verify actual usage:** a role constant that is defined but has
+  0 usages outside its definition and import lines is dead code and
+  MUST NOT become a persona. Grep each role variable individually
+  (never combined via `|`) to get accurate counts
 - Subscription tiers are NOT personas — propose them in a separate
   "feature flags — not personas" list
 - The confirmed persona set from sub-step 0.2 is a **closed set** —
