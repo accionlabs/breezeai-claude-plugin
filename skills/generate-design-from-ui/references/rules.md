@@ -86,6 +86,39 @@ atomic design theory:
 
 ---
 
+## Persona Filtering
+
+**Only human persona scenarios are eligible for design generation.**
+
+| Persona Type | Process? | Reason |
+|---|---|---|
+| Human roles (User, Admin, etc.) | **Yes** | Has UI to design |
+| System | **No — skip** | Background jobs, no UI |
+| External System | **No — skip** | Webhooks/integrations, no UI |
+
+**How to filter (blocklist approach) — ⛔ BLOCKING GATE:**
+
+> You MUST NOT fetch, display, or process any scenario until the
+> blocklist is fully built. No exceptions.
+
+The hierarchy is `Persona → Outcome → Scenario`.
+`Get_scenarios_by_uuid` has no persona filter parameter, so build a
+blocklist of outcome IDs from non-human personas:
+
+1. `Get_all_personas(uuid)` — get all personas
+2. Identify non-human personas: `System`, `External System`
+3. For each non-human persona:
+   `Get_all_outcomes_for_a_persona_id(uuid, personaId)` → collect
+   outcome IDs
+4. Store all collected outcome IDs in `blockedOutcomeIds` set
+5. **Verify** the set was built — if zero personas returned, STOP
+6. When processing any scenario, check its `outcomeId`:
+   - `outcomeId` in `blockedOutcomeIds` → **skip**, show user:
+     `"Skipping '{name}' — belongs to non-human persona (no UI)"`
+   - `outcomeId` not in `blockedOutcomeIds` → **proceed**
+
+---
+
 ## Frontend Repo Detection
 
 A valid frontend repo has `package.json` AND at least one of:

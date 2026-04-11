@@ -286,6 +286,52 @@ pattern as `existingcomponents.json` for Components.
 > entire functional graph in one shot. Always fetch incrementally per
 > scenario.
 
+> **SKIP SYSTEM PERSONA SCENARIOS.**
+> This skill generates design nodes for UI — System and External System
+> persona scenarios have no user interface and MUST be excluded.
+> See Step 2a-pre below for how to build the blocklist.
+
+### 2a-pre. Build non-human outcome blocklist ⛔ BLOCKING GATE
+
+> **⛔ HARD STOP: You MUST NOT proceed to scenario selection or
+> processing until the blocklist is fully built. This gate ensures no
+> System/External System scenario is ever processed. There is NO valid
+> reason to skip this step — even in `auto` mode, even to "save time".**
+
+The functional graph hierarchy is **Persona → Outcome → Scenario**.
+`Get_scenarios_by_uuid` does not have a persona filter, so we build
+a blocklist of outcome IDs belonging to non-human personas and check
+each scenario against it.
+
+**Steps:**
+
+1. Call `Get_all_personas(uuid: "<projectUuid>")`
+2. From the response, identify non-human personas:
+   - `System` → non-human
+   - `External System` → non-human
+   - Everything else (User, Admin, named roles) → human
+3. For each **non-human persona**, call
+   `Get_all_outcomes_for_a_persona_id(uuid, personaId: "<id>")`
+4. Collect all outcome IDs from these calls into a
+   `blockedOutcomeIds` set
+5. **Verify** the set was built — if `Get_all_personas` returned
+   zero personas, STOP and tell user to run
+   `/breeze:generate-functional-from-ui` first
+6. Log: `"Blocklist built: {N} non-human outcome(s) from {M} non-human persona(s) will be excluded"`
+
+**⛔ Gate check:** `blockedOutcomeIds` must exist before ANY scenario
+is fetched, displayed, or processed. If this step fails, do not
+continue.
+
+**Usage during scenario processing:**
+
+When fetching scenarios (Browse & Pick, Search, or Process All),
+each scenario has an `outcomeId`. Check it against `blockedOutcomeIds`:
+
+- `outcomeId` **in** `blockedOutcomeIds` → **skip** — show user:
+  `"Skipping '{scenarioName}' — belongs to non-human persona (no UI)"`
+- `outcomeId` **not in** `blockedOutcomeIds` → **proceed** normally
+
 ### 2a. Scenario Selection Mode
 
 Ask the user how they want to select scenarios for design generation:
@@ -298,7 +344,9 @@ Ask the user how they want to select scenarios for design generation:
 
 1. Fetch a page of scenarios:
    `Get_scenarios_by_uuid(uuid: "<projectUuid>", page: "<currentPage>", limit: "10", isDesignGenerated: "false")`
-2. Display a numbered list with scenario name, outcome, and persona:
+2. For each scenario, check `outcomeId` against `blockedOutcomeIds`
+   (from Step 2a-pre) — exclude matches from the display list
+3. Display only human-persona scenarios:
 
    ```
    Unprocessed Scenarios (Page 1 of N — showing 10 of <total>):
@@ -309,13 +357,15 @@ Ask the user how they want to select scenarios for design generation:
    ...
    10. View Dashboard — Persona: Admin
 
+   (N system persona scenarios excluded)
+
    Actions: Enter number(s) to select (e.g. "1,3,5"), "next" for next page, "all" to select all on this page
    ```
 
-3. User selects scenarios by number (comma-separated), or:
+4. User selects scenarios by number (comma-separated), or:
    - `next` / `prev` — paginate through scenarios
    - `all` — select all scenarios on the current page
-4. Collect selected scenarios into a `selectedScenarios` list
+5. Collect selected scenarios into a `selectedScenarios` list
 5. Ask: **"You selected {count} scenario(s). Proceed?"**
 6. Process only the selected scenarios using the Processing Loop below
 
@@ -323,17 +373,20 @@ Ask the user how they want to select scenarios for design generation:
 
 1. Ask: **"Enter scenario name (or keyword) to search:"**
 2. Call `Functional_Graph_Search(query: "<userInput>", project_uuid: "<projectUuid>", includeLabels: "[\"Scenario\"]")` to find matching scenarios
-3. If multiple matches found, display numbered list and let user pick
+3. Filter results: exclude any scenario whose `outcomeId` is in
+   `blockedOutcomeIds`
+4. If multiple matches found, display numbered list and let user pick
    one or more (same format as Option 1)
-4. If exactly one match, confirm: **"Found: '{scenarioName}'. Generate design for this scenario?"**
-5. If no matches, inform user and ask to try again or switch to another
+5. If exactly one match, confirm: **"Found: '{scenarioName}'. Generate design for this scenario?"**
+6. If no matches, inform user and ask to try again or switch to another
    selection mode
-6. Process selected scenario(s) using the Processing Loop below
+7. Process selected scenario(s) using the Processing Loop below
 
 #### Option 3: Process All (Default)
 
 Batch mode. All unprocessed scenarios (`isDesignGenerated=false`) are
-processed one by one. This is the default if the user doesn't specify.
+processed one by one, **skipping any whose `outcomeId` is in
+`blockedOutcomeIds`**. This is the default if the user doesn't specify.
 
 ---
 
@@ -347,26 +400,32 @@ Before entering the loop, determine `totalScenarios`:
 
 ```
 counter = 0
+skippedSystem = 0
 LOOP:
   1. Get next scenario to process
      - Option 3: Fetch ONE scenario where isDesignGenerated=false
      - Option 1/2: Take next from selectedScenarios list
   2. IF no scenario remaining → EXIT
-  3. counter += 1
-  4. Fetch steps and actions for THIS scenario ONLY
+  3. Check scenario's outcomeId against blockedOutcomeIds:
+     - IF outcomeId IN blockedOutcomeIds →
+       Show: "Skipping '{scenarioName}' — belongs to non-human persona (no UI)"
+       skippedSystem += 1
+       REPEAT from step 1
+  4. counter += 1
+  5. Fetch steps and actions for THIS scenario ONLY
      → Get_all_steps_actions_for_a_scenario_id(uuid, parameters0_Value: <scenarioId>)
      → Extract and store:
         - scenarioId (the scenario UUID)
         - For each step: stepId (UUID), step name, step order
         - For each action under each step: actionId (UUID), action name, action description
      → These IDs are REQUIRED for linking design nodes to functional nodes
-  5. Show progress: "[counter/totalScenarios] Scenario: <name>"
-  6. Execute Steps 3-7 for this scenario
+  6. Show progress: "[counter/totalScenarios] Scenario: <name>"
+  7. Execute Steps 3-7 for this scenario
      (In `auto` mode: skip user confirmation in Step 6)
-  7. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6d)
-  8. Call Bulk_Update_Design_Nodes (Step 6f) — ONLY after step 7 is done
-  9. Mark scenario as processed (Step 6i)
-  10. REPEAT from step 1
+  8. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6d)
+  9. Call Bulk_Update_Design_Nodes (Step 6f) — ONLY after step 8 is done
+  10. Mark scenario as processed (Step 6i)
+  11. REPEAT from step 1
 END LOOP
 ```
 
