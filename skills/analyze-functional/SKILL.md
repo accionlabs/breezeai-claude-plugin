@@ -149,3 +149,15 @@ If the user chose to update existing nodes (from conflict resolution in Step 2),
 Refer to `../shared/functional-graph-rules.md` for the data model and required fields.
 
 When creating actions, ensure descriptions follow the persona-aware rules from Step 3.
+
+### Step 6: Sync Analysis Back to Jira
+
+This step runs **only** if the original input in Step 1 was a Jira ticket link/key (input format A). For any other input source, skip Step 6 entirely.
+
+1. Ask the user for explicit confirmation before touching Jira
+2. On confirmation, fetch the current ticket via `mcp__plugin_atlassian_atlassian__getJiraIssue` and capture the existing `description` verbatim
+3. Build the analysis block from Steps 1–5 and **append** it to the existing description (existing content + blank line + analysis block)
+4. Write the combined description back via `mcp__plugin_atlassian_atlassian__editJiraIssue` — never overwrite, never post as a comment, never edit any other field
+5. Reply to the user with the Jira URL so they can verify
+
+> **Rules:** see [jira-sync-rules.md](references/jira-sync-rules.md) → "When to Apply", "Confirmation Gate", "Write Protocol", "Description Format Preservation", "Analysis Block Template", "Placeholder Rules", "Multi-Scenario Rule", and "Post-Write Confirmation".
