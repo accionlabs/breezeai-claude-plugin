@@ -1,23 +1,20 @@
 ---
 name: analyze-design
 description: >
-  Analyze UI/UX designs from Jira tickets and/or Figma wireframes.
-  Fetches Jira ticket info, resolves linked functional scenarios,
-  extracts visual descriptions from Figma, and generates design graph
-  nodes (UserJourney, Flow, Page, Component). Use when: user shares a
-  Jira ticket, a Figma URL, or both; "analyze this design", "design
-  from Jira", "map Figma to design graph".
+  Generate design graph nodes (UserJourney, Flow, Page, Component) from any
+  input: Jira ticket, plain-text description, scenario references, or Figma
+  wireframes. Builds requirement context, resolves matching functional graph
+  scenarios/steps/actions, generates design nodes with component reuse, and
+  optionally syncs results back to Jira. Use when: "analyze this design",
+  "create design from this ticket", "generate design for these scenarios",
+  user shares a Figma URL or Jira link, "design graph from requirement".
 ---
 
 ## Resources
 
-- For design graph rules (component types, supportingComponents,
-  reuse, payload structure), read
-  [../generate-design-from-ui/references/rules.md](../generate-design-from-ui/references/rules.md)
-- For shared design ontology guide (API tools, payload schemas), read
-  [../generate-design/references/guide.md](../generate-design/references/guide.md)
-- For atomic design theory and component classification, read
-  [../generate-design/references/atomic-design-theory.md](../generate-design/references/atomic-design-theory.md)
+- For functional graph node definitions (Outcome, Scenario, Step, Action), persona rules, action naming rules, and dedup decision matrix, read [references/functional-graph-rules.md](references/functional-graph-rules.md)
+- For API tools, mapping rules, payload structures, bulk upsert format, component types, supportingComponents array, reusability patterns, and designSystemRef lookup tables, read [references/guide.md](../generate-design/references/guide.md)
+- For atomic design theory, component type decision rules, hierarchy examples, full page breakdowns, and common mistakes, read [references/atomic-design-theory.md](../generate-design/references/atomic-design-theory.md)
 
 ---
 
@@ -28,176 +25,332 @@ Extract `apiKey` and `projectUuid`.
 
 > **Parameter naming hint:** All Breeze MCP tools require the project ID
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
-> `projectUuid`). Pass `.breeze.json`'s `projectUuid` value as `uuid`.
+> `projectUuid`). When calling any Breeze MCP tool, pass the value from
+> `.breeze.json`'s `projectUuid` field as the `uuid` argument. Using any other
+> name will fail with `Required → at uuid`.
 >
 > **Scenario ID hint:** When calling
-> `Get_all_steps_actions_for_a_scenario_id`, the scenario ID parameter
-> MUST be named **`parameters0_Value`** (NOT `scenarioId`, `id`, or
-> `scenario_id`).
+> `Get_all_steps_actions_for_a_scenario_id`, the scenario ID parameter MUST
+> be named **`parameters0_Value`** (NOT `scenarioId`, `id`, or `scenario_id`).
+> It maps to `filters[id][$eq]` on the backend. Using any other name fails
+> with `Required → at parameters0_Value`.
 >
 > **Design-by-label hint:** When calling `Get_all_Design_By_Label`, pass
 > the node label as **`label`** (e.g., `label: "Component"`), NOT as
-> `parameters0_Value`.
+> `parameters0_Value`. The `parameters0_Value` naming is specific to
+> `Get_all_steps_actions_for_a_scenario_id` — do not generalize it. Using
+> the wrong name fails with `Required → at label`.
 
 ---
 
-## Step 1: Gather Input
+## Step 0: Gather Input & Build Requirement Context
 
-The user can provide **one or both** of the following:
+The user provides **any one (or more)** of the inputs below. A single input
+is sufficient — do NOT ask for additional inputs if the user has already
+provided one. Only ask if nothing was provided at all.
 
-**A. Jira ticket** (e.g., `https://...atlassian.net/browse/PROJ-123` or `PROJ-123`)
-- Use `mcp__plugin_atlassian_atlassian__getJiraIssue` to fetch the ticket details (summary, description, acceptance criteria, comments)
-- Extract requirement context from the ticket content
+### 0a. Accepted Inputs
 
-**B. Figma URL(s)** (e.g., `figma.com/design/:fileKey/:fileName?node-id=:nodeId`)
-- One or more Figma frame links for the wireframes/designs
-- Do NOT fetch Figma yet — these are used later in Step 3
+| Input | Example | How to Fetch |
+| --- | --- | --- |
+| **A. Jira ticket** (link or ID) | `PROJ-123` or `https://…/browse/PROJ-123` | `mcp__plugin_atlassian_atlassian__getJiraIssue` → extract summary, description, acceptance criteria, comments |
+| **B. Plain-text description** | User types the requirement directly | Use as-is |
+| **C. Scenario reference** | "create design for the login scenarios" | Noted — resolved in Step 1 |
+| **D. Figma URL(s)** | `figma.com/design/:fileKey/…?node-id=:nodeId` | Fetch via Figma MCP, then run `/breeze:visual-to-text` to extract functional description |
 
-If neither a Jira ticket nor a Figma URL is provided, ask the user for at least one.
+If **none** of the above are provided, ask the user for at least one.
+If the user provides just one input, proceed with that — do not prompt for others.
+
+### 0b. Fetch Raw Content
+
+For each input provided:
+
+1. **Jira ticket →** call `getJiraIssue` and capture:
+   - Summary & description
+   - Acceptance criteria / definition of done
+   - Comments (latest 10)
+   - Linked issues (may reveal related scenarios)
+
+2. **Figma URL(s) →** process wireframes to extract functional descriptions:
+   1. Extract fileKey and nodeId from each URL (convert `-` to `:` in nodeId)
+   2. Call `get_design_context` (Figma MCP) to fetch the screenshot and design data
+   3. Run the **`/breeze:visual-to-text`** skill on the fetched frames — this
+      produces structured user stories (personas, outcomes, scenarios, steps,
+      actions) describing the functional intent behind the visual design
+   4. Capture the visual-to-text output as part of the requirement context —
+      this gives you both the UI elements identified AND the functional intent
+      they represent
+
+3. **Plain-text description →** use verbatim
+
+4. **Scenario reference →** hold for Step 1
+
+### 0c. Build Requirement Context
+
+Synthesize all fetched content into a single **Requirement Context** document.
+This is the lens through which you will search the functional graph and
+generate design nodes.
+
+```
+REQUIREMENT CONTEXT
+───────────────────
+Source:        [Jira PROJ-123 | User description | Figma frame "Login" | …]
+
+Summary:       <1-2 sentence description of what the user needs>
+
+Key Capabilities:
+  - <capability 1> (e.g., "User can log in with email and password")
+  - <capability 2> (e.g., "User can reset password via email link")
+  - …
+
+From Figma / visual-to-text (if available):
+  Personas identified:
+    - <persona>: <description>
+  Scenarios identified:
+    - <scenario name>: <brief description>
+  UI Elements:
+    - <element>: <purpose> (e.g., "Email input: captures user email")
+  Functional Intent:
+    - <step → action mapping from visual-to-text output>
+
+Acceptance Criteria (from Jira, if available):
+  - <criterion 1>
+  - …
+
+Key Terms for Search:
+  - <term 1>, <term 2>, <term 3>, …
+```
+
+Present this context to the user for confirmation:
+**"Here's my understanding of the requirement. Does this look correct, or would you like to adjust anything?"**
 
 ---
 
-## Step 2: Resolve Functional Scenarios
+## Step 1: Resolve Scenarios, Steps & Actions
 
-The goal is to identify which functional graph scenarios are relevant to this Jira ticket / design.
+Use the Requirement Context from Step 0 to find the functional graph nodes
+that fulfil this requirement.
 
-### 2a. Check Jira Ticket for Linked Scenarios
+> **MANDATORY — DO NOT BULK FETCH THE FUNCTIONAL GRAPH.**
+> NEVER call `Get_complete_functional_graph` or any tool that returns the entire
+> functional graph in one shot. Always fetch incrementally per scenario.
 
-If a Jira ticket was provided, check whether it already has scenario references — look for Breeze scenario names, scenario IDs, or functional graph references in the ticket description, comments, or custom fields.
+### 1a. Resolve Scenarios
 
-### 2b. Search Functional Graph
+Scenarios can come from **three sources** — check each that applies and
+merge into a single candidate list (deduplicate by scenario ID):
 
-Regardless of whether the Jira ticket has scenario links:
+#### Source 1: Direct scenario reference (input C)
 
-1. Extract key terms from the Jira ticket (summary, description, acceptance criteria) and/or the Figma URL context
-2. Call `Functional_Graph_Search(query: "<key terms>", project_uuid: "<projectUuid>", includeLabels: "[\"Scenario\"]")` to find matching scenarios
-3. If the Jira ticket had linked scenarios, also search for those specifically to validate they exist in the graph
+If the user explicitly named scenarios (e.g., "create design for the login
+scenarios"), fetch them directly:
 
-### 2c. Filter Non-Human Persona Scenarios
+- Call `Functional_Graph_Search(query: "<scenario name>", project_uuid: "<projectUuid>", includeLabels: "[\"Scenario\"]")`
+- Or call `Get_scenarios_by_uuid` and match by name
+- Add matched scenarios to the candidate list
 
-> **Only human persona scenarios are eligible for design generation.**
-> System and External System personas have no UI — their scenarios MUST be excluded.
+#### Source 2: Jira ticket linked scenarios
 
-1. Call `Get_all_personas(uuid: "<projectUuid>")`
-2. Identify non-human personas: `System`, `External System`
-3. For each non-human persona, call `Get_all_outcomes_for_a_persona_id(uuid, personaId: "<id>")` and collect all outcome IDs into a `blockedOutcomeIds` set
-4. From the scenarios discovered in Steps 2a–2b, remove any scenario whose `outcomeId` is in `blockedOutcomeIds`
-5. Log excluded scenarios: `"Excluded N scenario(s) belonging to non-human personas (System / External System) — no UI to design"`
+If a Jira ticket was provided, check whether it already has scenario
+references — look for Breeze scenario names, scenario IDs, or functional
+graph references in the ticket description, comments, or custom fields.
 
-### 2d. Handle No Scenarios Found — HARD STOP
+If found:
+- Fetch each referenced scenario via `Functional_Graph_Search` or
+  `Get_scenarios_by_uuid` to validate it exists in the graph
+- Add validated scenarios to the candidate list
 
-If no matching scenarios remain after filtering (neither from Jira links nor from search, or all were non-human):
+#### Source 3: Search by requirement context
 
-> _"No functional graph scenarios found for this Jira ticket / design. The functional graph must exist before design generation can proceed. Please use `/breeze:analyze-functional` to generate the functional graph first, then re-run `/breeze:analyze-design`."_
-
-**Stop here.** Do not proceed to any further steps.
-
-### 2e. Present Scenarios to User for Selection
-
-Display all remaining human-persona scenarios in a numbered list. For each scenario, show its `isDesignGenerated` status:
+Using the **Key Terms** from the Requirement Context, search for additional
+matching scenarios:
 
 ```
-Found scenarios related to this ticket/design:
-
-From Jira ticket links:
-  1. ✓ Login with Email — Persona: End User (linked in ticket) [design: not generated]
-  2. ✓ Login with SSO — Persona: End User (linked in ticket) [design: already generated]
-
-From functional graph search:
-  3. Reset Password — Persona: End User [design: not generated]
-
-(N non-human persona scenarios excluded)
-
-Select scenarios to process (e.g. "1,2,3"), "all", or "none" to skip:
+Functional_Graph_Search(
+  query: "<key terms>",
+  project_uuid: "<projectUuid>",
+  includeLabels: "[\"Scenario\"]"
+)
 ```
 
-- If the Jira ticket had scenario links, pre-validate them: show ✓ if found in graph, ✗ if not found
-- Show `[design: already generated]` or `[design: not generated]` for each scenario
-- Show count of excluded non-human scenarios
-- Ask the user to confirm which scenarios to process
-- If user says "none", inform the user and stop
+Run multiple searches if the requirement spans different domains (e.g., one
+search for "login authentication", another for "password reset").
 
-### 2f. Handle Already-Generated Scenarios
+Add results to the candidate list (skip duplicates already found via
+Source 1 or 2).
 
-If any of the user's selected scenarios have `isDesignGenerated: true`, ask the user how to proceed **before** fetching steps/actions:
+> **Priority:** If Source 1 or Source 2 already yielded scenarios, those are
+> the primary candidates. Source 3 results are supplementary — present them
+> separately so the user can decide whether to include them.
 
-> _"The following scenario(s) already have design nodes generated:
-> - Login with SSO
-> - Account Lockout
->
-> How would you like to proceed?
-> 1. **Skip** — exclude these scenarios and only process the ungenerated ones
-> 2. **Regenerate** — delete existing design nodes and regenerate from scratch
-> 3. **Continue anyway** — process all selected scenarios (may create duplicate design nodes)"_
+### 1b. Handle No Scenarios Found — HARD STOP
 
-Apply the user's choice:
-- **Skip**: remove already-generated scenarios from the selected list
-- **Regenerate**: keep them in the list; in Step 6, delete existing design nodes before bulk upsert
-- **Continue anyway**: keep them in the list; proceed without deleting existing nodes
+If no matching scenarios are found:
 
-### 2g. Fetch Steps & Actions for Selected Scenarios
+> _"No functional graph scenarios found matching your requirement. The
+> functional graph must exist before design generation can proceed. Please use
+> `/breeze:update-functional-graph` to create the functional graph first, then
+> re-run `/breeze:analyze-design`."_
 
-For each selected scenario, call `Get_all_steps_actions_for_a_scenario_id(uuid, parameters0_Value: <scenarioId>)` and extract:
-- `scenarioId` (UUID)
+**Stop here.**
+
+### 1c. Fetch Steps & Actions for Each Matched Scenario
+
+For each scenario found, call
+`Get_all_steps_actions_for_a_scenario_id(uuid, parameters0_Value: <scenarioId>)`
+and extract:
+- `scenarioId` (UUID), scenario name
 - For each step: `stepId`, step name, step order
 - For each action under each step: `actionId`, action name, action description
 
-Hold this data for use in design graph generation.
+### 1d. Map Requirement Context → Scenarios → Steps → Actions
+
+Cross-reference the Requirement Context against the fetched functional data.
+For each **Key Capability** and **UI Element** from the context, identify which
+scenario → step → action covers it.
+
+Present a coverage summary to the user, grouped by source:
+
+```
+Requirement Coverage:
+
+  From direct reference / Jira ticket:
+    1. ✓ Login with Email — Persona: End User [design: not generated]
+       ├── Step 1: Enter Credentials
+       │   ├── Action: Display email input field
+       │   ├── Action: Display password input field
+       │   └── Action: Display login button
+       └── Step 2: Validate & Redirect
+           ├── Action: Show validation errors
+           └── Action: Redirect to dashboard
+
+  From functional graph search:
+    2. Reset Password — Persona: End User [design: not generated]
+       ├── Step 1: Request Reset
+       │   └── Action: Display reset form
+       └── Step 2: Confirm Reset
+           └── Action: Display confirmation message
+
+  Gaps (not covered by any scenario):
+  - <UI element or capability with no matching action>
+
+  Unmatched Actions (in graph but not in requirement):
+  - <action that exists but isn't relevant to this requirement>
+
+Scenarios to process: 2 | Steps: 4 | Actions: 7
+```
+
+### 1e. User Confirms Scope
+
+Ask: **"These are the scenarios, steps, and actions I'll use to generate the
+design graph. Proceed with all, or would you like to adjust the selection?"**
+
+- User can exclude scenarios, add more via search, or accept all
+- If user says "none", stop
+
+### 1f. Handle Already-Generated Scenarios
+
+If any selected scenarios have `isDesignGenerated: true`, ask:
+
+> _"The following scenario(s) already have design nodes:
+> - Login with SSO
+>
+> 1. **Skip** — exclude these
+> 2. **Regenerate** — delete existing and regenerate
+> 3. **Continue anyway** — may create duplicates"_
+
+### 1g. Select Target Modalities
+
+Ask which modalities to generate design nodes for:
+
+| Modality        | Description                        |
+| --------------- | ---------------------------------- |
+| `web`           | Browser-based interface            |
+| `mobile/tablet` | Native mobile & tablet application |
+| `desktop`       | Desktop application                |
+
+Default: `web` if user doesn't specify.
 
 ---
 
-## Step 3: Fetch & Analyze Figma Designs
+## Processing Loop
 
-This step runs **only** if Figma URL(s) were provided. If no Figma URLs, skip to Step 4 — design graph generation will rely solely on the functional graph data (scenario steps & actions).
+Process selected scenarios one at a time.
 
-### 3a. Fetch Figma Frames
-
-For each Figma URL:
-1. Extract fileKey and nodeId from the URL
-2. Convert "-" to ":" in nodeId
-3. Call `get_design_context` (Figma MCP) with fileKey and nodeId
-4. Review the screenshot and generated code
-
-### 3b. Extract Functional Description from Figma (Visual-to-Text)
-
-For each fetched Figma frame, analyze the visual design and extract a functional text description. Focus on:
-
-**Input Elements:**
-- Text fields, dropdowns, selectors, checkboxes, radio buttons, date pickers, file uploads, text areas
-
-**Interactive Elements:**
-- Primary/secondary action buttons, links, navigation items, tabs, accordions, modals, dialogs, toggles, switches
-
-**Display Elements:**
-- Headers, titles, labels, data tables, lists, cards, charts, status indicators, error/success messages
-
-**Navigation:**
-- Navigation bars, breadcrumbs, pagination, menu items
-
-**Layout & Structure:**
-- Page sections, containers, grid layouts
-
-### 3c. Map Figma Descriptions to Scenarios
-
-From the extracted Figma descriptions, identify which scenarios, steps, and actions are represented:
-- Match Figma elements to the steps/actions fetched in Step 2
-- Note any UI elements in the Figma that don't map to existing actions (potential gaps)
-- Note any actions from the functional graph that have no corresponding UI element in the Figma
-
-This mapping informs the design graph generation — the Figma descriptions provide richer context about what components look like and how they're laid out.
+```
+counter = 0
+LOOP:
+  1. Take next scenario from selected list
+  2. IF no scenario remaining → EXIT
+  3. counter += 1
+  4. Show progress: "[counter/totalScenarios] Scenario: <name>"
+  5. Execute Steps 2-3 for this scenario (check coverage, generate nodes)
+  6. Step 4: User confirmation
+  7. Step 5: Bulk upsert
+  8. Step 5e: Mark scenario as processed
+  9. REPEAT from step 1
+END LOOP
+```
 
 ---
 
-## Step 4: Generate Design Graph Nodes (Per Scenario)
+## Step 2: Check Existing Design Coverage
 
-Process each selected scenario one at a time. For each scenario, generate design nodes using the functional graph data (steps, actions) enriched by Figma descriptions (if available).
+### 2a. Check Direct Mappings
 
-### 4a. Scenario → UserJourney
+Query existing design nodes to find what's already mapped:
+
+| Functional Node | Design Node | Check Field   |
+| --------------- | ----------- | ------------- |
+| Scenario        | UserJourney | `scenarioId`  |
+| Step            | Flow/Page   | `stepIds[]`   |
+| Action          | Component   | `actionIds[]` |
+
+### 2b. Build Reusable Registries
+
+**Flow Registry:**
+
+Query `Get_all_Design_By_Label` (label=`Flow`). Index by
+`(name, modality)`. Used in Step 3b to avoid duplicating flows
+across scenarios.
+
+**Page Registry:**
+
+Query `Get_all_Design_By_Label` (label=`Page`). Index by
+`(name, pageType, modality)`. Used in Step 3b to avoid duplicating pages
+across scenarios.
+
+**Component Registry:**
+
+Query `Get_all_Design_By_Label` (label=`Component`). Search by name,
+`designSystemRef`, or `componentType` to find existing components for reuse.
+Used in Step 3c for component reuse decisions — reuse if found, create new
+if not.
+
+| Level    | Scope              |
+| -------- | ------------------ |
+| `GLOBAL` | Entire application |
+| `DOMAIN` | Business domain    |
+| `PAGE`   | Single page        |
+
+### 2c. For Existing Mappings, Ask User
+
+| Option      | Action                                         |
+| ----------- | ---------------------------------------------- |
+| **Skip**    | Keep existing design node unchanged            |
+| **Update**  | Update design node with latest functional data |
+| **Replace** | Delete existing and create new design node     |
+
+---
+
+## Step 3: Generate Design Graph Nodes
+
+### 3a. Scenario → UserJourney
 
 One UserJourney per Scenario with `scenarioId` link.
 Name MUST end with `Journey` suffix.
 
-### 4b. Step → Flow OR Page (Exclusive)
+### 3b. Step → Flow OR Page (Exclusive)
 
 A Step maps to Flow OR Page, never both.
 
@@ -207,98 +360,149 @@ A Step maps to Flow OR Page, never both.
 | Reusable sub-journey pattern      | Data entry/display on one screen |
 | Process spanning multiple screens | Form, list, detail, or dashboard |
 
-Create separate Flow/Page for EACH modality (default: `web`).
-**Name MUST include modality** — format: `{Step} {Modality} Flow` / `{Step} {Modality} Page`.
+Create separate Flow/Page for EACH selected modality.
+**Name MUST include modality** — format: `{Step} {Modality} Flow` / `{Step} {Modality} Page`
+(e.g., "Sign Up Web Flow", "Sign Up Mobile Flow", "Registration Web Page", "Registration Mobile Page").
 
 **Flow Deduplication (LINK before CREATE):**
-Before creating a Flow, search existing Flows via `Design_Graph_Search` or `Get_all_Design_By_Label(label: "Flow")` for match by `(name, modality)`. Match found → LINK (append `stepIds[]` via `Update_Design_Node`) instead of creating.
+
+Before creating a Flow, check the flow registry from Step 2b for an existing
+flow with the same `(name, modality)`. If a match is found:
+
+- Do NOT create a new Flow or its child Pages
+- LINK: issue an `Update_Design_Node` call to append the current step's UUID
+  to the existing flow's `stepIds[]`
+- In the bulk payload, omit this flow entirely (it and its pages/components
+  already exist)
+- In the preview (Step 4), show the flow under "REUSE EXISTING" rather than
+  "NEW"
+
+A flow contains multiple pages that together complete the flow. Reusing a
+flow automatically reuses all its pages and their components.
 
 **Page Deduplication (LINK before CREATE):**
-Before creating a Page, search existing Pages via `Design_Graph_Search` or `Get_all_Design_By_Label(label: "Page")` for match by `(name, pageType, modality)`. Match found → LINK instead of creating.
 
-### 4c. Action → Component (REUSE FIRST)
+Before creating a Page, check the page registry from Step 2b for an existing
+page with the same `(name, pageType, modality)`. If a match is found:
 
-Since we don't have a repo to read actual code from, components are inferred from:
-1. **Figma descriptions** (if available) — use the visual elements identified in Step 3b
-2. **Action names and descriptions** from the functional graph
-3. **Existing components** in the design graph — search to maximize reuse
+- Do NOT create a new Page
+- LINK: issue an `Update_Design_Node` call to append the current step's UUID
+  to the existing page's `stepIds[]`
+- In the bulk payload, omit this page (and its components — they already
+  exist on the page)
+- In the preview (Step 4), show the page under "REUSE EXISTING" rather than
+  "NEW"
 
-**Component Reuse Resolution (priority order):**
-1. **Search existing components** via `Design_Graph_Search` or `Get_all_Design_By_Label(label: "Component")` for matching components by name or `designSystemRef` → REUSE
+This prevents the same page (e.g., "Patient Dashboard") from being duplicated
+when multiple scenarios reference it.
+
+### 3c. Component Reuse Resolution (REUSE FIRST)
+
+> **Always search existing components via `Get_all_Design_By_Label(label: "Component")`
+> or `Design_Graph_Search` before creating any component.**
+
+Walk this priority order, stop at the first match:
+
+1. **Exact `designSystemRef` match** in existing design graph → REUSE (append `actionId`)
 2. **Semantic + type match in same domain** → REUSE
 3. **Global atom/molecule match** → REUSE
 4. **Template/layout match** → REUSE
 5. **Create new** → narrowest correct scope (`GLOBAL` > `DOMAIN` > `PAGE`)
 
-**Classify components using atomic design theory:**
+**Hard rules:**
 
-| Level | When to Use |
-|---|---|
-| **TEMPLATE** | Page-level layout skeleton — defines WHERE things go |
-| **ORGANISM** | Self-contained section (forms, tables, nav bars) — always CREATE NEW, reuse children |
-| **MOLECULE** | Small group of atoms as unit (label + input + error) |
-| **ATOM** | Single UI element (button, input, label, icon) |
+- Always search the design graph BEFORE creating
+- ORGANISM containers are page-specific — always CREATE NEW; supportingComponents follow rules 1–3
+- Merge near-duplicates with same `designSystemRef`
+- Never downgrade scope on reuse
+- Ties: prefer higher scope and more `actionIds[]` linked
 
-**supportingComponents rules:**
-- TEMPLATE → ORGANISM names only
-- ORGANISM → MOLECULE and/or ATOM names
-- MOLECULE → ATOM names only
-- ATOM → `[]`
+### 3d. Template Generation (Mandatory)
 
-### 4d. Template Generation (Mandatory)
+Every Page MUST be assigned a TEMPLATE. After generating all Pages in the
+current scenario, apply this for each Page:
 
-Every Page MUST have a TEMPLATE. Use the standard mapping:
+1. **Determine the layout pattern** from the Page's `pageType`:
 
-| `pageType` | TEMPLATE Name |
-|---|---|
-| form / create / edit / register | `FormPageLayout` |
-| list / table / search | `ListPageLayout` |
-| detail / view / profile | `DetailPageLayout` |
-| dashboard / overview | `DashboardLayout` |
-| wizard / multi-step | `WizardLayout` |
-| master-detail / split | `SplitPaneLayout` |
-| login / signup / reset | `AuthPageLayout` |
+   | `pageType`                      | Standard TEMPLATE  |
+   | ------------------------------- | ------------------ |
+   | form / create / edit / register | `FormPageLayout`   |
+   | list / table / search           | `ListPageLayout`   |
+   | detail / view / profile         | `DetailPageLayout` |
+   | dashboard / overview            | `DashboardLayout`  |
+   | wizard / multi-step             | `WizardLayout`     |
+   | master-detail / split           | `SplitPaneLayout`  |
+   | login / signup / reset          | `AuthPageLayout`   |
 
-Search existing TEMPLATEs via `Design_Graph_Search` or `Get_all_Design_By_Label(label: "Component")` for reuse. TEMPLATEs are always `GLOBAL` scope.
+   If the page does not match any standard pattern, derive a generic layout
+   name from its structure (e.g., `SettingsPageLayout`). Never name a template
+   after a specific page — use the layout pattern name.
 
-### 4e. Order Preservation
+2. **Search existing TEMPLATEs** via `Get_all_Design_By_Label(label: "Component")`
+   or `Design_Graph_Search` for a TEMPLATE with the matching `designSystemRef`.
+   If found → REUSE it (do not create a duplicate). Add the Page's ORGANISMs
+   to its `supportingComponents` if not already present.
+
+3. **If no matching TEMPLATE exists → CREATE one** with:
+   - `scope`: `GLOBAL` (templates are always reusable)
+   - `designSystemRef`: the layout pattern name from the table above
+   - `supportingComponents`: the ORGANISMs that slot into this layout
+
+**Hard rules:**
+
+- TEMPLATEs can ONLY contain ORGANISMs — never MOLECULEs or ATOMs directly
+- TEMPLATEs define WHERE things go, not WHAT they are
+- Name generically (`FormPageLayout`), never specifically (`PatientRegistrationTemplate`)
+- One TEMPLATE per layout pattern, reused across all pages sharing that pattern
+
+### 3e. Order Preservation
 
 Preserve `order` field from functional graph in design nodes.
 
 ---
 
-## Step 5: User Confirmation (Per Scenario)
+## Step 4: User Confirmation (Per Scenario)
 
-Before creating nodes, show a preview for the current scenario:
+Before creating nodes, show a preview for the current scenario covering:
+UserJourneys, Flows, Pages, Components, Templates (new + reused). Include a
+summary with total nodes to create and actions to link.
 
-```
-Design Preview: [Scenario Name]
+Ask: **"Proceed with creating these design nodes for this scenario?"**
 
-UserJourney: [Name] Journey
-├── Flow: [Name] Web Flow (NEW / REUSE EXISTING)
-│   ├── Page: [Name] Web Page — pageType: [type] (NEW / REUSE EXISTING)
-│   │   ├── TEMPLATE: [LayoutName] (NEW / REUSE)
-│   │   ├── ORGANISM: [Name] (NEW)
-│   │   │   ├── MOLECULE: [Name] (REUSE)
-│   │   │   └── ATOM: [Name] (REUSE)
-│   │   └── ...
-│   └── ...
-└── ...
+| Option     | Action                                   |
+| ---------- | ---------------------------------------- |
+| **Yes**    | Create all nodes as shown                |
+| **No**     | Skip this scenario, move to next         |
+| **Modify** | Let user specify changes before creating |
 
-Summary: N new nodes, M reused | stepIds: [list] | actionIds: [list]
-```
-
-Ask: **"Proceed with creating these design nodes? (Yes / No / Modify)"**
-
-If "Modify": allow removing nodes, changing names, reusability levels. Show updated preview and re-confirm.
+If "Modify": allow removing nodes, changing names, reusability levels,
+modality assignments. Show updated preview and re-confirm.
 
 ---
 
-## Step 6: Create Design Nodes (Bulk Upsert)
+## Step 5: Create Design Nodes (Bulk Upsert)
 
-### 6a. Build & Send Bulk Payload
+Use `Bulk_Update_Design_Nodes` to create the entire UserJourney tree for the
+current scenario in **one call**. See [references/guide.md](../generate-design/references/guide.md)
+for the full payload structure, supportingComponents array rules, and examples.
 
-Assemble the nested tree: UserJourney → Flows → Pages → Components (with `supportingComponents`) + TEMPLATEs.
+### 5a. Build the Bulk Payload
+
+Assemble the nested tree from the confirmed preview: UserJourney → Flows →
+Pages → Components (with `supportingComponents`) + TEMPLATEs. One UserJourney per call (one scenario).
+
+Include any new TEMPLATE nodes generated in Step 3d in the payload. TEMPLATEs
+sit at the Page level with their ORGANISM `supportingComponents`. If the
+TEMPLATE already exists (reused), omit it from the payload.
+
+### 5b. Payload Rules
+
+- **Nesting = hierarchy** — backend wires parent-child relationships
+- **Component supportingComponents** — ORGANISM → MOLECULE/ATOM, MOLECULE → ATOM, ATOM → `[]`
+- **Reused components** — include with `designSystemRef`; backend deduplicates via upsert
+- **Multi-modality** — separate Flow entries per modality under the same UserJourney
+
+### 5c. Make the Call
 
 ```
 Bulk_Update_Design_Nodes(
@@ -308,12 +512,17 @@ Bulk_Update_Design_Nodes(
 )
 ```
 
-One call per scenario. See [../generate-design/references/guide.md](../generate-design/references/guide.md) for payload structure.
+### 5d. Error Handling
 
-### 6b. Mark Scenario as Design-Generated
+| Failure Point              | Action                                      |
+| -------------------------- | ------------------------------------------- |
+| Entire bulk call fails     | Retry once; if still fails, report to user  |
+| Partial failure (returned) | Log failed nodes, report to user for review |
+
+### 5e. Mark Scenario as Processed
 
 ```
-Call_Update_Functional_Node_(
+Update_Functional_Node(
   uuid: <projectUuid>,
   apiKey: <apiKey>,
   label: "Scenario",
@@ -322,46 +531,67 @@ Call_Update_Functional_Node_(
 )
 ```
 
-### 6c. Repeat for Next Scenario
+---
 
-Return to Step 4 for the next selected scenario. Continue until all selected scenarios are processed.
+## Step 6: Sync to Jira (Conditional)
+
+This step runs **only** if the original input included a Jira ticket link or
+key. If no Jira ticket was provided, skip to Step 7.
+
+> **Rules:** see [references/jira-sync-rules.md](references/jira-sync-rules.md)
+> for confirmation gate, write protocol, description format preservation,
+> analysis block template, and post-write confirmation.
+
+### 6a. Ask for Confirmation
+
+> _"Would you like me to append this design analysis to the description of
+> Jira ticket `<TICKET-KEY>`? The existing description will be preserved and
+> this analysis will be appended at the end."_
+
+If the user declines → skip to Step 7. Never write to Jira without explicit
+confirmation.
+
+### 6b. Build & Append Analysis Block
+
+1. Fetch the current ticket via `mcp__plugin_atlassian_atlassian__getJiraIssue`
+   and capture the existing `description` verbatim
+2. Build the analysis block using the template in
+   [jira-sync-rules.md](references/jira-sync-rules.md) — fill from Steps 0–5
+   (requirement context, coverage mapping, design graph created, gaps)
+3. **Append** the analysis block to the existing description (never overwrite)
+4. Call `mcp__plugin_atlassian_atlassian__editJiraIssue` with the combined
+   description — only modify the `description` field, nothing else
+
+### 6c. Confirm to User
+
+Reply with the Jira ticket URL so the user can verify the appended analysis.
+If the edit failed, surface the error and ask the user how to proceed.
 
 ---
 
-## Step 7: Sync Analysis Back to Jira
+## Step 7: Output Summary
 
-This step runs **only** if the original input included a Jira ticket link/key. If no Jira ticket was provided, skip this step entirely.
+**Design Graph Generated (by Modality)**
 
-1. Ask the user for explicit confirmation before touching Jira
-2. On confirmation, fetch the current ticket via `mcp__plugin_atlassian_atlassian__getJiraIssue` and capture the existing `description` verbatim
-3. Build the analysis block and **append** it to the existing description
-4. Write the combined description back via `mcp__plugin_atlassian_atlassian__editJiraIssue` — never overwrite, never post as a comment, never edit any other field
-5. Reply to the user with the Jira URL so they can verify
+| Modality  | UserJourneys | Flows | Pages | Templates (New/Reused) | Components (New) |
+| --------- | ------------ | ----- | ----- | ---------------------- | ---------------- |
+| web       | N            | N     | N     | N / N                  | N                |
+| mobile    | N            | N     | N     | N / N                  | N                |
+| **Total** | N            | N     | N     | N / N                  | N                |
 
-> **Rules:** see [jira-sync-rules.md](references/jira-sync-rules.md) → "When to Apply", "Confirmation Gate", "Write Protocol", "Description Format Preservation", "Analysis Block Template", and "Post-Write Confirmation".
+**Component Reuse Statistics**
 
----
+| Metric                        | Count |
+| ----------------------------- | ----- |
+| New GLOBAL components created | N     |
+| New DOMAIN components created | N     |
+| New PAGE components created   | N     |
+| Existing components reused    | N     |
 
-## Step 8: Output Summary
+**Reuse Efficiency:** `(Reused / Total Actions) × 100`%
 
-**Design Analysis Summary: [Ticket Key / Frame Name]**
+**Next Steps**
 
-| Metric | Count |
-|---|---|
-| Scenarios processed | N |
-| UserJourneys created | N |
-| Flows (new / reused) | N / N |
-| Pages (new / reused) | N / N |
-| Components (new / reused) | N / N |
-| Templates (new / reused) | N / N |
-
-**Component Reuse Efficiency:** `(Reused / Total) × 100`%
-
-**Gaps Identified:**
-- Figma elements not mapped to functional actions
-- Functional actions without Figma representation
-- Acceptance criteria coverage (if Jira provided)
-
-**Next Steps:**
+- Refine design nodes with additional properties
 - Run `/breeze:create-page` to generate UI code
-- Export to Figma for visual design refinement
+- Export to Figma for visual design
