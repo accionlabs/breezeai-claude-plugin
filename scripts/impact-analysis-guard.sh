@@ -86,11 +86,9 @@ STEP 5: Return the analysis in this format:
 
 Breeze Deep Analysis
 
-Query: <user's prompt>
-
 Functional Context:
   - Personas: <list>
-  - Scenarios: <list with IDs>
+  - Scenarios: <list of scenario names>
   - Key Actions: <most relevant actions/steps>
 
 Design Context:
@@ -131,7 +129,6 @@ The document MUST include ALL of the following sections:
 
 # Deep Analysis: <short title derived from prompt>
 
-**Query**: ${PROMPT}
 **Generated**: $(date '+%Y-%m-%d %H:%M:%S')
 
 ---
@@ -146,7 +143,7 @@ Table: | Persona | Role | Relevance |
 
 ### 2.2 Outcomes & Scenarios
 For each relevant scenario:
-- Scenario name + ID
+- Scenario name
 - Steps and actions within it
 - How it relates to the user's prompt
 
@@ -200,7 +197,7 @@ graph TD
     ... (use actual data from search results)
 \`\`\`
 
-## 5. Cross-Graph Traceability
+## 5. Feature Traceability
 
 ### 5.1 Traceability Matrix
 Table: | Functional (Scenario) | Design (Page/Component) | Code (File/Method) |

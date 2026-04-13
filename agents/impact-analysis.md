@@ -57,11 +57,9 @@ Return the deep analysis to the main conversation as a concise but informative s
 ```
 Breeze Deep Analysis
 
-Query: <user's prompt>
-
 Functional Context:
   - Personas: <list of relevant personas>
-  - Scenarios: <list of relevant scenarios with IDs>
+  - Scenarios: <list of relevant scenario names>
   - Key Actions: <most relevant actions/steps>
 
 Design Context:
@@ -74,7 +72,7 @@ Code Context:
   - Modules/Classes: <related modules>
   - Key Methods: <relevant methods/functions>
 
-Cross-Graph Connections:
+Feature Traceability:
   <how functional → design → code are linked for this prompt>
 
 Risk Level: <Low/Medium/High> — <one-line justification>
