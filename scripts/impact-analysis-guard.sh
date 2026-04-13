@@ -28,6 +28,11 @@ case "$LOWER_PROMPT" in
     ;;
 esac
 
+# Skip action/mutation intents
+if echo "$LOWER_PROMPT" | grep -qE "(create|add|update|delete|remove|build|implement|fix|change|modify|generate|write|deploy)"; then
+  exit 0
+fi
+
 # ── Guard: .breeze.json must exist with apiKey + projectUuid ────────
 if [ ! -f ".breeze.json" ]; then
   exit 0
