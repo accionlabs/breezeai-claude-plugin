@@ -490,6 +490,35 @@ paths/flows exist in the UI for completing this scenario.
 
 ### 3a. Map scenario to UI entry points
 
+**Option 1: Use citations (preferred — faster and more accurate)**
+
+Scenarios created by `/breeze:generate-functional-from-ui` have citations
+on their parent **Outcome** node pointing to the exact UI source files.
+Check citations first before falling back to grep:
+
+1. The scenario has an `outcomeId` — use
+   `Get_all_outcomes_for_a_persona_id` (already fetched during blocklist
+   build) or `Functional_Graph_Search` to get the outcome node
+2. Read the outcome's `citations[]` array — each citation has:
+   - `type`: `"code"`
+   - `name`: file name (e.g. `"ProjectDetail.tsx"`)
+   - `reference`: file path (e.g. `"src/pages/ProjectDetail.tsx"`)
+3. `Read` each cited file to understand the page structure, components,
+   routes, and conditional rendering
+4. These files are the **primary source of truth** for this scenario's
+   UI — they tell you exactly which components exist, what props they
+   take, what state they manage, and how they're composed
+
+> **Why citations first?** The functional graph was generated from these
+> exact files. Using them directly avoids grep guesswork and gives you
+> the actual component tree, imports, and rendering logic. This produces
+> more accurate Flow/Page/Component identification.
+
+**Option 2: Grep fallback (when citations are missing)**
+
+If the outcome has no citations (e.g. scenario was created manually or
+via `/breeze:analyze-functional`), fall back to grep:
+
 1. Use the scenario name and step names to grep the UI repo for
    matching routes, page titles, or component names
 2. Use `Code_Graph_Search` as an accelerator, then confirm with `Read`
