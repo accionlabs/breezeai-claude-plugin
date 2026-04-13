@@ -172,8 +172,8 @@ Default: `confirm` if user doesn't specify.
    ```
 
 3. If user adds modalities → each scenario gets duplicate Flows per
-   modality (e.g. "Login Web Flow" + "Login Mobile Flow") with the
-   same pages but modality-specific naming
+   modality (e.g. "Login" for web + "Login" for mobile) with the
+   same pages but separate `modality` field values
 4. Store confirmed modalities list for the per-scenario loop
 
 ---
@@ -244,9 +244,9 @@ key** for fast lookup:
 
 ### 1d. Build Flow & Page Registries
 
-> **Flows and Pages are reusable across scenarios.** A "Login Web Flow"
+> **Flows and Pages are reusable across scenarios.** A "Login" flow
 > created for Scenario A can be reused when Scenario B also passes
-> through login. Same for pages — a "Dashboard Web Page" can appear in
+> through login. Same for pages — a "Dashboard" page can appear in
 > many flows. These registries enable LINK-before-CREATE at every level.
 
 Query existing Flows and Pages (paginate if > 50):
@@ -259,16 +259,16 @@ Get_all_Design_By_Label(uuid, label: "Page", page: "1", limit: "50")
 **Flow Registry** — index by `(name, modality)`:
 ```json
 {
-  "Login Web Flow": { "id": "flow-uuid-1", "stepIds": ["step-1"], "modality": "WEB" },
-  "Registration Web Flow": { "id": "flow-uuid-2", "stepIds": ["step-2"], "modality": "WEB" }
+  "Login|WEB": { "id": "flow-uuid-1", "stepIds": ["step-1"], "modality": "WEB" },
+  "Registration|WEB": { "id": "flow-uuid-2", "stepIds": ["step-2"], "modality": "WEB" }
 }
 ```
 
 **Page Registry** — index by `(name, pageType, modality)`:
 ```json
 {
-  "Dashboard Web Page|dashboard|WEB": { "id": "page-uuid-1", "stepIds": ["step-3"], "pageType": "dashboard" },
-  "Login Web Page|form|WEB": { "id": "page-uuid-2", "stepIds": ["step-1"], "pageType": "form" }
+  "Dashboard|dashboard|WEB": { "id": "page-uuid-1", "stepIds": ["step-3"], "pageType": "dashboard" },
+  "Login|form|WEB": { "id": "page-uuid-2", "stepIds": ["step-1"], "pageType": "form" }
 }
 ```
 
@@ -604,11 +604,11 @@ grep -rn "openModal\|showDrawer\|useDisclosure\|isInline\|isFullPage" --include=
    — if found, split further
 3. If no Type A or Type B signals → one default flow
 4. Name each flow descriptively:
-   - Type A: `"Generate User Stories from Dashboard Web Flow"`,
-     `"Generate User Stories from Projects List Web Flow"`
-   - Type B: `"Email Registration Web Flow"`,
-     `"Social Login Web Flow"`
-   - Combined: `"CSV Import via Settings Web Flow"`
+   - Type A: `"Generate User Stories from Dashboard"`,
+     `"Generate User Stories from Projects List"`
+   - Type B: `"Email Registration"`,
+     `"Social Login"`
+   - Combined: `"CSV Import via Settings"`
 5. Multiply all flows by each selected modality
 
 **Record for each flow:**
@@ -812,13 +812,13 @@ For each flow discovered from UI code (Step 3b):
 ```
 Scenario 1: "Generate User Stories"
   → Type A discovery finds: navigate("/ticket/:id") in projects.tsx
-  → Creates flow: "Projects List to Ticket Web Flow"
-     Pages: Projects List Page → Ticket Page
-  → Flow Registry: { "Projects List to Ticket Web Flow|WEB": { id: "flow-123", ... } }
+  → Creates flow: "Projects List to Ticket"
+     Pages: Projects List → Ticket
+  → Flow Registry: { "Projects List to Ticket|WEB": { id: "flow-123", ... } }
 
 Scenario 2: "Edit Ticket Details"     (processed later)
   → Type A discovery also finds: navigate("/ticket/:id") in projects.tsx
-  → Check Flow Registry for ("Projects List to Ticket Web Flow", "WEB")
+  → Check Flow Registry for ("Projects List to Ticket", "WEB")
   → MATCH FOUND → REUSE:
      Call Update_Design_Node(nodeId: "flow-123", data: { stepIds: [...existing, ...new] })
      Omit flow from bulk payload — pages and components already exist
@@ -941,12 +941,12 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
 {
   "userJourneys": [
     {
-      "name": "User Registration Journey",
+      "name": "User Registration",
       "description": "End-to-end account registration",
       "scenarioId": "scenario-uuid",
       "flows": [
         {
-          "name": "Email Registration Web Flow",
+          "name": "Email Registration",
           "description": "Register with email and password form",
           "modality": "WEB",
           "entryPoint": "Registration page",
@@ -954,7 +954,7 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
           "stepIds": ["step-uuid-1", "step-uuid-2"],
           "pages": [
             {
-              "name": "Registration Form Web Page",
+              "name": "Registration Form",
               "description": "User fills in registration details",
               "pageType": "form",
               "requiresAuth": false,
@@ -994,7 +994,7 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
               ]
             },
             {
-              "name": "Email Verification Web Page",
+              "name": "Email Verification",
               "description": "Confirm email address",
               "pageType": "detail",
               "stepIds": ["step-uuid-2"],
@@ -1012,7 +1012,7 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
           ]
         },
         {
-          "name": "Social Login Web Flow",
+          "name": "Social Login",
           "description": "Register via Google/GitHub OAuth",
           "modality": "WEB",
           "entryPoint": "Registration page",
@@ -1020,7 +1020,7 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
           "stepIds": ["step-uuid-1", "step-uuid-3"],
           "pages": [
             {
-              "name": "Social Auth Web Page",
+              "name": "Social Auth",
               "description": "Choose OAuth provider and authorize",
               "pageType": "form",
               "requiresAuth": false,

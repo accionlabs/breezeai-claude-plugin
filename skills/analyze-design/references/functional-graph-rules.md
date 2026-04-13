@@ -229,9 +229,9 @@ A Flow represents a **distinct path/way to complete the journey**.
 describes a single path, create one default Flow.
 
 **Naming:**
-- Single flow: `"{Scenario Name} {Modality} Flow"`
-- Multiple flows: `"{Path Description} {Modality} Flow"`
-  (e.g. "Email Registration Web Flow", "Social Login Web Flow")
+- Single flow: `"{Scenario Name}"`
+- Multiple flows: `"{Path Description}"`
+  (e.g. "Email Registration", "Social Login"). Do NOT add "Flow" suffix or modality — the node label and `modality` field already convey these.
 
 **Multiply by modalities:**
 - Each discovered flow × each selected modality = total flows
