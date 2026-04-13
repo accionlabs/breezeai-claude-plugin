@@ -250,12 +250,12 @@ deduplication (upsert by `designSystemRef`) automatically.
 {
   "userJourneys": [
     {
-      "name": "User Registration Journey",
+      "name": "User Registration",
       "description": "End-to-end registration flow",
       "scenarioId": "scenario-uuid-from-functional-graph",
       "flows": [
         {
-          "name": "Sign Up Web Flow",
+          "name": "Sign Up",
           "description": "New user sign up process",
           "modality": "WEB",
           "entryPoint": "page-id-1",
@@ -263,7 +263,7 @@ deduplication (upsert by `designSystemRef`) automatically.
           "stepIds": ["step-uuid-1", "step-uuid-2"],
           "pages": [
             {
-              "name": "Registration Web Page",
+              "name": "Registration",
               "description": "User fills in registration details",
               "pageType": "form",
               "requiresAuth": false,
@@ -289,7 +289,7 @@ deduplication (upsert by `designSystemRef`) automatically.
               ]
             },
             {
-              "name": "Confirmation Web Page",
+              "name": "Confirmation",
               "description": "Email verification confirmation",
               "pageType": "info",
               "requiresAuth": false,
@@ -468,7 +468,7 @@ Select option: (1/2/3)
 ### Rules
 
 1. **One Scenario = One UserJourney** - Each scenario in the functional graph creates exactly one UserJourney
-2. **Name derivation**: Use scenario name directly or add "Journey" suffix if needed
+2. **Name derivation**: Use the scenario name directly. Do NOT add "Journey" suffix
 3. **Description**: Copy scenario description or enhance with journey context
 4. **Cross-ontology link**: Always set `scenarioId` to create `MAPS_TO` relationship
 
@@ -506,7 +506,7 @@ Design: UserJourney "Conduct and Document Medical Tests"
 
 1. **Step → Flow (Exclusive)** - A Step can map to a Flow OR a Page, not both
 2. **When to use Flow**: When the step represents a multi-page navigation sequence or reusable sub-journey
-3. **Name derivation**: `{Step.step} {Modality} Flow` — always include modality in the name (e.g., "Order Medical Tests Web Flow", "Order Medical Tests Mobile Flow")
+3. **Name derivation**: Use the step name directly — do NOT add "Flow" suffix or modality (e.g., "Order Medical Tests"). The node label and `modality` field already convey these
 4. **Modality required**: Always specify `modality` (web | mobile | desktop | api)
 5. **Entry/Exit points**: Define navigation context
 6. **Cross-ontology link**: Set `stepIds` array to create `MAPS_TO` relationships
@@ -567,7 +567,7 @@ Voice Flow:
   "apiKey": "<apiKey from .breeze.json>",
   "label": "Flow",
   "data": {
-    "name": "{Step.step} {Modality} Flow",
+    "name": "{Step.step}",
     "description": "Flow for {Step.step}",
     "modality": "web | mobile | desktop | api",
     "entryPoint": "Previous page/flow or entry context",
@@ -583,7 +583,7 @@ Voice Flow:
 ```
 Functional: Step "Order Medical Tests" (order: 1)
      ↓
-Design: Flow "Order Medical Tests Web Flow"
+Design: Flow "Order Medical Tests"
         modality: "web"
         stepIds: ["1774964938277-vfem9cu"]
         userJourneyId: "{UserJourney.id}"
@@ -600,7 +600,7 @@ Design: Flow "Order Medical Tests Web Flow"
 1. **Step → Page (Exclusive)** - A Step can map to a Flow OR a Page, not both
 2. **When to use Page**: When the step represents a single screen/interface interaction
 3. **Page per interaction context**: Create separate pages for distinct interaction states
-4. **Name derivation**: `{Step.step} {Modality} Page` — always include modality in the name (e.g., "Settings Menu Web Page", "Settings Menu Mobile Page")
+4. **Name derivation**: Use the step name directly — do NOT add "Page" suffix or modality (e.g., "Settings Menu"). The node label and `modality` field already convey these
 5. **PageType selection**: Based on step's primary function
 6. **Auth requirements**: Derive from persona/outcome context
 7. **Cross-ontology link**: Set `stepIds` for `MAPS_TO` relationship
@@ -683,7 +683,7 @@ When an Action represents a page-level interaction rather than a specific UI ele
   "apiKey": "<apiKey from .breeze.json>",
   "label": "Page",
   "data": {
-    "name": "{Step.step} {Modality} Page",
+    "name": "{Step.step}",
     "description": "Page for {Step.description}",
     "pageType": "form | list | detail | dashboard | modal | menu | search | settings",
     "requiresAuth": true | false,
@@ -705,7 +705,7 @@ When an Action represents a page-level interaction rather than a specific UI ele
 ```
 Functional: Step "Order Medical Tests"
      ↓
-Design: Page "Order Medical Tests Page"
+Design: Page "Order Medical Tests"
         pageType: "form"
         requiresAuth: true
         allowedRoles: ["Doctor"]
@@ -1532,7 +1532,7 @@ FOR each Scenario in Functional Graph:
 
         IF Step is multi-page sequence:
             3a. CREATE Flow (Step maps to Flow)
-                - name = Step.step + " Flow"
+                - name = Step.step
                 - modality = determine from context
                 - stepIds = [Step.id]
                 - userJourneyId = UserJourney.id
@@ -1543,7 +1543,7 @@ FOR each Scenario in Functional Graph:
 
         ELSE (Step is single screen):
             3b. CREATE Page directly (Step maps to Page)
-                - name = Step.step + " Page"
+                - name = Step.step
                 - pageType = determine from Step function
                 - flowId = parent Flow.id (if exists)
                 - stepIds = [Step.id]

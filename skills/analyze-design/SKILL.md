@@ -135,6 +135,51 @@ that fulfil this requirement.
 > NEVER call `Get_complete_functional_graph` or any tool that returns the entire
 > functional graph in one shot. Always fetch incrementally per scenario.
 
+> **SKIP SYSTEM PERSONA SCENARIOS.**
+> This skill generates design nodes for UI — System and External System
+> persona scenarios have no user interface and MUST be excluded.
+> See Step 1a-pre below for how to build the blocklist.
+
+### 1a-pre. Build non-human outcome blocklist ⛔ BLOCKING GATE
+
+> **⛔ HARD STOP: You MUST NOT proceed to scenario selection or
+> processing until the blocklist is fully built. This gate ensures no
+> System/External System scenario is ever processed. There is NO valid
+> reason to skip this step.**
+
+The functional graph hierarchy is **Persona → Outcome → Scenario**.
+`Get_scenarios_by_uuid` does not have a persona filter, so we build
+a blocklist of outcome IDs belonging to non-human personas and check
+each scenario against it.
+
+**Steps:**
+
+1. Call `Get_all_personas(uuid: "<projectUuid>")`
+2. From the response, identify non-human personas:
+   - `System` → non-human
+   - `External System` → non-human
+   - Everything else (User, Admin, named roles) → human
+3. For each **non-human persona**, call
+   `Get_all_outcomes_for_a_persona_id(uuid, personaId: "<id>")`
+4. Collect all outcome IDs from these calls into a
+   `blockedOutcomeIds` set
+5. **Verify** the set was built — if `Get_all_personas` returned
+   zero personas, STOP and tell user to populate the functional graph first
+6. Log: `"Blocklist built: {N} non-human outcome(s) from {M} non-human persona(s) will be excluded"`
+
+**⛔ Gate check:** `blockedOutcomeIds` must exist before ANY scenario
+is fetched, displayed, or processed. If this step fails, do not
+continue.
+
+**Usage during scenario processing:**
+
+When resolving or processing scenarios, each scenario has an `outcomeId`.
+Check it against `blockedOutcomeIds`:
+
+- `outcomeId` **in** `blockedOutcomeIds` → **skip** — show user:
+  `"Skipping '{scenarioName}' — belongs to non-human persona (no UI)"`
+- `outcomeId` **not in** `blockedOutcomeIds` → **proceed** normally
+
 ### 1a. Resolve Scenarios
 
 Scenarios can come from **three sources** — check each that applies and
@@ -348,7 +393,7 @@ if not.
 ### 3a. Scenario → UserJourney
 
 One UserJourney per Scenario with `scenarioId` link.
-Name MUST end with `Journey` suffix.
+Use the scenario name directly as the UserJourney name. Do NOT add "Journey" suffix.
 
 ### 3b. Step → Flow OR Page (Exclusive)
 
@@ -361,8 +406,7 @@ A Step maps to Flow OR Page, never both.
 | Process spanning multiple screens | Form, list, detail, or dashboard |
 
 Create separate Flow/Page for EACH selected modality.
-**Name MUST include modality** — format: `{Step} {Modality} Flow` / `{Step} {Modality} Page`
-(e.g., "Sign Up Web Flow", "Sign Up Mobile Flow", "Registration Web Page", "Registration Mobile Page").
+**Name format:** Use the step name directly (e.g., "Sign Up", "Registration"). Do NOT add "Flow"/"Page" suffix or modality — the node label and `modality` field already convey these.
 
 **Flow Deduplication (LINK before CREATE):**
 

@@ -200,7 +200,7 @@ what goes in them changes.
 **When to create a TEMPLATE vs not:**
 
 ```
-Page: "Patient Registration Page"
+Page: "Patient Registration"
 
 Does this page follow a layout pattern used by other pages?
 ├── YES, it's a standard form layout (header + form + actions)

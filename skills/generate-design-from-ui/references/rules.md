@@ -105,7 +105,8 @@ atomic design theory:
 
 | Tool | When to use | Why |
 |---|---|---|
-| `Glob` / `Read` / `Grep` on the UI folder | **Primary** — pages, widgets, services, components | Filesystem has literal JSX, component hierarchy, props |
+| **Outcome citations** | **Preferred first step** — read the cited source files before grepping | Citations point to the exact UI files the scenario was generated from — most accurate starting point |
+| `Glob` / `Read` / `Grep` on the UI folder | **Fallback** — when citations are missing or incomplete | Filesystem has literal JSX, component hierarchy, props |
 | `Code_Graph_Search` on the UI repo | **Optional accelerator** — locate pages or trace imports | Faster than blind globbing, but always confirm by `Read` |
 | `Design_Graph_Search` | **Dedup check only** — never as source of UI knowledge | Step 2 dedup |
 | Functional graph tools | **Scenario/step/action structure** — the skeleton to enrich | Fetch incrementally per scenario |
@@ -300,9 +301,9 @@ discovered from the UI code.
 signals are found in the UI code, create one default Flow.
 
 **Naming:**
-- Single flow: `"{Scenario Name} {Modality} Flow"`
-- Multiple flows: `"{Path Description} {Modality} Flow"`
-  (e.g. "Email Registration Web Flow", "Social Login Web Flow")
+- Single flow: `"{Scenario Name}"`
+- Multiple flows: `"{Path Description}"`
+  (e.g. "Email Registration", "Social Login"). Do NOT add "Flow" suffix or modality — the node label and `modality` field already convey these.
 
 **Multiply by modalities:**
 - Each discovered flow × each selected modality = total flows
