@@ -285,6 +285,24 @@ pattern as `existingcomponents.json` for Components.
 > entire functional graph in one shot. Always fetch incrementally per
 > scenario.
 
+> **⛔ MANDATORY — ONE SCENARIO AT A TIME. NO PARALLEL PROCESSING.**
+> You MUST process scenarios strictly sequentially — one at a time.
+> NEVER launch parallel agents, concurrent tool calls, or background
+> tasks to process multiple scenarios simultaneously. Each scenario
+> must fully complete (including all blocking gates: existingcomponents.json
+> update, bulk upsert, MCP sync, and marking as processed) before the
+> next scenario begins. This is non-negotiable — parallel processing
+> causes registry corruption and duplicate design nodes.
+>
+> **Exception: UI code reading IS parallelizable.** Within a single
+> scenario, you SHOULD launch multiple parallel agents to read UI
+> files simultaneously (Steps 3–4). For example, spawn separate agents
+> to read page files, widget files, and component files at the same
+> time. This is safe because reading is read-only and does not mutate
+> registries. The sequential constraint applies to **scenario-level
+> processing** (Steps 6d onward: registry updates, bulk upsert, MCP
+> sync).
+
 > **SKIP SYSTEM PERSONA SCENARIOS.**
 > This skill generates design nodes for UI — System and External System
 > persona scenarios have no user interface and MUST be excluded.
@@ -398,10 +416,12 @@ Before entering the loop, determine `totalScenarios`:
 - **Option 3:** fetch total using `Get_scenarios_by_uuid(uuid, page: "1", limit: "1", isDesignGenerated: "false")` and read `total` from response
 
 ```
+⛔ STRICTLY SEQUENTIAL — no parallel agents or concurrent scenario processing.
+
 counter = 0
 skippedSystem = 0
 LOOP:
-  1. Get next scenario to process
+  1. Get next scenario to process (ONE at a time, wait for previous to fully complete)
      - Option 3: Fetch ONE scenario where isDesignGenerated=false
      - Option 1/2: Take next from selectedScenarios list
   2. IF no scenario remaining → EXIT
@@ -422,15 +442,20 @@ LOOP:
   7. Execute Steps 3-7 for this scenario
      (In `auto` mode: skip user confirmation in Step 6)
   8. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6d)
-  9. Call Bulk_Update_Design_Nodes (Step 6f) — ONLY after step 8 is done
-  10. Mark scenario as processed (Step 6i)
-  11. REPEAT from step 1
+  9. Call Bulk_Update_Design_Nodes (Step 6g) — ONLY after step 8 is done
+  10. ⛔ BLOCKING: Post-upsert MCP sync of existingcomponents.json (Step 6h-post)
+      — Fetch real component IDs from MCP and update existingcomponents.json
+      — DO NOT proceed to next scenario until sync is complete
+  11. Mark scenario as processed (Step 6i)
+  12. REPEAT from step 1
 END LOOP
 ```
 
-> **⛔ The loop order above is non-negotiable.** Step 7 (update
-> `existingcomponents.json`) MUST happen before Step 8 (bulk upsert) on
-> EVERY iteration. Do not reorder, batch, or skip these steps.
+> **⛔ The loop order above is non-negotiable.** Step 8 (update
+> `existingcomponents.json`) MUST happen before Step 9 (bulk upsert),
+> and Step 10 (MCP sync of existingcomponents.json) MUST complete
+> before Step 12 (next scenario) on EVERY iteration.
+> Do not reorder, batch, or skip these steps.
 
 ### 2c. Extracted Data from `Get_all_steps_actions_for_a_scenario_id`
 
@@ -535,6 +560,27 @@ There are **two types** of flow discovery:
 - **Type B: On-page flows** — conditional rendering ON the target page
   that creates different component trees (e.g. social login vs email
   form)
+
+**Flow Discovery Strategy Summary (Type A + Type B)**
+
+Grep the entire codebase for all `navigate()`, `<Link>`, `to=`
+references pointing to each target route to discover all distinct
+navigation paths:
+
+| Target Page | Entry Points Found | Flows Created |
+|---|---|---|
+| Example: Notifications Page (`/main/dashboard`, `/main/notification`) | Sidebar Menu (dashboard route), Top Bar Bell Icon (notification route), External Email Deep Link (`?emailId=`) | 2-3 flows per scenario depending on relevance |
+| Example: Project Detail Page (`/main/project/:id`) | From Notification templates (project link), From Dashboard (content-card), From ProjectTracker (card) | 3 flows per scenario |
+| Example: Settings Page (`/main/setting`) | From Sidebar Menu | 1 flow |
+| Example: Sub-pages (Preferences, Change Email, Change Password) | From Settings Page (ItemList links) | 1 flow each, multi-page |
+
+Then check for on-page branching patterns:
+
+| Pattern Found | Result |
+|---|---|
+| `isTablet ? <TabletLayout> : <DesktopLayout>` | Responsive layout → separate scenario, not separate flow |
+| `error?.status === 404 / === 401` | Error states → separate flows (404 path → NotFound page, 401 path → OutsideSubscription page) |
+| `templateRegistry[modules]` dispatching different templates | Template switching → separate scenarios, not separate flows |
 
 ---
 
@@ -648,6 +694,17 @@ grep -rn "openModal\|showDrawer\|useDisclosure\|isInline\|isFullPage" --include=
 - Which UI components belong to this path
 - Which steps/actions from the functional data map to this flow
 
+### 3b-post. Page Discovery Strategy
+
+Multi-page flows are identified by following navigation links in code:
+
+| Scenario Type | Pages in Flow |
+|---|---|
+| Notification → Project link (`target="_blank"`) | 2 pages: Notifications Page → Project Detail Page |
+| Settings → Sub-page navigation (`Link to="/main/..."`) | 2 pages: Settings Page → Destination Page (Preferences/Email/Password) |
+| Single-page interactions (filter, select, scroll) | 1 page: Same page, different components activated |
+| Error states (API returns 404/401) | 1 page: Replaced page (NotFound or OutsideSubscription) |
+
 ### 3c. Map steps/actions to UI files per flow
 
 For each discovered flow:
@@ -673,7 +730,18 @@ all discovered flows):
 
 ---
 
-## Step 4: Deep-Read UI Code
+## Step 4: Deep-Read UI Code (Component Discovery Strategy)
+
+Read actual JSX/TSX files via background agents to extract real
+component hierarchy:
+
+| Step | What to do |
+|---|---|
+| Page-level read | Read all page `index.tsx` files identified in Step 3 |
+| Widget drill-down | Read all `widgets/*` files (top-details, tab-details, sidebar-contacts, etc.) |
+| Component drill-down | Read all `components/*` files (side-card, filter-keyword, tab-contact-card, etc.) |
+| Template discovery | Read template registry + all template variants |
+| Import tracking | Follow imports to discover shared library atoms (icons, selects, tabs, etc.) |
 
 ### 4a. Read page files
 
@@ -709,14 +777,14 @@ components.
 
 ### 5a. Classify components by atomic design level
 
-Analyze the actual JSX structure to classify each component:
+Classification uses **actual code patterns**, not guesswork:
 
-| UI Code Pattern | Design Level | Example |
+| UI Code Pattern | Classification | Example |
 |---|---|---|
-| Page-level layout wrapper | TEMPLATE | `<PageLayout>`, `<DashboardGrid>` |
-| Self-contained section with own state | ORGANISM | `<SearchForm>`, `<DataTable>` |
-| Small group of elements as unit | MOLECULE | `<SearchBar>` (input + button) |
-| Single UI element | ATOM | `<Button>`, `<Input>`, `<Label>` |
+| Page-level container with own hooks/state | ORGANISM | Sidebar, Contents, TopDetails, TabDetails |
+| Composed atoms with minimal state | MOLECULE | NotificationCard, SidebarContactCard, AccordionTable, DateFilter |
+| Single UI element / thin wrapper | ATOM | TNLMIcon, Typography, Button, TextField, Skeleton |
+| Layout-only wrapper | TEMPLATE | SplitPaneLayout, DetailPageLayout, SettingsPageLayout, FormPageLayout |
 
 **ATOM indicators:** Single HTML element/thin wrapper, no internal
 state, props-only interface.
@@ -729,6 +797,9 @@ management (hooks), contains multiple molecules/atoms.
 
 **TEMPLATE indicators:** Layout-only, no business logic, just slots
 for children.
+
+Component names MUST use exact repo names (e.g. `SidebarContactCard`
+not `ContactSummaryCard`).
 
 ### 5b. Build `supportingComponents` from JSX nesting
 
@@ -804,6 +875,17 @@ Walk this priority order, stop at first match:
 ---
 
 ## Step 6: Build and Upsert Design Payload
+
+### Functional Graph Linkage Reference
+
+Every design node MUST be linked back to functional graph IDs:
+
+| Design Node | Linked To |
+|---|---|
+| UserJourney | `scenarioId` (1:1 with functional scenario) |
+| Flow | `stepIds[]` (steps that belong to this path) |
+| Page | `stepIds[]` + `actionIds[]` (steps/actions rendered on this page) |
+| Component | `actionIds[]` (actions this component implements) |
 
 ### 6a. Assemble the design hierarchy (REUSE FIRST at every level)
 
@@ -1145,9 +1227,30 @@ via `Update_Design_Node(nodeId)`.
 >   automatically via upsert. No `Update_Design_Node` call needed,
 >   so no ID needed in `existingcomponents.json`.
 
-**`existingcomponents.json`** does NOT need a post-upsert ID sync.
-It was already updated before the bulk call (Step 6d) with names and
-designSystemRefs — that's all it needs for reuse resolution.
+### 6h-post. Sync `existingcomponents.json` from MCP (⛔ BLOCKING GATE)
+
+> **⛔ HARD STOP: You MUST NOT proceed to the next scenario until
+> `existingcomponents.json` has been synced with real MCP data.**
+
+After `Bulk_Update_Design_Nodes` succeeds and Flow/Page registries
+are updated, sync `existingcomponents.json` with real IDs from MCP:
+
+1. Fetch newly created components from MCP via
+   `Get_all_Design_By_Label(uuid, label: "Component", page: "1", limit: "50")`
+   (paginate if needed)
+2. For each component in the response, update the corresponding entry
+   in `existingcomponents.json` with:
+   - Real MCP UUID (`id`)
+   - Confirmed `designSystemRef`
+   - Confirmed `scope`
+   - Confirmed `supportingComponents`
+3. Write the updated file back
+4. Verify the file was written successfully before proceeding to the
+   next scenario
+
+**Why blocking?** Pending/placeholder IDs are unreliable for
+cross-scenario deduplication. The next scenario's reuse resolution
+depends on accurate, MCP-sourced data in the registry.
 
 ### 6i. Mark scenario as processed
 
