@@ -68,14 +68,22 @@ USER PROMPT TO ANALYZE: "${PROMPT}"
 
 STEP 1: Read .breeze.json to get the projectUuid. If missing, return "No Breeze project configured."
 
-STEP 2: Use ToolSearch with query "select:mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search,mcp__plugin_breeze_breeze-mcp__Design_Graph_Search,mcp__plugin_breeze_breeze-mcp__Code_Graph_Search" to load the MCP tool schemas.
+STEP 2: Use ToolSearch with query "select:mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search,mcp__plugin_breeze_breeze-mcp__Design_Graph_Search,mcp__plugin_breeze_breeze-mcp__Code_Graph_Search,mcp__plugin_breeze_breeze-mcp__Get_all_personas,mcp__plugin_breeze_breeze-mcp__Get_all_outcomes_for_a_persona_id,mcp__plugin_breeze_breeze-mcp__Get_all_scenarios_for_a_outcome_id,mcp__plugin_breeze_breeze-mcp__Get_all_steps_actions_for_a_scenario_id" to load the MCP tool schemas.
 
 STEP 3: Call all three search tools IN PARALLEL with queries derived from the user prompt:
   a) mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search — find personas, outcomes, scenarios, steps, actions
   b) mcp__plugin_breeze_breeze-mcp__Design_Graph_Search — find user journeys, flows, pages, components
   c) mcp__plugin_breeze_breeze-mcp__Code_Graph_Search — find files, classes, methods, modules
 
-STEP 4: Perform deep analysis across all results:
+STEP 3.1: FUNCTIONAL DRILL-DOWN — After Functional_Graph_Search, drill deeper:
+  a) ALWAYS call Get_all_personas first to get the full persona list with their IDs.
+  b) For outcomes/scenarios returned by the search, match the personaId field in each outcome back to the persona list to identify which personas are affected.
+  c) Call Get_all_outcomes_for_a_persona_id for each affected persona to get their full outcome list.
+  d) Call Get_all_scenarios_for_a_outcome_id for each relevant outcome.
+  e) For each relevant scenario, call Get_all_steps_actions_for_a_scenario_id to get the complete steps and actions.
+  This gives you the full functional chain: Persona → Outcome → Scenario → Steps → Actions.
+
+STEP 4: Perform deep analysis across all results (including drill-down data):
   - What does this mean FUNCTIONALLY? Which personas, outcomes, scenarios, business logic?
   - What does this mean for DESIGN? Which UI journeys, flows, pages, components?
   - What does this mean for CODE? Which files, modules, classes, methods?

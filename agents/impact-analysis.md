@@ -11,6 +11,10 @@ tools:
   - mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search
   - mcp__plugin_breeze_breeze-mcp__Design_Graph_Search
   - mcp__plugin_breeze_breeze-mcp__Code_Graph_Search
+  - mcp__plugin_breeze_breeze-mcp__Get_all_personas
+  - mcp__plugin_breeze_breeze-mcp__Get_all_outcomes_for_a_persona_id
+  - mcp__plugin_breeze_breeze-mcp__Get_all_scenarios_for_a_outcome_id
+  - mcp__plugin_breeze_breeze-mcp__Get_all_steps_actions_for_a_scenario_id
 ---
 
 # Breeze Deep Analysis Agent
@@ -39,6 +43,18 @@ Run these three searches simultaneously using queries derived from the user's pr
    Search for related code files, classes, methods, and modules.
 
 If a search returns no results, note "No matches found" for that graph.
+
+## Step 2.1 — Functional Drill-Down
+
+Based on the Functional_Graph_Search results, drill deeper into the functional graph:
+
+1. ALWAYS call `Get_all_personas` first to get the full persona list with their IDs.
+2. For outcomes/scenarios returned by the search, match the `personaId` field in each outcome back to the persona list to identify which personas are affected.
+3. Call `Get_all_outcomes_for_a_persona_id` for each affected persona to get their full outcome list.
+4. Call `Get_all_scenarios_for_a_outcome_id` for each relevant outcome.
+5. For each relevant scenario, call `Get_all_steps_actions_for_a_scenario_id` to get the complete steps and actions.
+
+This gives you the full functional chain: Persona → Outcome → Scenario → Steps → Actions.
 
 ## Step 3 — Deep Analysis
 
