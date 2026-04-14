@@ -233,53 +233,14 @@ Refer to `references/guide.md` for the full data model and required fields per l
 
 ### If `--jira` was provided
 
-Append a comment to the Jira ticket via the Jira MCP. **The comment IS the analysis report** — the analysis itself is ephemeral and lives only here, not in the Architecture Graph. Use this format:
+Post the analysis as a **comment** on the Jira ticket via
+`mcp__plugin_atlassian_atlassian__addCommentToJiraIssue`. **The comment IS the analysis report** — the analysis itself is ephemeral and lives only here, not in the Architecture Graph.
 
-```
-── Breeze.AI Architecture Analysis ──
-Status:   Architecture Graph updated (architecture-graph@v<N>)
-Case:     <classification summary>
-
-IMPACT ANALYSIS
-  Direct code impact (<count> files):
-    • <file path> (<function name> L<start>-<end>)
-  Indirect impact (via call graph): <count> files
-  Architecture nodes touched: <count>
-    <diff summary per node>
-
-REUSE OPPORTUNITIES
-  ✓ <existing component> — <reuse rationale>
-  ⚠ <missing capability> — <suggestion>
-
-CROSS-ONTOLOGY ALIGNMENT
-  Functional anchors (proposed):
-    ✓ "<outcome/scenario>" (id: <functional_node_id>) [cited]
-  Missing action coverage:
-    ⚠ <gap>
-
-GAPS & CONSISTENCY
-  ⚠ <gap or inconsistency>
-  ✓ <passed check>
-
-COMMITTED TO GRAPH
-  <layer>:
-    + <node name> (new)
-       code_ontology_id: <id>
-       scenario: [<ids>]
-    ~ <node name> (modified)
-
-Citation:    <Jira key>
-URL:         <Jira URL>
-Version:     architecture-graph@v<N>
-```
-
-For **blocked cases** (unanchored nodes, layer violations, duplicates), replace COMMITTED TO GRAPH with a BLOCKERS section listing the specific issues, and note that no graph changes were made.
-
-For **current-state-capture runs** (empty/sparse graph + input describes existing system), change the heading to *"Baseline documentation — all nodes committed"* and skip REUSE OPPORTUNITIES / GAPS sections (nothing to compare against).
+> **Rules:** see [references/jira-sync-rules.md](references/jira-sync-rules.md) for the confirmation gate, write protocol (comment-only, never edit description), comment-format preservation, full analysis block template, placeholder rules, current-state-capture rule, blocked-run rule, multi-node rule, and post-write confirmation.
 
 ### If `--jira` was not provided
 
-Return the analysis as a structured summary artifact. Optionally prompt the user for a Jira ticket URL to mirror the comment into.
+Return the analysis as a structured summary artifact. Optionally prompt the user for a Jira ticket URL to mirror the comment into — if they supply one, follow the same rules in `references/jira-sync-rules.md`.
 
 ---
 
