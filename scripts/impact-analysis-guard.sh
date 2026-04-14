@@ -73,7 +73,7 @@ STEP 2: Use ToolSearch with query "select:mcp__plugin_breeze_breeze-mcp__Functio
 STEP 3: Call all three search tools IN PARALLEL with queries derived from the user prompt:
   a) mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search — find personas, outcomes, scenarios, steps, actions
   b) mcp__plugin_breeze_breeze-mcp__Design_Graph_Search — find user journeys, flows, pages, components
-  c) mcp__plugin_breeze_breeze-mcp__Code_Graph_Search — find files, classes, methods, modules
+  c) mcp__plugin_breeze_breeze-mcp__Code_Graph_Search — find files, classes, methods, modules. For every code result, capture the repository name (from the repo/repository field on the node) alongside the file path.
 
 STEP 3.1: FUNCTIONAL DRILL-DOWN — After Functional_Graph_Search, drill deeper:
   a) ALWAYS call Get_all_personas first to get the full persona list with their IDs.
@@ -86,7 +86,7 @@ STEP 3.1: FUNCTIONAL DRILL-DOWN — After Functional_Graph_Search, drill deeper:
 STEP 4: Perform deep analysis across all results (including drill-down data):
   - What does this mean FUNCTIONALLY? Which personas, outcomes, scenarios, business logic?
   - What does this mean for DESIGN? Which UI journeys, flows, pages, components?
-  - What does this mean for CODE? Which files, modules, classes, methods?
+  - What does this mean for CODE? Which repositories, files, modules, classes, methods? Always record the repository each file belongs to — the project may span multiple repos (frontend, backend, mirrors) and this is essential for scoping cross-repo changes.
   - How are these CONNECTED? Trace functional requirement → design element → code implementation.
   - What are the DEPENDENCIES and RISKS? Upstream/downstream effects, shared components.
 
@@ -105,9 +105,10 @@ Design Context:
   - Components: <related UI components>
 
 Code Context:
-  - Files: <related source files with paths>
-  - Modules/Classes: <related modules>
-  - Key Methods: <relevant methods/functions>
+  - Repositories: <list of distinct repositories touched>
+  - Files: <related source files, grouped by repository — format: "[repo-name] path/to/file.ext">
+  - Modules/Classes: <related modules, with their repository>
+  - Key Methods: <relevant methods/functions, with their repository and file>
 
 Cross-Graph Connections:
   <how functional → design → code are linked>
@@ -188,10 +189,12 @@ flowchart LR
 ## 4. Code Analysis
 
 ### 4.1 Affected Files
-Table: | File Path | Type | Purpose |
+Table: | Repository | File Path | Type | Purpose |
+(Group rows by repository. Include every repository touched — frontend, backend, mirrors, etc.)
 
 ### 4.2 Classes & Methods
 For each relevant file:
+- Repository
 - Class/module name
 - Key methods
 - What they do
@@ -208,7 +211,7 @@ graph TD
 ## 5. Feature Traceability
 
 ### 5.1 Traceability Matrix
-Table: | Functional (Scenario) | Design (Page/Component) | Code (File/Method) |
+Table: | Functional (Scenario) | Design (Page/Component) | Code (Repository / File / Method) |
 
 ### 5.2 End-to-End Flow Diagram
 Generate a Mermaid diagram showing the full trace from functional → design → code:
