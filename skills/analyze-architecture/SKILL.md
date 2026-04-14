@@ -156,7 +156,40 @@ Ask the user to:
 
 Loop on this step until the user confirms the proposed changes.
 
-## Step 6 — Classify and commit to the Architecture Graph
+## Step 6 — Prepare Citations
+
+After the user confirms the proposed changes in Step 5, determine the citation strategy based on the input sources used during analysis (Jira ticket, documents, diagrams, code, prompt text, etc.).
+
+**Determine citation type and content for each source:**
+- `"jira"` — Jira ticket URL/key. `reference`: the Jira URL. `inputText`: full ticket content (summary, description, acceptance criteria, relevant comments).
+- `"confluence"` — Confluence page URL. `reference`: the URL. `inputText`: full page content.
+- `"figma"` — Figma URL. `reference`: the Figma URL. `inputText`: converted text content.
+- `"exDoc"` — document (PDF, uploaded doc, pasted spec, diagram image). `name`: the actual file name or title of the document as provided by the user (e.g., "architecture-spec.pdf", "System Context Diagram.png"). Do NOT generate or summarize a name — use the original document name exactly. `inputText`: full document content / extracted text from the diagram or image.
+- `"code"` — source code or Code Graph result. `reference`: file path. `name`: file path. `inputText`: full file content (from `Get_Code_File_Details` or equivalent).
+- `"prompt"` — free-text typed by the user. `name`: generate a unique descriptive name (e.g., "Requirement: <short summary>"). `inputText`: full prompt text.
+
+**Choose one of two strategies:**
+
+**A. Same citation for all nodes** — When all architecture nodes come from a single source (e.g., one Jira ticket, one spec document, one prompt):
+- Call `Call_Create_Citation_` MCP tool once with `projectUuid`, `apiKey`, `name`, `reference`, `type`, and `inputText`.
+- Save the returned citation `id` — you will pass it as `citationIds: [<citationId>]` on every architecture node in Step 7.
+
+**B. Different citations per node** — When nodes originate from multiple distinct sources (e.g., some layers inferred from a Jira ticket, some from an existing diagram, some from the Code Graph):
+- Do NOT call `Call_Create_Citation_` separately.
+- Instead, for each node in Step 7, pass the `citations` array directly on the create/update call. Each citation object in the array follows this schema:
+  ```json
+  {
+    "type": "document | exDoc | jira | figma | confluence | code | prompt",
+    "name": "<string, optional>",
+    "inputText": "<string, optional>",
+    "reference": "<string, optional>"
+  }
+  ```
+- Populate the fields based on the citation type rules above. Each node gets its own `citations` array with the specific source(s) it was derived from (e.g., a Service inferred from both the Jira ticket and a code file carries both citation objects).
+
+> **Rule:** every committed architecture node MUST carry at least one citation. Nodes without citations are blocked at commit (see Step 7).
+
+## Step 7 — Classify and commit to the Architecture Graph
 
 Apply the commit policy based on classification outcome:
 
@@ -187,13 +220,16 @@ The tool's own schema description lists values like `UserExperienceLabel`, `Serv
 
 ### Required fields on every committed node
 
-- **citation** — the Jira key + URL (Jira mode) or file path / hash (ad-hoc mode). Never commit a node without a citation.
+- **citations** — attach citations using the strategy chosen in Step 6:
+  - **Strategy A (same citation):** pass `citationIds: [<citationId>]` on every `Create_Architecture_Node` / `Update_Architecture_Node` call.
+  - **Strategy B (different citations):** pass the `citations` array on each call with the specific citation object(s) for that node's source.
+  - Never commit a node without at least one citation — block and ask the user to resolve.
 - **scenario** — array of Functional node IDs (for UserExperience / ApiGateway / Services only). Non-empty for these three layers.
 - **code_ontology_id** — the repo cluster ID from Code Graph results, when the component corresponds to existing code.
 
 Refer to `references/guide.md` for the full data model and required fields per layer.
 
-## Step 7 — Write back
+## Step 8 — Write back
 
 ### If `--jira` was provided
 
