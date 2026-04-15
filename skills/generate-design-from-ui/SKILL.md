@@ -484,30 +484,48 @@ LOOP:
         - For each action under each step: actionId (UUID), action name, action description
      → These IDs are REQUIRED for linking design nodes to functional nodes
   6. Show progress: "[counter/totalScenarios] Scenario: <name>"
-  7. Execute Steps 3-7 for this scenario
+  7. ⛔ INLINE SELF-CHECK — READ THIS EVERY ITERATION:
+     Before executing Steps 3-7, confirm you will do ALL of the following
+     for THIS scenario (not from memory of earlier scenarios):
+     ┌─────────────────────────────────────────────────────────────┐
+     │ □ GREP the entire repo for navigate()/Link refs to target  │
+     │   route (Type A entry-point flows) — Step 3b               │
+     │ □ GREP the target page directory for conditional rendering, │
+     │   tabs, auth methods, feature flags (Type B on-page flows) │
+     │   — Step 3b                                                 │
+     │ □ GREP each page file for outbound navigate()/Link calls   │
+     │   to detect multi-page flows — Step 3b-post                │
+     │ □ PRODUCE the Flow Discovery Evidence Block — Step 3e      │
+     │ □ READ actual TSX/JSX files before inferring components    │
+     │   — Step 4                                                  │
+     │ □ UPDATE existingcomponents.json BEFORE bulk upsert — 6d   │
+     │ □ SYNC existingcomponents.json from MCP AFTER upsert — 6h  │
+     │ If you are about to skip ANY box → you are drifting. STOP. │
+     └─────────────────────────────────────────────────────────────┘
+  8. Execute Steps 3-7 for this scenario
      (In `auto` mode: skip user confirmation in Step 6)
-  8. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6d)
+  9. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6d)
      — READ the file FIRST, then WRITE with new components added
      — VERIFY the write succeeded before continuing
-  9. Call Bulk_Update_Design_Nodes (Step 6g) — ONLY after step 8 is done
-  10. ⛔ BLOCKING: Post-upsert MCP sync of existingcomponents.json (Step 6h-post)
+  10. Call Bulk_Update_Design_Nodes (Step 6g) — ONLY after step 9 is done
+  11. ⛔ BLOCKING: Post-upsert MCP sync of existingcomponents.json (Step 6h-post)
       — Fetch real component IDs from MCP and update existingcomponents.json
       — DO NOT proceed to next scenario until sync is complete
-  11. ⛔ CHECKPOINT: Verify existingcomponents.json is up-to-date
+  12. ⛔ CHECKPOINT: Verify existingcomponents.json is up-to-date
       — Read existingcomponents.json and confirm it contains ALL components
         created/reused in this scenario with real MCP IDs
       — If any component from this scenario is missing → STOP and fix
       — This checkpoint exists because Claude tends to forget this step
         after processing several scenarios. IT IS NOT OPTIONAL.
-  12. Mark scenario as processed (Step 6i)
-  13. REPEAT from step 1
+  13. Mark scenario as processed (Step 6i)
+  14. REPEAT from step 1
 END LOOP
 ```
 
-> **⛔ The loop order above is non-negotiable.** Step 8 (update
-> `existingcomponents.json`) MUST happen before Step 9 (bulk upsert),
-> and Step 10 (MCP sync of existingcomponents.json) MUST complete
-> before Step 12 (next scenario) on EVERY iteration.
+> **⛔ The loop order above is non-negotiable.** Step 9 (update
+> `existingcomponents.json`) MUST happen before Step 10 (bulk upsert),
+> and Step 11 (MCP sync of existingcomponents.json) MUST complete
+> before Step 13 (next scenario) on EVERY iteration.
 > Do not reorder, batch, or skip these steps.
 
 ### 2c. Extracted Data from `Get_all_steps_actions_for_a_scenario_id`
@@ -812,6 +830,70 @@ all discovered flows):
 - Source pages for entry-point flows (the pages users navigate FROM)
 - Flow-specific components (e.g. `SocialAuthPanel`, `EmailForm`,
   `BulkDeleteForm`, `WizardStepper`)
+
+### 3e. Flow Discovery Evidence Gate (⛔ BLOCKING GATE)
+
+> **⛔ HARD STOP: You MUST NOT proceed to Step 4 until you have
+> produced a Flow Discovery Evidence Block for this scenario.**
+> This gate exists because Claude consistently skips grep-based flow
+> discovery after ~10 scenarios, defaulting to "1 flow, 1 page" without
+> evidence. The evidence block makes skipping observable.
+
+**Before proceeding, write the following evidence block** (in your
+response, not to a file):
+
+```
+┌─── FLOW DISCOVERY EVIDENCE: "{scenarioName}" ───┐
+│                                                   │
+│ TARGET ROUTE: /path/to/page                       │
+│ TARGET FILES: src/pages/PageName/index.tsx         │
+│                                                   │
+│ TYPE A GREPS (entry-point flows):                 │
+│   grep command: <exact command run>               │
+│   hits: <N> results                               │
+│   entry points found:                             │
+│     1. <sourcePage> → <targetRoute> (via <Link>)  │
+│     2. <sourcePage> → <targetRoute> (via navigate) │
+│   classification: <N> distinct flows              │
+│                                                   │
+│ TYPE B GREPS (on-page branching):                 │
+│   grep command: <exact command run>               │
+│   hits: <N> results                               │
+│   branching patterns found:                       │
+│     1. <pattern> → <separate flow? yes/no + why>  │
+│   classification: <N> additional flows            │
+│                                                   │
+│ PAGE NAV GREPS (multi-page detection):            │
+│   grep command: <exact command run>               │
+│   hits: <N> results                               │
+│   outbound links found:                           │
+│     1. <targetPage> (via navigate/Link)           │
+│   classification: <N> pages per flow              │
+│                                                   │
+│ FINAL: <N> flows, <N> pages                       │
+│ EVIDENCE: grep-confirmed / citation-confirmed     │
+└───────────────────────────────────────────────────┘
+```
+
+**Rules for this gate:**
+
+1. **Every field must be filled** — no placeholders, no "N/A",
+   no "skipped". If a grep returns 0 hits, write `hits: 0 results`
+   and explain why (e.g. "route is defined but never linked from
+   other pages → single entry point confirmed")
+2. **Grep commands must be real** — you must have actually run
+   the Grep tool or Bash grep. Fabricating grep results is worse
+   than skipping the gate entirely
+3. **If using citations** (Option 1 from Step 3a), replace grep
+   commands with the citation file paths you read, but still fill
+   in the evidence for Type A/B/page-nav patterns found in those files
+4. **If flow count = 1 AND page count = 1**, the evidence block MUST
+   include an explicit line:
+   `SINGLE-FLOW JUSTIFICATION: <why no other entry points or branching>`
+
+**⛔ Gate check:** If this evidence block is not present in your
+response for the current scenario, you have skipped flow discovery.
+STOP and go back to Step 3b.
 
 ---
 
@@ -1288,7 +1370,30 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
   UserJourney
 - **NO `children` field** — composition via `supportingComponents` only
 
-### 6f. User confirmation (confirm mode only)
+### 6f. Flow Count Validation Gate (⛔ BLOCKING)
+
+> **⛔ This check runs in BOTH `confirm` and `auto` mode.**
+> Before showing the preview or logging progress, validate flow/page
+> counts against grep evidence.
+
+**Validation rules:**
+
+| Condition | Action |
+| --------- | ------ |
+| flows = 1, pages = 1 | ⛔ REQUIRES `SINGLE-FLOW JUSTIFICATION` in the Step 3e evidence block. If justification is missing → STOP, go back to Step 3b, run the greps |
+| flows = 1, pages > 1 | OK — single flow can span multiple pages |
+| flows > 1 | OK — multiple flows discovered from grep evidence |
+| flows = 0 | ⛔ ERROR — every scenario must have at least 1 flow |
+
+**In `auto` mode:** If validation fails (flow=1, page=1, no
+justification), log a warning and **re-run Step 3b greps** for this
+scenario rather than skipping. The goal is accuracy, not speed.
+
+**Self-check question:** "Am I reporting 1 flow / 1 page because
+I actually grepped and found no branching, or because I skipped
+the greps? If I skipped → go back NOW."
+
+### 6f-post. User confirmation (confirm mode only)
 
 > **Skip in `auto` mode.** Print a progress line instead:
 > `"[{current}/{total}] Processing: {scenarioName} → {flowCount} Flows, {pageCount} Pages, {componentCount} Components"`
