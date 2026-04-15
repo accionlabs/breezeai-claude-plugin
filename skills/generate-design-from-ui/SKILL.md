@@ -24,6 +24,7 @@ Design Ontology
 ```
 
 **Hierarchy rules:**
+
 - **Scenario → UserJourney** — 1:1 mapping, always
 - **UserJourney → Flow(s)** — one or many flows per journey, discovered
   from the UI code. The functional graph captures WHAT the user does;
@@ -37,6 +38,7 @@ Design Ontology
   complete the flow.
 
 **Functional graph linkage:**
+
 - `scenarioId` on UserJourney
 - `stepIds[]` on Flows and Pages (steps distribute across flows/pages)
 - `actionIds[]` on Components and Pages (actions map to the components
@@ -123,6 +125,7 @@ real components, their nesting, props, states, and flow structure.
 ### 0a. Detect Framework
 
 Look for framework signals in the UI repo:
+
 - React Router: `<Route`, `createBrowserRouter`, `useRoutes`
 - Vue 2/3: `src/router/index.{js,ts}`
 - Next.js: `pages/` or `app/` directory
@@ -144,6 +147,7 @@ Ask user which processing mode to use:
 Default: `confirm` if user doesn't specify.
 
 In `auto` mode:
+
 - Skip user confirmation in Step 6 entirely
 - Log a one-line progress update per scenario
 - On error: log the failure, skip the scenario, continue to the next
@@ -153,13 +157,13 @@ In `auto` mode:
 
 **Auto-detect the primary modality from the repo:**
 
-| Repo Signal | Detected Modality |
-|---|---|
-| React Router, Next.js, Nuxt, Vue Router, Angular Router, SvelteKit | `web` |
-| React Native, `react-native` in package.json, `expo` | `mobile` |
-| Electron, `electron` in package.json, Tauri | `desktop` |
-| Ionic, Capacitor | `mobile` + `web` (hybrid) |
-| Flutter web, responsive meta tags + mobile breakpoints | `web` + `mobile` |
+| Repo Signal                                                        | Detected Modality         |
+| ------------------------------------------------------------------ | ------------------------- |
+| React Router, Next.js, Nuxt, Vue Router, Angular Router, SvelteKit | `web`                     |
+| React Native, `react-native` in package.json, `expo`               | `mobile`                  |
+| Electron, `electron` in package.json, Tauri                        | `desktop`                 |
+| Ionic, Capacitor                                                   | `mobile` + `web` (hybrid) |
+| Flutter web, responsive meta tags + mobile breakpoints             | `web` + `mobile`          |
 
 1. Detect the primary modality from the framework identified in 0a
    and `package.json` dependencies
@@ -263,18 +267,36 @@ Get_all_Design_By_Label(uuid, label: "Page", page: "1", limit: "50")
 ```
 
 **Flow Registry** — index by `(name, modality)`:
+
 ```json
 {
-  "Login|WEB": { "id": "flow-uuid-1", "stepIds": ["step-1"], "modality": "WEB" },
-  "Registration|WEB": { "id": "flow-uuid-2", "stepIds": ["step-2"], "modality": "WEB" }
+  "Login|WEB": {
+    "id": "flow-uuid-1",
+    "stepIds": ["step-1"],
+    "modality": "WEB"
+  },
+  "Registration|WEB": {
+    "id": "flow-uuid-2",
+    "stepIds": ["step-2"],
+    "modality": "WEB"
+  }
 }
 ```
 
 **Page Registry** — index by `(name, pageType, modality)`:
+
 ```json
 {
-  "Dashboard|dashboard|WEB": { "id": "page-uuid-1", "stepIds": ["step-3"], "pageType": "dashboard" },
-  "Login|form|WEB": { "id": "page-uuid-2", "stepIds": ["step-1"], "pageType": "form" }
+  "Dashboard|dashboard|WEB": {
+    "id": "page-uuid-1",
+    "stepIds": ["step-3"],
+    "pageType": "dashboard"
+  },
+  "Login|form|WEB": {
+    "id": "page-uuid-2",
+    "stepIds": ["step-1"],
+    "pageType": "form"
+  }
 }
 ```
 
@@ -389,8 +411,8 @@ Ask the user how they want to select scenarios for design generation:
    - `next` / `prev` — paginate through scenarios
    - `all` — select all scenarios on the current page
 5. Collect selected scenarios into a `selectedScenarios` list
-5. Ask: **"You selected {count} scenario(s). Proceed?"**
-6. Process only the selected scenarios using the Processing Loop below
+6. Ask: **"You selected {count} scenario(s). Proceed?"**
+7. Process only the selected scenarios using the Processing Loop below
 
 #### Option 2: Search & Generate
 
@@ -418,6 +440,7 @@ processed one by one, **skipping any whose `outcomeId` is in
 Process selected scenarios one at a time (incremental batch processing).
 
 Before entering the loop, determine `totalScenarios`:
+
 - **Option 1 & 2:** count of user-selected scenarios
 - **Option 3:** fetch total using `Get_scenarios_by_uuid(uuid, page: "1", limit: "1", isDesignGenerated: "false")` and read `total` from response
 
@@ -430,6 +453,15 @@ Before entering the loop, determine `totalScenarios`:
 
 ```
 ⛔ STRICTLY SEQUENTIAL — no parallel agents or concurrent scenario processing.
+
+⛔ PER-SCENARIO CHECKLIST (verify ALL before moving to next scenario):
+  □ Flow & page discovery greps executed (Type A + Type B + page nav)
+  □ existingcomponents.json updated with new components (Step 6d)
+  □ Bulk_Update_Design_Nodes called (Step 6g)
+  □ existingcomponents.json synced from MCP with real IDs (Step 6h-post)
+  □ Flow & Page registries updated (Step 6h)
+  □ Scenario marked as processed (Step 6i)
+  If ANY box is unchecked → DO NOT proceed to the next scenario.
 
 counter = 0
 skippedSystem = 0
@@ -455,12 +487,20 @@ LOOP:
   7. Execute Steps 3-7 for this scenario
      (In `auto` mode: skip user confirmation in Step 6)
   8. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6d)
+     — READ the file FIRST, then WRITE with new components added
+     — VERIFY the write succeeded before continuing
   9. Call Bulk_Update_Design_Nodes (Step 6g) — ONLY after step 8 is done
   10. ⛔ BLOCKING: Post-upsert MCP sync of existingcomponents.json (Step 6h-post)
       — Fetch real component IDs from MCP and update existingcomponents.json
       — DO NOT proceed to next scenario until sync is complete
-  11. Mark scenario as processed (Step 6i)
-  12. REPEAT from step 1
+  11. ⛔ CHECKPOINT: Verify existingcomponents.json is up-to-date
+      — Read existingcomponents.json and confirm it contains ALL components
+        created/reused in this scenario with real MCP IDs
+      — If any component from this scenario is missing → STOP and fix
+      — This checkpoint exists because Claude tends to forget this step
+        after processing several scenarios. IT IS NOT OPTIONAL.
+  12. Mark scenario as processed (Step 6i)
+  13. REPEAT from step 1
 END LOOP
 ```
 
@@ -514,6 +554,7 @@ for the current scenario iteration:
 ```
 
 These IDs are used in Step 6 to populate:
+
 - `scenarioId` on UserJourney
 - `stepIds[]` on Flows and Pages
 - `actionIds[]` on Components and Pages
@@ -521,6 +562,16 @@ These IDs are used in Step 6 to populate:
 ---
 
 ## Step 3: Locate UI Code & Discover Flows for This Scenario
+
+> **⛔ CRITICAL — FLOW & PAGE DISCOVERY IS MANDATORY, NOT OPTIONAL.**
+> You MUST execute the full grep-based discovery strategy below for
+> EVERY scenario. Do NOT default to "1 flow, 1 page" without evidence.
+> Do NOT skip Type A or Type B discovery. Do NOT guess flow/page counts
+> from the scenario name alone. The whole point of this skill is that
+> flows and pages come from **actual UI code analysis**, not inference.
+> A scenario with only 1 flow is valid — but only AFTER you have grepped
+> and confirmed there is truly only one navigation path and no on-page
+> branching. Skipping discovery produces shallow, inaccurate design graphs.
 
 Using the step names and action names from the fetched functional data,
 locate the corresponding UI code and discover how many distinct
@@ -564,6 +615,14 @@ via `/breeze:analyze-functional`), fall back to grep:
 
 ### 3b. Discover flows (distinct paths) from UI code
 
+> **⛔ CRITICAL — GREP IS NON-NEGOTIABLE.**
+> You MUST grep the ENTIRE UI repo for navigation calls to the target
+> route (Type A) AND grep the target page directory for branching
+> patterns (Type B). Both grep passes are mandatory for every scenario.
+> Do NOT skip either pass. Do NOT assume "there's probably just one flow"
+> without running the greps. The grep results are the ONLY valid source
+> for determining flow count.
+
 Detect how many distinct ways a user can complete this journey.
 There are **two types** of flow discovery:
 
@@ -580,20 +639,20 @@ Grep the entire codebase for all `navigate()`, `<Link>`, `to=`
 references pointing to each target route to discover all distinct
 navigation paths:
 
-| Target Page | Entry Points Found | Flows Created |
-|---|---|---|
+| Target Page                                                           | Entry Points Found                                                                                             | Flows Created                                 |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
 | Example: Notifications Page (`/main/dashboard`, `/main/notification`) | Sidebar Menu (dashboard route), Top Bar Bell Icon (notification route), External Email Deep Link (`?emailId=`) | 2-3 flows per scenario depending on relevance |
-| Example: Project Detail Page (`/main/project/:id`) | From Notification templates (project link), From Dashboard (content-card), From ProjectTracker (card) | 3 flows per scenario |
-| Example: Settings Page (`/main/setting`) | From Sidebar Menu | 1 flow |
-| Example: Sub-pages (Preferences, Change Email, Change Password) | From Settings Page (ItemList links) | 1 flow each, multi-page |
+| Example: Project Detail Page (`/main/project/:id`)                    | From Notification templates (project link), From Dashboard (content-card), From ProjectTracker (card)          | 3 flows per scenario                          |
+| Example: Settings Page (`/main/setting`)                              | From Sidebar Menu                                                                                              | 1 flow                                        |
+| Example: Sub-pages (Preferences, Change Email, Change Password)       | From Settings Page (ItemList links)                                                                            | 1 flow each, multi-page                       |
 
 Then check for on-page branching patterns:
 
-| Pattern Found | Result |
-|---|---|
-| `isTablet ? <TabletLayout> : <DesktopLayout>` | Responsive layout → separate scenario, not separate flow |
-| `error?.status === 404 / === 401` | Error states → separate flows (404 path → NotFound page, 401 path → OutsideSubscription page) |
-| `templateRegistry[modules]` dispatching different templates | Template switching → separate scenarios, not separate flows |
+| Pattern Found                                               | Result                                                                                        |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `isTablet ? <TabletLayout> : <DesktopLayout>`               | Responsive layout → separate scenario, not separate flow                                      |
+| `error?.status === 404 / === 401`                           | Error states → separate flows (404 path → NotFound page, 401 path → OutsideSubscription page) |
+| `templateRegistry[modules]` dispatching different templates | Template switching → separate scenarios, not separate flows                                   |
 
 ---
 
@@ -622,20 +681,22 @@ grep -rn "href=.*ticket\|window\.location.*ticket" --include="*.tsx" --include="
 ```
 
 **3. For each hit, identify the source page/component:**
+
 - Which page/route does this `navigate()` or `<Link>` live in?
 - Record: `{ sourcePage, sourceComponent, targetRoute }`
 
 **4. Classify each entry point as a distinct flow or not:**
 
-| Pattern | Separate Flow? | Why |
-|---|---|---|
-| Different source pages with different preceding steps | **Yes** | User navigates through different pages to get there |
-| Same source page, different trigger components (sidebar vs card vs button) | **No** — same flow, different UI trigger | All start from the same page |
-| Dashboard shortcut that skips listing page | **Yes** | Different page sequence (1 page vs 2 pages) |
-| Breadcrumb/back navigation | **No** | Return path, not a forward flow |
-| Deep link / direct URL | **Yes** — if the page behaves differently with no prior context | Different entry context |
+| Pattern                                                                    | Separate Flow?                                                  | Why                                                 |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------- |
+| Different source pages with different preceding steps                      | **Yes**                                                         | User navigates through different pages to get there |
+| Same source page, different trigger components (sidebar vs card vs button) | **No** — same flow, different UI trigger                        | All start from the same page                        |
+| Dashboard shortcut that skips listing page                                 | **Yes**                                                         | Different page sequence (1 page vs 2 pages)         |
+| Breadcrumb/back navigation                                                 | **No**                                                          | Return path, not a forward flow                     |
+| Deep link / direct URL                                                     | **Yes** — if the page behaves differently with no prior context | Different entry context                             |
 
 **5. Check if target page behaves differently per entry point:**
+
 - Grep the target page for `from`, `source`, `returnUrl`,
   `searchParams`, `location.state` — does it read where the user
   came from?
@@ -668,17 +729,17 @@ grep -rn "openModal\|showDrawer\|useDisclosure\|isInline\|isFullPage" --include=
 
 **2. Read each hit and classify:**
 
-| Pattern Found | Separate Flow? | Example |
-|---|---|---|
-| Ternary rendering different component trees | **Yes** | `isOAuth ? <SocialAuth/> : <EmailForm/>` |
-| Tab group with self-contained workflows | **Yes** | `<Tab label="Import CSV">` / `<Tab label="Manual">` |
-| Wizard with express/skip mode | **Yes** | `quickMode ? skipToStep3() : showAll()` |
-| Modal vs full-page for same operation | **Yes** | `isInline ? <InlineEditor/> : navigate("/edit")` |
-| Bulk vs single operation | **Yes** | `isBulk ? <BulkForm/> : <SingleConfirm/>` |
-| Show/hide optional fields | **No** | `showAdvanced && <AdvancedOptions/>` |
-| Loading/error states | **No** | `isLoading ? <Spinner/> : <Content/>` |
-| Permission-gated sections | **No** | `canEdit && <EditButton/>` |
-| Responsive layout switches | **No** | `isMobile ? <MobileLayout/> : <DesktopLayout/>` |
+| Pattern Found                               | Separate Flow? | Example                                             |
+| ------------------------------------------- | -------------- | --------------------------------------------------- |
+| Ternary rendering different component trees | **Yes**        | `isOAuth ? <SocialAuth/> : <EmailForm/>`            |
+| Tab group with self-contained workflows     | **Yes**        | `<Tab label="Import CSV">` / `<Tab label="Manual">` |
+| Wizard with express/skip mode               | **Yes**        | `quickMode ? skipToStep3() : showAll()`             |
+| Modal vs full-page for same operation       | **Yes**        | `isInline ? <InlineEditor/> : navigate("/edit")`    |
+| Bulk vs single operation                    | **Yes**        | `isBulk ? <BulkForm/> : <SingleConfirm/>`           |
+| Show/hide optional fields                   | **No**         | `showAdvanced && <AdvancedOptions/>`                |
+| Loading/error states                        | **No**         | `isLoading ? <Spinner/> : <Content/>`               |
+| Permission-gated sections                   | **No**         | `canEdit && <EditButton/>`                          |
+| Responsive layout switches                  | **No**         | `isMobile ? <MobileLayout/> : <DesktopLayout/>`     |
 
 ---
 
@@ -700,6 +761,7 @@ grep -rn "openModal\|showDrawer\|useDisclosure\|isInline\|isFullPage" --include=
 5. Multiply all flows by each selected modality
 
 **Record for each flow:**
+
 - Flow name and description
 - Entry point (which page the user starts from)
 - Exit point (where the user ends up after completing the flow)
@@ -709,18 +771,27 @@ grep -rn "openModal\|showDrawer\|useDisclosure\|isInline\|isFullPage" --include=
 
 ### 3b-post. Page Discovery Strategy
 
+> **⛔ CRITICAL — MULTI-PAGE DETECTION IS MANDATORY.**
+> You MUST grep each page file for outbound navigation calls
+> (`navigate()`, `<Link>`, `to=`, `router.push`, `target="_blank"`)
+> to discover if the flow spans multiple pages. A flow with only 1 page
+> is valid — but only AFTER you have grepped and confirmed there are no
+> outbound navigation links that lead to a next step in the flow.
+> Do NOT assume single-page flows without evidence.
+
 Multi-page flows are identified by following navigation links in code:
 
-| Scenario Type | Pages in Flow |
-|---|---|
-| Notification → Project link (`target="_blank"`) | 2 pages: Notifications Page → Project Detail Page |
+| Scenario Type                                          | Pages in Flow                                                          |
+| ------------------------------------------------------ | ---------------------------------------------------------------------- |
+| Notification → Project link (`target="_blank"`)        | 2 pages: Notifications Page → Project Detail Page                      |
 | Settings → Sub-page navigation (`Link to="/main/..."`) | 2 pages: Settings Page → Destination Page (Preferences/Email/Password) |
-| Single-page interactions (filter, select, scroll) | 1 page: Same page, different components activated |
-| Error states (API returns 404/401) | 1 page: Replaced page (NotFound or OutsideSubscription) |
+| Single-page interactions (filter, select, scroll)      | 1 page: Same page, different components activated                      |
+| Error states (API returns 404/401)                     | 1 page: Replaced page (NotFound or OutsideSubscription)                |
 
 ### 3c. Map steps/actions to UI files per flow
 
 For each discovered flow:
+
 1. Identify which **steps** belong to this flow path
    - Record mapping: `stepId → page directory path`
    - Shared steps (e.g. "View confirmation page") can appear in
@@ -733,6 +804,7 @@ For each discovered flow:
 
 Collect all files that need to be read for this scenario (across
 all discovered flows):
+
 - Page entry components (`index.tsx`, `page.tsx`)
 - Widget/component directories (`widgets/*`, `components/*`)
 - Form components, modals, dialogs
@@ -748,17 +820,18 @@ all discovered flows):
 Read actual JSX/TSX files via background agents to extract real
 component hierarchy:
 
-| Step | What to do |
-|---|---|
-| Page-level read | Read all page `index.tsx` files identified in Step 3 |
-| Widget drill-down | Read all `widgets/*` files (top-details, tab-details, sidebar-contacts, etc.) |
+| Step                 | What to do                                                                        |
+| -------------------- | --------------------------------------------------------------------------------- |
+| Page-level read      | Read all page `index.tsx` files identified in Step 3                              |
+| Widget drill-down    | Read all `widgets/*` files (top-details, tab-details, sidebar-contacts, etc.)     |
 | Component drill-down | Read all `components/*` files (side-card, filter-keyword, tab-contact-card, etc.) |
-| Template discovery | Read template registry + all template variants |
-| Import tracking | Follow imports to discover shared library atoms (icons, selects, tabs, etc.) |
+| Template discovery   | Read template registry + all template variants                                    |
+| Import tracking      | Follow imports to discover shared library atoms (icons, selects, tabs, etc.)      |
 
 ### 4a. Read page files
 
 For each file identified in Step 3b, `Read` the file and extract:
+
 - Component hierarchy (JSX nesting)
 - Props interface/type definitions
 - State management (`useState`, `useReducer`, hooks)
@@ -775,6 +848,7 @@ read the file before drafting design nodes.
 ### 4c. Follow-the-trigger
 
 For modals, drawers, panels triggered from this page:
+
 - Viewer (read-only) → capture as components under this page
 - Feature-rich (own forms/CRUD) → note for separate scenario processing
 
@@ -792,12 +866,12 @@ components.
 
 Classification uses **actual code patterns**, not guesswork:
 
-| UI Code Pattern | Classification | Example |
-|---|---|---|
-| Page-level container with own hooks/state | ORGANISM | Sidebar, Contents, TopDetails, TabDetails |
-| Composed atoms with minimal state | MOLECULE | NotificationCard, SidebarContactCard, AccordionTable, DateFilter |
-| Single UI element / thin wrapper | ATOM | TNLMIcon, Typography, Button, TextField, Skeleton |
-| Layout-only wrapper | TEMPLATE | SplitPaneLayout, DetailPageLayout, SettingsPageLayout, FormPageLayout |
+| UI Code Pattern                           | Classification | Example                                                               |
+| ----------------------------------------- | -------------- | --------------------------------------------------------------------- |
+| Page-level container with own hooks/state | ORGANISM       | Sidebar, Contents, TopDetails, TabDetails                             |
+| Composed atoms with minimal state         | MOLECULE       | NotificationCard, SidebarContactCard, AccordionTable, DateFilter      |
+| Single UI element / thin wrapper          | ATOM           | TNLMIcon, Typography, Button, TextField, Skeleton                     |
+| Layout-only wrapper                       | TEMPLATE       | SplitPaneLayout, DetailPageLayout, SettingsPageLayout, FormPageLayout |
 
 **ATOM indicators:** Single HTML element/thin wrapper, no internal
 state, props-only interface.
@@ -819,11 +893,11 @@ not `ContactSummaryCard`).
 Map actual JSX children to `supportingComponents` arrays:
 
 | Component Type | `supportingComponents` contains |
-|---|---|
-| TEMPLATE | ORGANISM names only |
-| ORGANISM | MOLECULE and/or ATOM names |
-| MOLECULE | ATOM names only |
-| ATOM | `[]` (empty) |
+| -------------- | ------------------------------- |
+| TEMPLATE       | ORGANISM names only             |
+| ORGANISM       | MOLECULE and/or ATOM names      |
+| MOLECULE       | ATOM names only                 |
+| ATOM           | `[]` (empty)                    |
 
 ### 5c. Component naming (USE REPO NAMES)
 
@@ -843,18 +917,19 @@ Map actual JSX children to `supportingComponents` arrays:
 
 **Examples — repo name → design node name:**
 
-| Code / File | Design Node Name | Type |
-|---|---|---|
-| `export const DataTable` | `DataTable` | ORGANISM |
-| `export const SearchFilterPanel` | `SearchFilterPanel` | ORGANISM |
-| `export const TextInputField` | `TextInputField` | MOLECULE |
-| `export const IconButton` | `IconButton` | ATOM |
-| `<Button>` from `ui/button.tsx` | `Button` | ATOM |
-| `<DateRangePicker>` from `date-range-picker.tsx` | `DateRangePicker` | MOLECULE |
-| `default export` in `project-card.tsx` | `ProjectCard` | MOLECULE |
-| Layout in `page-layout.tsx` | `PageLayout` | TEMPLATE |
+| Code / File                                      | Design Node Name    | Type     |
+| ------------------------------------------------ | ------------------- | -------- |
+| `export const DataTable`                         | `DataTable`         | ORGANISM |
+| `export const SearchFilterPanel`                 | `SearchFilterPanel` | ORGANISM |
+| `export const TextInputField`                    | `TextInputField`    | MOLECULE |
+| `export const IconButton`                        | `IconButton`        | ATOM     |
+| `<Button>` from `ui/button.tsx`                  | `Button`            | ATOM     |
+| `<DateRangePicker>` from `date-range-picker.tsx` | `DateRangePicker`   | MOLECULE |
+| `default export` in `project-card.tsx`           | `ProjectCard`       | MOLECULE |
+| Layout in `page-layout.tsx`                      | `PageLayout`        | TEMPLATE |
 
 **When the repo doesn't have a named component:**
+
 - HTML elements used directly (`<input>`, `<button>`, `<div>`) →
   use the design system name if from a library (e.g. MUI `TextField`
   → `TextField`), or standard name (`TextInput`, `Button`) if raw HTML
@@ -880,6 +955,7 @@ Walk this priority order, stop at first match:
 5. **Create new** → narrowest correct scope (GLOBAL > DOMAIN > PAGE)
 
 **Scope rules:**
+
 - ORGANISMs: page-specific → always CREATE NEW, reuse children
 - TEMPLATEs: named by layout pattern (`FormPageLayout`), never by
   page name — this is the one exception where we use a generic name
@@ -893,12 +969,12 @@ Walk this priority order, stop at first match:
 
 Every design node MUST be linked back to functional graph IDs:
 
-| Design Node | Linked To |
-|---|---|
-| UserJourney | `scenarioId` (1:1 with functional scenario) |
-| Flow | `stepIds[]` (steps that belong to this path) |
-| Page | `stepIds[]` + `actionIds[]` (steps/actions rendered on this page) |
-| Component | `actionIds[]` (actions this component implements) |
+| Design Node | Linked To                                                         |
+| ----------- | ----------------------------------------------------------------- |
+| UserJourney | `scenarioId` (1:1 with functional scenario)                       |
+| Flow        | `stepIds[]` (steps that belong to this path)                      |
+| Page        | `stepIds[]` + `actionIds[]` (steps/actions rendered on this page) |
+| Component   | `actionIds[]` (actions this component implements)                 |
 
 ### 6a. Assemble the design hierarchy (REUSE FIRST at every level)
 
@@ -909,6 +985,7 @@ nodes before creating new ones**.
 ---
 
 **1. Scenario → UserJourney (1:1, always new)**
+
 - `scenarioId` = scenario UUID (always required)
 - UserJourneys are always unique per scenario — no reuse here
 
@@ -994,12 +1071,12 @@ For each component on a new page (skip if page was reused):
 
 **Reusability by component type:**
 
-| Type | Reuse behavior |
-|---|---|
-| ATOM | Always reuse globally (`TextInput`, `Button`, `Label`) |
-| MOLECULE | Reuse globally or by domain (`TextInputField`, `SearchBar`) |
+| Type     | Reuse behavior                                                     |
+| -------- | ------------------------------------------------------------------ |
+| ATOM     | Always reuse globally (`TextInput`, `Button`, `Label`)             |
+| MOLECULE | Reuse globally or by domain (`TextInputField`, `SearchBar`)        |
 | ORGANISM | Always create new (page-specific), but reuse child molecules/atoms |
-| TEMPLATE | Reuse globally by layout pattern (`FormPageLayout`) |
+| TEMPLATE | Reuse globally by layout pattern (`FormPageLayout`)                |
 
 ---
 
@@ -1012,41 +1089,57 @@ existing node via `Update_Design_Node`.
 
 Derive `pageType` from actual UI analysis:
 
-| UI Pattern | `pageType` |
-|---|---|
-| Form with inputs + submit | `form` |
-| Table/list with rows | `list` |
-| Detail view with data display | `detail` |
-| Dashboard with widgets/cards | `dashboard` |
-| Modal/dialog overlay | `modal` |
-| Search with filters + results | `search` |
-| Settings with sections | `settings` |
-| Multi-step wizard/stepper | `wizard` |
-| Report/chart view | `report` |
+| UI Pattern                    | `pageType`  |
+| ----------------------------- | ----------- |
+| Form with inputs + submit     | `form`      |
+| Table/list with rows          | `list`      |
+| Detail view with data display | `detail`    |
+| Dashboard with widgets/cards  | `dashboard` |
+| Modal/dialog overlay          | `modal`     |
+| Search with filters + results | `search`    |
+| Settings with sections        | `settings`  |
+| Multi-step wizard/stepper     | `wizard`    |
+| Report/chart view             | `report`    |
 
 ### 6c. Assign TEMPLATEs
 
 Every Page MUST have a TEMPLATE. Map `pageType` to layout pattern:
 
-| `pageType` | TEMPLATE Name |
-|---|---|
-| form / create / edit | `FormPageLayout` |
-| list / table / search | `ListPageLayout` |
-| detail / view / profile | `DetailPageLayout` |
-| dashboard / overview | `DashboardLayout` |
-| wizard / multi-step | `WizardLayout` |
-| master-detail / split | `SplitPaneLayout` |
-| login / signup / reset | `AuthPageLayout` |
-| modal | `ModalLayout` |
-| settings | `SettingsPageLayout` |
+| `pageType`              | TEMPLATE Name        |
+| ----------------------- | -------------------- |
+| form / create / edit    | `FormPageLayout`     |
+| list / table / search   | `ListPageLayout`     |
+| detail / view / profile | `DetailPageLayout`   |
+| dashboard / overview    | `DashboardLayout`    |
+| wizard / multi-step     | `WizardLayout`       |
+| master-detail / split   | `SplitPaneLayout`    |
+| login / signup / reset  | `AuthPageLayout`     |
+| modal                   | `ModalLayout`        |
+| settings                | `SettingsPageLayout` |
 
 Check `existingcomponents.json` → TEMPLATE section. If matching
 TEMPLATE exists → REUSE. Otherwise → CREATE with scope `GLOBAL`.
 
 ### 6d. Update `existingcomponents.json` (BLOCKING GATE)
 
-> **HARD STOP: You MUST NOT call `Bulk_Update_Design_Nodes` until
+> **⛔ HARD STOP: You MUST NOT call `Bulk_Update_Design_Nodes` until
 > `existingcomponents.json` has been updated for this scenario.**
+>
+> **⛔ THIS IS THE MOST COMMONLY SKIPPED STEP.** After processing 3-5
+> scenarios, Claude often forgets to update this file. If you are
+> reading this during scenario processing, STOP and check: did you
+> update `existingcomponents.json` for the PREVIOUS scenario? If not,
+> you have a bug — the previous scenario's components are missing from
+> the registry and subsequent scenarios cannot deduplicate against them.
+>
+> **Symptoms of skipping this step:**
+> - Duplicate components appearing in the design graph
+> - Components that should be REUSED being created as new
+> - `existingcomponents.json` stuck at an early state with few entries
+>
+> **Self-check prompt (run mentally before EVERY scenario):**
+> "Have I updated existingcomponents.json since the last
+> Bulk_Update_Design_Nodes call? If no → do it NOW before proceeding."
 
 1. Read `existingcomponents.json`
 2. For each new component in the payload, add it under the appropriate
@@ -1100,7 +1193,11 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
                   "props": "{\"onSubmit\": \"function\"}",
                   "states": ["idle", "loading", "error", "success"],
                   "actionIds": ["action-uuid-1"],
-                  "supportingComponents": ["TextInputField", "PasswordInputField", "SubmitButton"]
+                  "supportingComponents": [
+                    "TextInputField",
+                    "PasswordInputField",
+                    "SubmitButton"
+                  ]
                 },
                 {
                   "name": "TextInputField",
@@ -1157,7 +1254,11 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
                   "description": "OAuth provider selection buttons",
                   "designSystemRef": "ds-social-auth-panel",
                   "actionIds": ["action-uuid-4"],
-                  "supportingComponents": ["SocialLoginButton", "Divider", "Label"]
+                  "supportingComponents": [
+                    "SocialLoginButton",
+                    "Divider",
+                    "Label"
+                  ]
                 },
                 {
                   "name": "SocialLoginButton",
@@ -1177,6 +1278,7 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
 ```
 
 **Payload rules:**
+
 - **One UserJourney per call** — one scenario per call
 - **Nesting = hierarchy** — backend wires parent-child relationships
 - **`scenarioId`** links UserJourney to functional scenario
@@ -1195,10 +1297,10 @@ Show preview covering: UserJourney, Flows, Pages, Components
 (new + reused), Templates. Ask: **"Proceed with creating these
 design nodes?"**
 
-| Option | Action |
-|---|---|
-| **Yes** | Create all nodes as shown |
-| **No** | Skip this scenario, move to next |
+| Option     | Action                                   |
+| ---------- | ---------------------------------------- |
+| **Yes**    | Create all nodes as shown                |
+| **No**     | Skip this scenario, move to next         |
 | **Modify** | Let user specify changes before creating |
 
 ### 6g. Make the bulk upsert call
@@ -1220,6 +1322,7 @@ registries** with real IDs so subsequent scenarios can LINK to them
 via `Update_Design_Node(nodeId)`.
 
 **Flow Registry:**
+
 - For each new flow in the payload, fetch its real ID from the
   `Bulk_Update_Design_Nodes` response (or query
   `Design_Graph_Search` for the flow name)
@@ -1227,11 +1330,13 @@ via `Update_Design_Node(nodeId)`.
   `{ name, modality, id: <real UUID>, stepIds }`
 
 **Page Registry:**
+
 - For each new page in the payload, fetch its real ID
 - Add to registry:
   `{ name, pageType, modality, id: <real UUID>, stepIds }`
 
 > **Why Flows/Pages need IDs but Components don't:**
+>
 > - **Flows/Pages** — when reused across scenarios, we call
 >   `Update_Design_Node(nodeId, data: { stepIds: [...] })` to append
 >   new stepIds. This requires the node's real UUID.
@@ -1244,6 +1349,11 @@ via `Update_Design_Node(nodeId)`.
 
 > **⛔ HARD STOP: You MUST NOT proceed to the next scenario until
 > `existingcomponents.json` has been synced with real MCP data.**
+>
+> **⛔ THIS STEP IS PAIRED WITH 6d. BOTH ARE MANDATORY. EVERY TIME.**
+> If you skipped 6d, you MUST go back and do it before this step.
+> If you are about to skip this step "to save time" — DON'T.
+> The entire component reuse system breaks without this sync.
 
 After `Bulk_Update_Design_Nodes` succeeds and Flow/Page registries
 are updated, sync `existingcomponents.json` with real IDs from MCP:
@@ -1258,12 +1368,18 @@ are updated, sync `existingcomponents.json` with real IDs from MCP:
    - Confirmed `scope`
    - Confirmed `supportingComponents`
 3. Write the updated file back
-4. Verify the file was written successfully before proceeding to the
-   next scenario
+4. **Read the file back and verify** it contains the expected component
+   count before proceeding to the next scenario
 
 **Why blocking?** Pending/placeholder IDs are unreliable for
 cross-scenario deduplication. The next scenario's reuse resolution
 depends on accurate, MCP-sourced data in the registry.
+
+> **⛔ FINAL GATE BEFORE NEXT SCENARIO:** Before moving to Step 6i,
+> mentally confirm: "existingcomponents.json has been (1) updated in 6d,
+> (2) synced from MCP in 6h-post, and (3) I can see the updated file
+> contains all components from this scenario." If ANY of these are
+> false → STOP and fix before continuing.
 
 ### 6i. Mark scenario as processed
 
@@ -1281,10 +1397,10 @@ Update_Functional_Node(
 
 ### 6j. Error handling
 
-| Failure Point | `confirm` mode | `auto` mode |
-|---|---|---|
+| Failure Point          | `confirm` mode                             | `auto` mode                                    |
+| ---------------------- | ------------------------------------------ | ---------------------------------------------- |
 | Entire bulk call fails | Retry once; if still fails, report to user | Retry once; log error, skip scenario, continue |
-| Partial failure | Log failed nodes, report to user | Log failed nodes, continue |
+| Partial failure        | Log failed nodes, report to user           | Log failed nodes, continue                     |
 
 In `auto` mode, collect errors in `failedScenarios` list for the
 final summary.
@@ -1295,17 +1411,17 @@ final summary.
 
 **Processing Summary** (`auto` mode only)
 
-| Metric | Count |
-|---|---|
-| Total scenarios | N |
-| Processed | N |
-| Skipped (errors) | N |
+| Metric           | Count |
+| ---------------- | ----- |
+| Total scenarios  | N     |
+| Processed        | N     |
+| Skipped (errors) | N     |
 
 **Failed Scenarios** (`auto` mode, only if errors)
 
 | Scenario | Error |
-|---|---|
-| Name | ... |
+| -------- | ----- |
+| Name     | ...   |
 
 > Failed scenarios remain `isDesignGenerated=false` and will be picked
 > up on the next run.
@@ -1314,19 +1430,19 @@ final summary.
 
 **Design Graph Generated (by Modality)**
 
-| Modality | UserJourneys | Flows | Pages | Templates (New/Reused) | Components (New) |
-|---|---|---|---|---|---|
-| web | N | N | N | N / N | N |
-| **Total** | N | N | N | N / N | N |
+| Modality  | UserJourneys | Flows | Pages | Templates (New/Reused) | Components (New) |
+| --------- | ------------ | ----- | ----- | ---------------------- | ---------------- |
+| web       | N            | N     | N     | N / N                  | N                |
+| **Total** | N            | N     | N     | N / N                  | N                |
 
 **Component Reuse Statistics**
 
-| Metric | Count |
-|---|---|
-| New GLOBAL components created | N |
-| New DOMAIN components created | N |
-| New PAGE components created | N |
-| Existing components reused | N |
+| Metric                        | Count |
+| ----------------------------- | ----- |
+| New GLOBAL components created | N     |
+| New DOMAIN components created | N     |
+| New PAGE components created   | N     |
+| Existing components reused    | N     |
 
 **Reuse Efficiency:** `(Reused / Total Components) x 100`%
 
@@ -1342,12 +1458,12 @@ final summary.
 
 ## What makes this skill different from `generate-design`
 
-| Aspect | `generate-design` | `generate-design-from-ui` |
-|---|---|---|
-| Component source | Inferred from action descriptions | Read from actual JSX/TSX code |
-| Component hierarchy | Guessed from action grouping | Derived from real import tree |
-| Props & states | Inferred | Extracted from TypeScript interfaces |
-| Realism | Approximate | Matches actual UI implementation |
+| Aspect              | `generate-design`                 | `generate-design-from-ui`            |
+| ------------------- | --------------------------------- | ------------------------------------ |
+| Component source    | Inferred from action descriptions | Read from actual JSX/TSX code        |
+| Component hierarchy | Guessed from action grouping      | Derived from real import tree        |
+| Props & states      | Inferred                          | Extracted from TypeScript interfaces |
+| Realism             | Approximate                       | Matches actual UI implementation     |
 
 Both skills share: scenario selection, component registry,
 `Bulk_Update_Design_Nodes`, `existingcomponents.json` workflow.
