@@ -316,11 +316,37 @@ Ask which modalities to generate design nodes for:
 
 Default: `web` if user doesn't specify.
 
+### 1h. Processing Mode
+
+Ask user which processing mode to use:
+
+| Mode      | Description                                                                     |
+| --------- | ------------------------------------------------------------------------------- |
+| `confirm` | Show preview and ask for confirmation before each scenario (default)            |
+| `auto`    | Skip per-scenario confirmation; process all unprocessed scenarios automatically |
+
+**Question:** "Do you want to confirm each scenario before creating design nodes, or process all automatically? (`confirm` / `auto`)"
+
+- Default: `confirm` if user doesn't specify
+- In `auto` mode:
+  - Skip Step 4 (User Confirmation) entirely
+  - Log a one-line progress update per scenario instead (e.g., `"[3/15] Processing: Login Scenario → 2 Flows, 3 Pages, 8 Components"`)
+  - On error: log the failure, skip the scenario, and continue to the next one
+  - Show a final summary at the end (Step 7)
+  - **CRITICAL — DO NOT STOP OR PAUSE DURING AUTO MODE.** When `auto` mode is selected, you MUST process ALL scenarios from start to finish without stopping to ask "should I continue?", "shall I proceed?", or any continuation prompt. The user has given blanket consent by selecting `auto`. Process every scenario until the loop exits naturally. The ONLY acceptable reason to stop is an unrecoverable error that prevents ALL further processing.
+
 ---
 
 ## Processing Loop
 
 Process selected scenarios one at a time.
+
+> **⛔ AUTO MODE — NO CONTINUATION PROMPTS.**
+> When processing mode is `auto`: you MUST NOT pause, stop, or ask the user
+> whether to continue at any point during this loop. Process ALL scenarios
+> sequentially without interruption. Do not ask "should I continue?", "shall
+> I proceed?", "do you want me to keep going?", or any variation. The loop
+> runs to completion.
 
 ```
 counter = 0
@@ -330,7 +356,7 @@ LOOP:
   3. counter += 1
   4. Show progress: "[counter/totalScenarios] Scenario: <name>"
   5. Execute Steps 2-3 for this scenario (check coverage, generate nodes)
-  6. Step 4: User confirmation
+  6. Step 4: User confirmation (skip in `auto` mode)
   7. Step 5: Bulk upsert
   8. Step 5e: Mark scenario as processed
   9. REPEAT from step 1
@@ -507,6 +533,12 @@ Preserve `order` field from functional graph in design nodes.
 
 ## Step 4: User Confirmation (Per Scenario)
 
+> **Skip this step entirely when processing mode is `auto`.** In `auto` mode,
+> proceed directly to Step 5 after generating the design nodes. Print a single
+> progress line instead:
+>
+> `"[{current}/{total}] Processing: {scenarioName} → {flowCount} Flows, {pageCount} Pages, {componentCount} Components, {templateCount} Templates"`
+
 Before creating nodes, show a preview for the current scenario covering:
 UserJourneys, Flows, Pages, Components, Templates (new + reused). Include a
 summary with total nodes to create and actions to link.
@@ -558,10 +590,13 @@ Bulk_Update_Design_Nodes(
 
 ### 5d. Error Handling
 
-| Failure Point              | Action                                      |
-| -------------------------- | ------------------------------------------- |
-| Entire bulk call fails     | Retry once; if still fails, report to user  |
-| Partial failure (returned) | Log failed nodes, report to user for review |
+| Failure Point              | `confirm` mode                              | `auto` mode                                                             |
+| -------------------------- | ------------------------------------------- | ----------------------------------------------------------------------- |
+| Entire bulk call fails     | Retry once; if still fails, report to user  | Retry once; if still fails, log error and skip scenario (continue loop) |
+| Partial failure (returned) | Log failed nodes, report to user for review | Log failed nodes, continue to next scenario                             |
+
+In `auto` mode, collect all errors in a `failedScenarios` list
+and report them at the end in Step 7.
 
 ### 5e. Mark Scenario as Processed
 
@@ -633,6 +668,23 @@ If the edit failed, surface the error and ask the user how to proceed.
 | Existing components reused    | N     |
 
 **Reuse Efficiency:** `(Reused / Total Actions) × 100`%
+
+**Processing Summary** (`auto` mode only)
+
+| Metric           | Count |
+| ---------------- | ----- |
+| Total scenarios  | N     |
+| Processed        | N     |
+| Skipped (errors) | N     |
+
+**Failed Scenarios** (`auto` mode, only if errors occurred)
+
+| Scenario | Error |
+| -------- | ----- |
+| Name     | ...   |
+
+> Failed scenarios remain `isDesignGenerated=false` and will be picked
+> up on the next run.
 
 **Next Steps**
 

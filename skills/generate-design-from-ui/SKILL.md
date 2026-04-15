@@ -143,6 +143,12 @@ Ask user which processing mode to use:
 
 Default: `confirm` if user doesn't specify.
 
+In `auto` mode:
+- Skip user confirmation in Step 6 entirely
+- Log a one-line progress update per scenario
+- On error: log the failure, skip the scenario, continue to the next
+- **CRITICAL — DO NOT STOP OR PAUSE DURING AUTO MODE.** When `auto` mode is selected, you MUST process ALL scenarios from start to finish without stopping to ask "should I continue?", "shall I proceed?", or any continuation prompt. The user has given blanket consent by selecting `auto`. Process every scenario until the loop exits naturally. The ONLY acceptable reason to stop is an unrecoverable error that prevents ALL further processing.
+
 ### 0c. Detect & Confirm Modalities
 
 **Auto-detect the primary modality from the repo:**
@@ -414,6 +420,13 @@ Process selected scenarios one at a time (incremental batch processing).
 Before entering the loop, determine `totalScenarios`:
 - **Option 1 & 2:** count of user-selected scenarios
 - **Option 3:** fetch total using `Get_scenarios_by_uuid(uuid, page: "1", limit: "1", isDesignGenerated: "false")` and read `total` from response
+
+> **⛔ AUTO MODE — NO CONTINUATION PROMPTS.**
+> When processing mode is `auto`: you MUST NOT pause, stop, or ask the user
+> whether to continue at any point during this loop. Process ALL scenarios
+> sequentially without interruption. Do not ask "should I continue?", "shall
+> I proceed?", "do you want me to keep going?", or any variation. The loop
+> runs to completion.
 
 ```
 ⛔ STRICTLY SEQUENTIAL — no parallel agents or concurrent scenario processing.

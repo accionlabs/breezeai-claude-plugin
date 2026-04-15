@@ -58,6 +58,7 @@ Ask user which processing mode to use:
   - Log a one-line progress update per scenario instead (e.g., `"[12/700] Processing: Login Scenario → 3 Flows, 5 Pages, 14 Components"`)
   - On error: log the failure, skip the scenario, and continue to the next one
   - Show a final summary at the end (Step 7)
+  - **CRITICAL — DO NOT STOP OR PAUSE DURING AUTO MODE.** When `auto` mode is selected, you MUST process ALL scenarios from start to finish without stopping to ask "should I continue?", "shall I proceed?", or any continuation prompt. The user has given blanket consent by selecting `auto`. Process every scenario until the loop exits naturally. The ONLY acceptable reason to stop is an unrecoverable error that prevents ALL further processing.
 
 ### 0b. Modalities
 
@@ -344,6 +345,13 @@ Before entering the loop, determine `totalScenarios`:
 
 - **Option 1 & 2:** count of user-selected scenarios
 - **Option 3:** fetch total using `Get_scenarios_by_uuid(uuid, page: "1", limit: "1", isDesignGenerated: "false")` and read `total` from response
+
+> **⛔ AUTO MODE — NO CONTINUATION PROMPTS.**
+> When processing mode is `auto`: you MUST NOT pause, stop, or ask the user
+> whether to continue at any point during this loop. Process ALL scenarios
+> sequentially without interruption. Do not ask "should I continue?", "shall
+> I proceed?", "do you want me to keep going?", or any variation. The loop
+> runs to completion.
 
 ```
 counter = 0

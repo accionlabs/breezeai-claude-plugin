@@ -15,7 +15,14 @@
       "mcp__plugin_breeze_breeze-mcp__bulk_update_design_nodes",
       "mcp__plugin_breeze_breeze-mcp__update_functional_node",
       "mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search",
-      "Bash(grep -E \"\\\\.\\(md|json|js\\)$\")"
+      "Bash(grep -E \"\\\\.\\(md|json|js\\)$\")",
+      "mcp__plugin_breeze_breeze-mcp__Design_Graph_Search",
+      "mcp__plugin_breeze_breeze-mcp__Code_Graph_Search",
+      "mcp__plugin_breeze_breeze-mcp__Get_Design_Nodes_by_Ids",
+      "Bash(find /Users/pranavpatil/Desktop/Projects/breezeai-claude-plugin -type f \\\\\\( -name \"*.py\" -o -name \"*.sh\" -o -name \"*.js\" -o -name \"*.ts\" \\\\\\) -exec grep -l \"continue\\\\|confirm\\\\|auto\\\\|proceed\\\\|suppress\\\\|skip.*prompt\" {} \\\\;)",
+      "Bash(git add:*)",
+      "Bash(git rebase:*)",
+      "Bash(GIT_EDITOR=true git rebase --continue)"
     ]
   },
   "disabledMcpjsonServers": [
