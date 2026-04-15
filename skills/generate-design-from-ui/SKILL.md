@@ -252,21 +252,55 @@ key** for fast lookup:
 }
 ```
 
-### 1d. Build Flow & Page Registries
+### 1d. Build Flow & Page Registries (Disk-Persisted)
 
 > **Flows and Pages are reusable across scenarios.** A "Login" flow
 > created for Scenario A can be reused when Scenario B also passes
 > through login. Same for pages — a "Dashboard" page can appear in
 > many flows. These registries enable LINK-before-CREATE at every level.
+>
+> **⛔ These registries are persisted to disk** (like
+> `existingcomponents.json`) so they survive across batched runs and
+> separate Claude Code sessions. This is critical for the Python
+> orchestration script workflow.
 
-Query existing Flows and Pages (paginate if > 50):
+#### 1d-i. Load or create `existingflows.json`
 
-```
-Get_all_Design_By_Label(uuid, label: "Flow", page: "1", limit: "50")
-Get_all_Design_By_Label(uuid, label: "Page", page: "1", limit: "50")
-```
+Look for `existingflows.json` in the plugin working directory.
 
-**Flow Registry** — index by `(name, modality)`:
+**If it exists and is non-empty** → load it as the Flow Registry.
+Skip the MCP query below (the file is the source of truth from
+prior runs).
+
+**If it does NOT exist or is empty** → create it, then populate
+from MCP:
+
+1. Create the file with empty structure: `{}`
+2. Query existing Flows via paginated MCP calls:
+   ```
+   allFlows = []
+   page = 1, limit = 50
+   LOOP:
+     Call Get_all_Design_By_Label(uuid, label: "Flow", page, limit)
+     Append to allFlows
+     IF count < limit → EXIT
+     page += 1
+   END LOOP
+   ```
+3. For each flow returned, add to the registry keyed by
+   `"{name}|{modality}"`:
+   ```json
+   {
+     "Login|WEB": {
+       "id": "flow-uuid-1",
+       "stepIds": ["step-1"],
+       "modality": "WEB"
+     }
+   }
+   ```
+4. Write the populated registry to `existingflows.json`
+
+**Flow Registry structure** — index by `(name, modality)`:
 
 ```json
 {
@@ -283,7 +317,35 @@ Get_all_Design_By_Label(uuid, label: "Page", page: "1", limit: "50")
 }
 ```
 
-**Page Registry** — index by `(name, pageType, modality)`:
+#### 1d-ii. Load or create `existingpages.json`
+
+Same pattern as flows. Look for `existingpages.json` in the plugin
+working directory.
+
+**If it exists and is non-empty** → load it as the Page Registry.
+
+**If it does NOT exist or is empty** → create and populate from MCP:
+
+1. Create with empty structure: `{}`
+2. Query existing Pages:
+   ```
+   Get_all_Design_By_Label(uuid, label: "Page", page: "1", limit: "50")
+   ```
+   (paginate if needed)
+3. For each page, add to registry keyed by
+   `"{name}|{pageType}|{modality}"`:
+   ```json
+   {
+     "Dashboard|dashboard|WEB": {
+       "id": "page-uuid-1",
+       "stepIds": ["step-3"],
+       "pageType": "dashboard"
+     }
+   }
+   ```
+4. Write to `existingpages.json`
+
+**Page Registry structure** — index by `(name, pageType, modality)`:
 
 ```json
 {
@@ -301,8 +363,9 @@ Get_all_Design_By_Label(uuid, label: "Page", page: "1", limit: "50")
 ```
 
 **After each scenario's upsert**, add newly created Flows and Pages
-to these registries so subsequent scenarios can reuse them — same
-pattern as `existingcomponents.json` for Components.
+to these disk-persisted registries so subsequent scenarios (including
+across batched sessions) can reuse them — same pattern as
+`existingcomponents.json` for Components.
 
 ---
 
@@ -459,7 +522,7 @@ Before entering the loop, determine `totalScenarios`:
   □ existingcomponents.json updated with new components (Step 6d)
   □ Bulk_Update_Design_Nodes called (Step 6g)
   □ existingcomponents.json synced from MCP with real IDs (Step 6h-post)
-  □ Flow & Page registries updated (Step 6h)
+  □ Flow & Page registries updated AND written to disk (Step 6h)
   □ Scenario marked as processed (Step 6i)
   If ANY box is unchecked → DO NOT proceed to the next scenario.
 
@@ -500,6 +563,7 @@ LOOP:
      │   — Step 4                                                  │
      │ □ UPDATE existingcomponents.json BEFORE bulk upsert — 6d   │
      │ □ SYNC existingcomponents.json from MCP AFTER upsert — 6h  │
+     │ □ WRITE existingflows.json & existingpages.json to disk — 6h│
      │ If you are about to skip ANY box → you are drifting. STOP. │
      └─────────────────────────────────────────────────────────────┘
   8. Execute Steps 3-7 for this scenario
@@ -1420,25 +1484,37 @@ Bulk_Update_Design_Nodes(
 
 **One call per scenario.** Never batch multiple scenarios.
 
-### 6h. Post-upsert: update Flow & Page registries
+### 6h. Post-upsert: update Flow & Page registries (⛔ PERSIST TO DISK)
 
 After `Bulk_Update_Design_Nodes` succeeds, update the **Flow and Page
 registries** with real IDs so subsequent scenarios can LINK to them
 via `Update_Design_Node(nodeId)`.
 
-**Flow Registry:**
+> **⛔ CRITICAL: Write registries to disk after EVERY scenario.**
+> These files (`existingflows.json`, `existingpages.json`) are the
+> cross-session persistence mechanism. If you only update in-memory
+> and the session ends (or gets batched by the orchestration script),
+> the next session loses all flow/page reuse data.
 
-- For each new flow in the payload, fetch its real ID from the
-  `Bulk_Update_Design_Nodes` response (or query
-  `Design_Graph_Search` for the flow name)
-- Add to registry:
-  `{ name, modality, id: <real UUID>, stepIds }`
+**Flow Registry → `existingflows.json`:**
 
-**Page Registry:**
+1. Read `existingflows.json` from disk
+2. For each new flow in the payload, fetch its real ID from the
+   `Bulk_Update_Design_Nodes` response (or query
+   `Design_Graph_Search` for the flow name)
+3. Add/update entry keyed by `"{name}|{modality}"`:
+   `{ id: <real UUID>, stepIds: [...], modality: "WEB" }`
+4. **Write `existingflows.json` back to disk**
+5. Verify the write succeeded
 
-- For each new page in the payload, fetch its real ID
-- Add to registry:
-  `{ name, pageType, modality, id: <real UUID>, stepIds }`
+**Page Registry → `existingpages.json`:**
+
+1. Read `existingpages.json` from disk
+2. For each new page in the payload, fetch its real ID
+3. Add/update entry keyed by `"{name}|{pageType}|{modality}"`:
+   `{ id: <real UUID>, stepIds: [...], pageType: "..." }`
+4. **Write `existingpages.json` back to disk**
+5. Verify the write succeeded
 
 > **Why Flows/Pages need IDs but Components don't:**
 >
