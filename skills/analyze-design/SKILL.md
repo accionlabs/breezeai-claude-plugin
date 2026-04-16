@@ -5,9 +5,12 @@ description: >
   input: Jira ticket, plain-text description, scenario references, or Figma
   wireframes. Builds requirement context, resolves matching functional graph
   scenarios/steps/actions, generates design nodes with component reuse, and
-  optionally syncs results back to Jira. Use when: "analyze this design",
-  "create design from this ticket", "generate design for these scenarios",
-  user shares a Figma URL or Jira link, "design graph from requirement".
+  optionally syncs results back to Jira. When a frontend UI repo is
+  available, reads it to discover routes and navigation and split a scenario
+  into multiple flows/pages. Use when: "analyze this design", "create design
+  from this ticket", "generate design for these scenarios", user shares a
+  Figma URL or Jira link, "design graph from requirement".
+argument-hint: "[ui-repo-path]"
 ---
 
 ## Resources
@@ -22,6 +25,34 @@ description: >
 
 Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
 Extract `apiKey` and `projectUuid`.
+
+### Resolve UI repo (optional but strongly preferred)
+
+When a frontend repo is available, this skill reads the codebase to discover
+routes, deep links, and navigation so one scenario can be split into
+**multiple flows and pages** (not just one-flow-one-page). If no repo can be
+resolved, the skill proceeds without UI discovery.
+
+Resolution order:
+
+1. **`$ARGUMENTS`** — if the user passed a path, validate it exists
+2. **`.breeze.json` → `targetRepos.frontend`** — use if set
+3. **Current working directory** — autodetect if it looks like a frontend repo
+4. **Ask the user once** — "Do you have a frontend UI repo I can read to
+   enrich the design graph? Provide an absolute path, or say 'skip'."
+
+A directory qualifies as a frontend repo when it has a `package.json` AND
+at least one of: `src/router/`, `src/routes/`, `app/routes`, `pages/`,
+`src/pages/`, `app/`, or a React/Vue/Angular/Svelte router import.
+
+If resolved, persist to `.breeze.json`:
+
+```json
+{ "targetRepos": { "frontend": "/abs/path/to/ui-repo" } }
+```
+
+Record a boolean `uiRepoAvailable` used by Step 1.5 and Step 3b. If the user
+says "skip" or no repo is found, set `uiRepoAvailable = false` and continue.
 
 > **Parameter naming hint:** All Breeze MCP tools require the project ID
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
@@ -51,12 +82,12 @@ provided one. Only ask if nothing was provided at all.
 
 ### 0a. Accepted Inputs
 
-| Input | Example | How to Fetch |
-| --- | --- | --- |
-| **A. Jira ticket** (link or ID) | `PROJ-123` or `https://…/browse/PROJ-123` | `mcp__plugin_atlassian_atlassian__getJiraIssue` → extract summary, description, acceptance criteria, comments |
-| **B. Plain-text description** | User types the requirement directly | Use as-is |
-| **C. Scenario reference** | "create design for the login scenarios" | Noted — resolved in Step 1 |
-| **D. Figma URL(s)** | `figma.com/design/:fileKey/…?node-id=:nodeId` | Fetch via Figma MCP, then run `/breeze:visual-to-text` to extract functional description |
+| Input                           | Example                                       | How to Fetch                                                                                                  |
+| ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **A. Jira ticket** (link or ID) | `PROJ-123` or `https://…/browse/PROJ-123`     | `mcp__plugin_atlassian_atlassian__getJiraIssue` → extract summary, description, acceptance criteria, comments |
+| **B. Plain-text description**   | User types the requirement directly           | Use as-is                                                                                                     |
+| **C. Scenario reference**       | "create design for the login scenarios"       | Noted — resolved in Step 1                                                                                    |
+| **D. Figma URL(s)**             | `figma.com/design/:fileKey/…?node-id=:nodeId` | Fetch via Figma MCP, then run `/breeze:visual-to-text` to extract functional description                      |
 
 If **none** of the above are provided, ask the user for at least one.
 If the user provides just one input, proceed with that — do not prompt for others.
@@ -201,6 +232,7 @@ references — look for Breeze scenario names, scenario IDs, or functional
 graph references in the ticket description, comments, or custom fields.
 
 If found:
+
 - Fetch each referenced scenario via `Functional_Graph_Search` or
   `Get_scenarios_by_uuid` to validate it exists in the graph
 - Add validated scenarios to the candidate list
@@ -244,6 +276,7 @@ If no matching scenarios are found:
 For each scenario found, call
 `Get_all_steps_actions_for_a_scenario_id(uuid, parameters0_Value: <scenarioId>)`
 and extract:
+
 - `scenarioId` (UUID), scenario name
 - For each step: `stepId`, step name, step order
 - For each action under each step: `actionId`, action name, action description
@@ -297,12 +330,13 @@ design graph. Proceed with all, or would you like to adjust the selection?"**
 
 If any selected scenarios have `isDesignGenerated: true`, ask:
 
-> _"The following scenario(s) already have design nodes:
+> \_"The following scenario(s) already have design nodes:
+>
 > - Login with SSO
 >
 > 1. **Skip** — exclude these
 > 2. **Regenerate** — delete existing and regenerate
-> 3. **Continue anyway** — may create duplicates"_
+> 3. **Continue anyway** — may create duplicates"\_
 
 ### 1g. Select Target Modalities
 
@@ -337,7 +371,184 @@ Ask user which processing mode to use:
 
 ---
 
-## Processing Loop
+## Step 1.5: UI Repo Discovery (runs once if `uiRepoAvailable`)
+
+> **Skip this entire step if no UI repo was resolved in Guard.** The
+> skill then falls back to inferring flows/pages from scenario steps
+> alone, as before.
+
+The functional graph tells you **what** the user does. The UI code reveals
+**how many distinct ways** they can do it and **how many screens** each way
+takes. Use the repo to split each scenario into multiple flows and pages
+instead of collapsing it to one.
+
+### 1.5a. Detect framework
+
+Look for the primary router/frame signal:
+
+| Signal in repo                                 | Framework      |
+| ---------------------------------------------- | -------------- |
+| `<Route`, `createBrowserRouter`, `useRoutes`   | React Router   |
+| `src/router/index.{js,ts}` with `createRouter` | Vue Router     |
+| `pages/` or `app/` with route conventions      | Next.js / Nuxt |
+| `*-routing.module.ts`, `app.routes.ts`         | Angular        |
+| `src/routes/` with `+page.svelte`              | SvelteKit      |
+| `react-native`, `expo` in `package.json`       | React Native   |
+
+Record the framework. Use it to decide what files and patterns to search.
+
+### 1.5b. Build a repo route map (once, cached in memory)
+
+Using Glob + Read + Grep on the resolved repo, produce a **route map**:
+
+```
+route path        →  component file(s)     →  outgoing links / nav targets
+/login            →  src/pages/Login.tsx   →  /forgot-password, /signup
+/signup           →  src/pages/SignUp.tsx  →  /verify-email
+/verify-email     →  src/pages/Verify.tsx  →  /dashboard
+```
+
+Extract:
+
+- **Route paths** — from router config or file-based routing conventions
+- **Component file for each route** — the top-level component rendered
+- **Deep links / modals / tabs** — panels, tabs, or drawers rendered
+  conditionally on the same route (discover via `useSearchParams`,
+  `isOpen` modal patterns, tab state, nested `<Outlet/>`)
+- **Outgoing navigation** — `<Link to>`, `navigate()`, `router.push()`,
+  `<a href>` calls inside each route's component subtree
+- **Entry points / guards** — redirects, auth guards, role gates that
+  sit in front of the route
+
+Do NOT walk the full repo indiscriminately — scope searches by scenario
+keywords and progressively widen only if nothing is found.
+
+### 1.5c. Per-scenario discovery → UI Discovery Map
+
+For each selected scenario, use the scenario name + step names + action
+descriptions as search terms. Find:
+
+1. **Candidate entry route(s)** — the route(s) where this scenario
+   starts. A scenario can have more than one entry (e.g., "Login" may
+   start from `/login` and also from a "Sign in" modal on `/`).
+2. **Navigation graph from each entry** — follow outgoing links
+   relevant to the scenario (stop at unrelated routes or when the
+   scenario goal is reached) to form one or more **flow paths**.
+3. **Pages along each path** — each distinct route reached on the way
+   to completing the scenario is a page candidate.
+4. **Step → page mapping** — map each functional step to the page(s)
+   on which it is implemented (a step can span multiple pages; a page
+   can host multiple steps).
+
+Emit a **UI Discovery Map** per scenario:
+
+```
+Scenario: Login with Email
+  entries:
+    - /login                        (primary)
+    - /  (sign-in modal via ?auth=1)
+  flow candidates:
+    Flow "Password login"
+      pages: /login → /dashboard
+      steps: Enter Credentials → Validate & Redirect
+    Flow "Magic link login"
+      pages: /login → /check-email → /verify → /dashboard
+      steps: Enter Credentials → (Email sent) → Validate & Redirect
+  unmapped steps: <any functional step with no page match>
+```
+
+If a step has **no matching route/component**, mark it `unmapped` —
+do not silently drop it. Surface unmapped steps in Step 4's preview
+and in the final summary.
+
+### 1.5d. Reuse check — match map against existing design graph
+
+Before presenting the map, cross-reference each discovered Flow and
+Page against the **existing design graph** so repeated structures
+LINK instead of duplicating.
+
+Build the reuse registries once for this run (not per-scenario):
+
+- **Flow registry** — `Get_all_Design_By_Label(label: "Flow")`,
+  indexed by `(name, modality, routeSignature)` where
+  `routeSignature` is the ordered list of route paths in the flow
+- **Page registry** — `Get_all_Design_By_Label(label: "Page")`,
+  indexed by `(name, pageType, modality, routePath,
+designSystemRef)`
+
+These are the same registries Step 2b needs. Build them here, cache
+them, and let Step 2b reuse the cached result instead of re-querying.
+
+**For each Flow in the UI Discovery Map**, walk this priority order
+and stop at the first match:
+
+1. **Route signature match** — existing flow has the same ordered set
+   of route paths (regardless of name) → REUSE
+2. **Exact `(name, modality)` match** — same name (case-insensitive,
+   stem-normalized) and same modality → REUSE
+3. **Semantic + overlap match** — ≥70% of the discovered pages exist
+   in an existing flow with a semantically similar name (e.g.
+   "Password Login" ↔ "Login with Password") → REUSE after user
+   confirmation in Step 4
+4. **No match** → CREATE NEW
+
+**For each Page in the UI Discovery Map**, priority order:
+
+1. **Route path match** — existing page already has this
+   `routePath` + `modality` → REUSE
+2. **Exact `(name, pageType, modality)` match** → REUSE
+3. **Same `designSystemRef` and route component file** → REUSE
+4. **Semantic name match in same `pageType` + `modality`** (e.g.
+   "Dashboard" ↔ "Home Dashboard") → REUSE after confirmation
+5. **No match** → CREATE NEW
+
+**Annotate the UI Discovery Map with REUSE/NEW** on each node:
+
+```
+Scenario: Login with Email
+  flow candidates:
+    Flow "Password login"                                   [REUSE existing: "Login with Password" — route-signature match]
+      pages:
+        /login       → Page "Sign In"                       [REUSE by routePath]
+        /dashboard   → Page "Dashboard"                     [REUSE by (name, pageType)]
+      steps: Enter Credentials → Validate & Redirect
+    Flow "Magic link login"                                 [NEW]
+      pages:
+        /login        → Page "Sign In"                      [REUSE — already above]
+        /check-email  → Page "Check Email"                  [NEW]
+        /verify       → Page "Verify Email"                 [REUSE by routePath]
+        /dashboard    → Page "Dashboard"                    [REUSE — already above]
+      steps: Enter Credentials → (Email sent) → Validate & Redirect
+```
+
+Reuse semantics (consistent with Step 3b LINK-before-CREATE):
+
+- **REUSE Flow** — do NOT emit the Flow or its child Pages in the
+  bulk payload; instead issue `Update_Design_Node` to append this
+  scenario's `stepIds[]` to the existing Flow
+- **REUSE Page** — do NOT emit the Page or its components; issue
+  `Update_Design_Node` to append the current step's UUID to the
+  existing page's `stepIds[]`
+- **Ties on priority** — prefer the higher-scope or
+  more-referenced existing node (highest `stepIds[]` count)
+- **Never downgrade scope on reuse** — a PAGE-scoped existing
+  page is not upgraded to a GLOBAL flow, etc.
+
+### 1.5e. Present and confirm
+
+Show the UI Discovery Map to the user alongside the coverage summary
+from Step 1d. Ask:
+
+> _"I found {N} flow(s) across {M} page(s) in the repo for this
+> requirement. {R} of these already exist in the design graph and will
+> be REUSED (linked), {C} are NEW. Proceed with this structure, or would
+> you like to adjust (merge/split flows, rename pages, override a REUSE
+> decision, mark unmapped steps)?"_
+
+In `auto` mode, skip the prompt and proceed with the map as generated
+(including REUSE decisions); log any unmapped steps and any
+semantic-match reuses requiring confirmation in the final summary
+instead of pausing.
 
 Process selected scenarios one at a time.
 
@@ -379,16 +590,21 @@ Query existing design nodes to find what's already mapped:
 
 ### 2b. Build Reusable Registries
 
+> **If Step 1.5d already built the Flow and Page registries, reuse
+> those cached indexes instead of re-querying.** Only the Component
+> registry below is new work per run.
+
 **Flow Registry:**
 
-Query `Get_all_Design_By_Label` (label=`Flow`). Index by
-`(name, modality)`. Used in Step 3b to avoid duplicating flows
-across scenarios.
+If not already cached from Step 1.5d, query `Get_all_Design_By_Label`
+(label=`Flow`). Index by `(name, modality)` AND `routeSignature`. Used
+in Step 3b to avoid duplicating flows across scenarios.
 
 **Page Registry:**
 
-Query `Get_all_Design_By_Label` (label=`Page`). Index by
-`(name, pageType, modality)`. Used in Step 3b to avoid duplicating pages
+If not already cached from Step 1.5d, query `Get_all_Design_By_Label`
+(label=`Page`). Index by `(name, pageType, modality)` AND
+`(routePath, modality)`. Used in Step 3b to avoid duplicating pages
 across scenarios.
 
 **Component Registry:**
@@ -421,9 +637,31 @@ if not.
 One UserJourney per Scenario with `scenarioId` link.
 Use the scenario name directly as the UserJourney name. Do NOT add "Journey" suffix.
 
+A UserJourney can host **one or many Flows**. When a UI Discovery Map
+exists for this scenario (Step 1.5), use the `flow candidates` from the
+map — one Flow per candidate — instead of collapsing the whole journey
+into a single flow.
+
 ### 3b. Step → Flow OR Page (Exclusive)
 
 A Step maps to Flow OR Page, never both.
+
+**When the UI Discovery Map is available (preferred):**
+
+- Use the map's `flow candidates` as the authoritative list of Flows
+  for this scenario. Flow names come from the map (e.g. "Password
+  login"), not from a single step name.
+- Each page in a flow's `pages:` list becomes a **Page** node, named
+  after the route's component or a human-readable label derived from
+  the route (e.g. `/check-email` → "Check Email"). Do NOT use the raw
+  URL as the page name.
+- Distribute steps across pages using the map's `steps:` per-flow
+  mapping. A step that spans multiple pages is linked to each page's
+  `stepIds[]`.
+- Include any `unmapped` steps as Pages or Flows only after asking the
+  user in Step 4 — never silently invent a page for them.
+
+**When no UI repo is available — fallback heuristic:**
 
 | Choose Flow When                  | Choose Page When                 |
 | --------------------------------- | -------------------------------- |
@@ -432,7 +670,10 @@ A Step maps to Flow OR Page, never both.
 | Process spanning multiple screens | Form, list, detail, or dashboard |
 
 Create separate Flow/Page for EACH selected modality.
-**Name format:** Use the step name directly (e.g., "Sign Up", "Registration"). Do NOT add "Flow"/"Page" suffix or modality — the node label and `modality` field already convey these.
+**Name format:** Use the step name (fallback) or the flow/page name
+from the UI Discovery Map directly (e.g., "Sign Up", "Registration").
+Do NOT add "Flow"/"Page" suffix or modality — the node label and
+`modality` field already convey these.
 
 **Flow Deduplication (LINK before CREATE):**
 
@@ -542,6 +783,11 @@ Preserve `order` field from functional graph in design nodes.
 Before creating nodes, show a preview for the current scenario covering:
 UserJourneys, Flows, Pages, Components, Templates (new + reused). Include a
 summary with total nodes to create and actions to link.
+
+If a **UI Discovery Map** was built in Step 1.5 for this scenario, show it in
+the preview alongside the design nodes — which route each page came from,
+and call out any `unmapped` steps so the user can decide how to handle them
+(skip, merge into an existing page, or create a new page).
 
 Ask: **"Proceed with creating these design nodes for this scenario?"**
 
