@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs ls:*)",
+      "Read(//Users/pranavpatil/Downloads/lmreborn-frontendweb_react_tnlm-ac4b062702e7/**)"
+    ],
+    "additionalDirectories": [
+      "/Users/pranavpatil/Desktop/Projects/breezeai-claude-plugin/skills"
+    ]
+  }
+}
