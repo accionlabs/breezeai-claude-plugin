@@ -30,7 +30,7 @@ graph as the only common surface (idempotent merge by outcome name).
 
 - **UI repo path** — if provided as argument (`$ARGUMENTS`), use it
   directly; otherwise resolved in Phase -1
-- **`.breeze.json`** — for `apiKey`, `apiBase`, `projectUuid`
+- **`.breeze.json`** — for `projectUuid`
 - **Existing functional graph** — queried for dedup, not assumed empty
 - **Optional: `entrypoints.json`** if resuming from a prior session
   (looked up inside the UI repo directory)
@@ -52,8 +52,9 @@ graph as the only common surface (idempotent merge by outcome name).
 
 1. Read `.breeze.json` from the plugin working directory
 2. If missing or incomplete, tell the user to run `/breeze:setup-project`
-3. Extract `apiKey`, `projectUuid`, `apiBase`
-4. Confirm the project has at least one code ontology indexed
+3. Extract `projectUuid`
+4. Call `Call_Get_Project_Details_` with `uuid=<projectUuid>` once, cache the returned project `name` — required by the bulk upsert in Step 7
+5. Confirm the project has at least one code ontology indexed
 
 ---
 
@@ -344,63 +345,61 @@ Notifications, Insights, Settings, Auth).
 2. Build persona -> outcome -> scenario -> step -> action tree
 3. Populate `apis[]` on every action that triggers an API call
 
-**Payload schema:**
+**`data` payload** (top-level `personas` array, passed as the `data`
+argument to `bulk_update_functional_nodes` in Step 7):
 
 ```json
 {
-  "project": {
-    "uuid": "<projectUuid from .breeze.json>",
-    "name": "<repo or project name>"
-  },
-  "payload": {
-    "personas": [
-      {
-        "persona": "User",
-        "description": "...optional...",
-        "citations": [
-          { "type": "code", "name": "<file>", "reference": "<file path>" }
-        ],
-        "outcomes": [
-          {
-            "outcome": "Manage X",
-            "description": "...",
-            "citations": [
-              { "type": "code", "name": "<file>", "reference": "<file path>" }
-            ],
-            "scenarios": [
-              {
-                "scenario": "Submit project search with filters",
-                "description": "User applies the project side-filter and submits a search.",
-                "steps": [
-                  {
-                    "step": "Provide search criteria via project side filter",
-                    "actions": [
-                      {
-                        "action": "Submit project search",
-                        "description": null,
-                        "apis": [
-                          {
-                            "type": "REST",
-                            "method": "POST",
-                            "url": "/v2/search/projects2?filter={encoded}",
-                            "request": "ES query body",
-                            "response": "{data:[ProjectRow], totalData}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
-  "skipStepAndAction": false
+  "personas": [
+    {
+      "persona": "User",
+      "description": "...optional...",
+      "citations": [
+        { "type": "code", "name": "<file>", "reference": "<file path>" }
+      ],
+      "outcomes": [
+        {
+          "outcome": "Manage X",
+          "description": "...",
+          "citations": [
+            { "type": "code", "name": "<file>", "reference": "<file path>" }
+          ],
+          "scenarios": [
+            {
+              "scenario": "Submit project search with filters",
+              "description": "User applies the project side-filter and submits a search.",
+              "steps": [
+                {
+                  "step": "Provide search criteria via project side filter",
+                  "actions": [
+                    {
+                      "action": "Submit project search",
+                      "description": null,
+                      "apis": [
+                        {
+                          "type": "REST",
+                          "method": "POST",
+                          "url": "/v2/search/projects2?filter={encoded}",
+                          "request": "ES query body",
+                          "response": "{data:[ProjectRow], totalData}"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }
 ```
+
+The project `uuid`, `name`, `skip_step_and_action`, `embedding`, and
+`llm_platform` are passed as sibling MCP arguments — they do NOT go
+inside `data`.
 
 > **Rules:** see [rules.md](references/rules.md) → "Persona rules", "Outcome
 > rules", "Action rules", "Quantity targets", "Disambiguation rule",
@@ -422,15 +421,21 @@ Notifications, Insights, Settings, Auth).
 
 ## Step 7 — Upsert ONE EP at a time
 
-1. Write payload to `<uiRepo>/ui_ep{NN}_{name}.json`
-2. POST it:
-   ```bash
-   curl -X POST "${API_BASE}/functional-graph/upsert?embedding=true&llmPlatform=AWSBEDROCK" \
-     -H "api-key: ${API_KEY}" \
-     -H "Content-Type: application/json" \
-     -d @<uiRepo>/ui_ep01_dashboard.json
+1. Write the Step 6 payload to `<uiRepo>/ui_ep{NN}_{name}.json` for
+   audit/resume purposes
+2. Call the `bulk_update_functional_nodes` MCP tool:
    ```
-3. If Rule A or Rule B fails, refuse to POST — fix and re-validate
+   bulk_update_functional_nodes(
+     uuid: <projectUuid>,
+     name: <project name from Call_Get_Project_Details_>,
+     data: <payload from Step 6 — top-level personas array>,
+     skip_step_and_action: false,
+     embedding: true,
+     llm_platform: "AWSBEDROCK"
+   )
+   ```
+3. If Rule A or Rule B fails, refuse to call the tool — fix and
+   re-validate
 
 > **Rules:** see [rules.md](references/rules.md) → "Pre-upsert validation
 > rules" and "Write protocol"
