@@ -121,6 +121,12 @@ Read `.breeze.json` from the project root. If it exists and contains
 both `apiKey` and `projectUuid`, skip to **Step 3 — Ontology Status
 Check**.
 
+Authentication note: MCP tool calls authenticate via Keycloak OAuth —
+Claude Code handles the sign-in automatically on the first MCP call
+and does not read `apiKey` from `.breeze.json`. The stored `apiKey`
+is used by non-MCP consumers (the ontology-generator CLI and the
+REST upsert path).
+
 ## Step 1 — API Key Setup
 
 If `apiKey` is missing from `.breeze.json`:
@@ -149,21 +155,21 @@ Ask: "Would you like to:
 
 **Option 1 — Select existing:**
 
-- Call `Call_List_Project_` with the apiKey
+- Call `Call_List_Project_`
 - Display the project list (name + UUID)
 - User selects one → save `projectUuid` to `.breeze.json`
 
 **Option 2 — Create new:**
 
 - Ask for project name and description (optional)
-- Call `Call_Create_Project_` with name, description, apiKey
+- Call `Call_Create_Project_` with name and description
 - Save returned `projectUuid` to `.breeze.json`
 
 Confirm: "Project linked successfully."
 
 ## Step 3 — Ontology Status Check
 
-Call `Call_Get_Project_Details_` with uuid and apiKey.
+Call `Call_Get_Project_Details_` with `uuid`.
 Inspect the response for these status fields:
 
 **Document Ontology:**
@@ -255,7 +261,7 @@ description: >
 ## Guard
 
 Read `.breeze.json`. If missing or incomplete, tell user to run
-`/breeze:init`. Extract `apiKey` and `projectUuid`.
+`/breeze:init`. Extract `projectUuid`.
 
 ## Decision Logic
 
@@ -327,7 +333,7 @@ description: >
 ## Guard
 
 Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
-Extract `apiKey` and `projectUuid`.
+Extract `projectUuid`.
 
 ## Hierarchy
 
@@ -577,7 +583,7 @@ description: >
 ## Guard
 
 Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
-Extract `apiKey` and `projectUuid`.
+Extract `projectUuid`.
 
 ## Analysis Flow
 
@@ -657,7 +663,7 @@ description: >
 ## Guard
 
 Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
-Extract `apiKey` and `projectUuid`.
+Extract `projectUuid`.
 
 ## Analysis Flow
 
@@ -749,7 +755,7 @@ description: >
 ## Guard
 
 Read `.breeze.json`. If missing, tell user to run `/breeze:init`.
-Extract `apiKey` and `projectUuid`.
+Extract `projectUuid`.
 
 ## Analysis Flow
 
@@ -914,6 +920,11 @@ See `skills/validate-graph/SKILL.md` for the full content.
   "projectUuid": "<PROJECT_UUID>"
 }
 ```
+
+MCP tool calls authenticate via Keycloak OAuth — Claude Code performs
+the sign-in flow on the first MCP tool call and does not read
+`apiKey` from `.breeze.json`. The stored `apiKey` is used by non-MCP
+consumers (the ontology-generator CLI and the REST upsert path).
 
 ### Guard Rule (all skills except init)
 

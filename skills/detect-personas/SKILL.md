@@ -11,7 +11,7 @@ description: >
 ## Guard
 
 1. Read `.breeze.json` in the current working directory. If missing or incomplete, tell the user to run `/breeze:setup-project`.
-2. Extract `apiKey` and `projectUuid`.
+2. Extract `projectUuid`.
 3. **Validate this is a frontend UI repo.** Check for ANY of these markers:
    - `package.json` exists AND contains one or more of: `react`, `vue`, `angular`, `svelte`, `next`, `nuxt`, `gatsby`, `remix`, `solid`, `lit`, `ember`, `backbone`
    - Directories like `src/pages/`, `src/views/`, `src/screens/`, `src/routes/`, `src/app/`, `app/`, `pages/`

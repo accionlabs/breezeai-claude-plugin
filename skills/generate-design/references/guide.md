@@ -51,7 +51,6 @@ Updates a functional graph node (used to mark scenarios as processed).
 **Inputs:**
 
 - `uuid` (required): Project UUID
-- `apiKey` (required): API key from .breeze.json
 - `label` (required): Node type - `Scenario`
 - `id` (required): Node ID to update
 - `data` (required): Object with fields to update
@@ -63,7 +62,6 @@ Updates a functional graph node (used to mark scenarios as processed).
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Scenario",
   "id": "<scenario id>",
   "data": {
@@ -153,7 +151,6 @@ Creates a new design node in the graph.
 **Inputs:**
 
 - `uuid` (required): Project UUID
-- `apiKey` (required): API key from .breeze.json
 - `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
 - `data` (required): Node data object (see payload structures below)
 
@@ -168,7 +165,6 @@ Updates an existing design node.
 **Inputs:**
 
 - `uuid` (required): Project UUID
-- `apiKey` (required): API key from .breeze.json
 - `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
 - `nodeId` (required): The ID of the node to update
 - `data` (required): Object with fields to update
@@ -178,7 +174,6 @@ Updates an existing design node.
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Component",
   "nodeId": "<component UUID>",
   "data": {
@@ -197,7 +192,6 @@ This reuses the entire flow including all its pages and components.
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Flow",
   "nodeId": "<existing flow UUID>",
   "data": {
@@ -218,7 +212,6 @@ instead of creating a duplicate page.
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Page",
   "nodeId": "<existing page UUID>",
   "data": {
@@ -241,7 +234,6 @@ deduplication (upsert by `designSystemRef`) automatically.
 **Inputs:**
 
 - `uuid` (required): Project UUID
-- `apiKey` (required): API key from .breeze.json
 - `data` (required): Nested tree object (see payload structure below)
 
 **Payload Structure:**
@@ -366,7 +358,6 @@ Deletes a design node from the graph.
 
 - `uuid` (required): Project UUID
 - `label` (required): Node type - `UserJourney` | `Flow` | `Page` | `Component`
-- `apiKey` (required): API key from .breeze.json
 - `nodeId` (required): The ID of the node to delete
 
 **Confirmation Required:** Before deleting any node, ALWAYS ask the user for confirmation with:
@@ -477,7 +468,6 @@ Select option: (1/2/3)
 ```json
 {
   "uuid": "<projectUuid from .breeze.json>",
-  "apiKey": "<apiKey from .breeze.json>",
   "label": "UserJourney",
   "data": {
     "name": "{Scenario.scenario}",
@@ -564,7 +554,6 @@ Voice Flow:
 ```json
 {
   "uuid": "<projectUuid from .breeze.json>",
-  "apiKey": "<apiKey from .breeze.json>",
   "label": "Flow",
   "data": {
     "name": "{Step.step}",
@@ -680,7 +669,6 @@ When an Action represents a page-level interaction rather than a specific UI ele
 ```json
 {
   "uuid": "<projectUuid from .breeze.json>",
-  "apiKey": "<apiKey from .breeze.json>",
   "label": "Page",
   "data": {
     "name": "{Step.step}",
@@ -917,7 +905,6 @@ Components can also be categorized by their functional purpose. Use these as `de
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Component",
   "data": {
     "name": "FormPageTemplate",
@@ -951,7 +938,6 @@ Components can also be categorized by their functional purpose. Use these as `de
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Component",
   "data": {
     "name": "PatientRegistrationForm",
@@ -989,7 +975,6 @@ Components can also be categorized by their functional purpose. Use these as `de
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Component",
   "data": {
     "name": "PatientNameInput",
@@ -1033,7 +1018,6 @@ Components can also be categorized by their functional purpose. Use these as `de
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Component",
   "data": {
     "name": "SubmitButton",
@@ -1144,7 +1128,6 @@ Usage:
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Component",
   "data": {
     "name": "TextInputField",
@@ -1183,7 +1166,6 @@ Domain Extensions:
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Component",
   "data": {
     "name": "BaseCard",
@@ -1289,7 +1271,6 @@ When creating components, indicate reusability:
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Component",
   "data": {
     "name": "TextInputField",
@@ -1412,7 +1393,6 @@ PAGE ORGANISMS (built from domain organisms):
 ```json
 {
   "uuid": "<projectUuid from .breeze.json>",
-  "apiKey": "<apiKey from .breeze.json>",
   "label": "Component",
   "data": {
     "name": "{derived from Action.action}",
@@ -1484,7 +1464,6 @@ Design:
 ```json
 {
   "uuid": "<projectUuid from .breeze.json>",
-  "apiKey": "<apiKey from .breeze.json>",
   "label": "Component",
   "data": {
     "name": "{Template Name}",
@@ -1503,7 +1482,6 @@ Design:
 ```json
 {
   "uuid": "<projectUuid>",
-  "apiKey": "<apiKey>",
   "label": "Component",
   "data": {
     "name": "Form Page Template",

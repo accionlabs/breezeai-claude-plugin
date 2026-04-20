@@ -62,7 +62,7 @@ real components, their nesting, props, states, and flow structure.
 
 - **UI repo path** — if provided as argument (`$ARGUMENTS`), use it
   directly; otherwise resolved in Phase -1
-- **`.breeze.json`** — for `apiKey`, `apiBase`, `projectUuid`
+- **`.breeze.json`** — for `apiBase`, `projectUuid`
 - **Functional graph** — scenarios, steps, actions (fetched
   incrementally per scenario)
 - **Existing design graph** — queried for dedup, not assumed empty
@@ -83,7 +83,7 @@ real components, their nesting, props, states, and flow structure.
 
 1. Read `.breeze.json` from the plugin working directory
 2. If missing or incomplete, tell the user to run `/breeze:setup-project`
-3. Extract `apiKey`, `projectUuid`
+3. Extract `projectUuid`
 
 > **Parameter naming hint:** All Breeze MCP tools require the project ID
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
@@ -1477,7 +1477,6 @@ design nodes?"**
 ```
 Bulk_Update_Design_Nodes(
   uuid: <projectUuid>,
-  apiKey: <apiKey>,
   data: <nested payload from 6e>
 )
 ```
@@ -1567,7 +1566,6 @@ depends on accurate, MCP-sourced data in the registry.
 ```
 Update_Functional_Node(
   uuid: <projectUuid>,
-  apiKey: <apiKey>,
   label: "Scenario",
   id: <scenario UUID>,
   data: { "isDesignGenerated": true },

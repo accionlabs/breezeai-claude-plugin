@@ -11,7 +11,7 @@ description: >
 ## Guard
 
 Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:setup-project`.
-Extract `apiKey` and `projectUuid`.
+Extract `projectUuid`.
 
 ---
 

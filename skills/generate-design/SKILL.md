@@ -17,7 +17,7 @@ description: >
 ## Guard
 
 Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
-Extract `apiKey` and `projectUuid`.
+Extract `projectUuid`.
 
 > **Parameter naming hint:** All Breeze MCP tools require the project ID
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
@@ -641,7 +641,6 @@ inconsistent design graph that requires manual cleanup.
 ```
 Bulk_Update_Design_Nodes(
   uuid: <projectUuid>,
-  apiKey: <apiKey>,
   data: <nested payload>
 )
 ```
@@ -662,7 +661,6 @@ summary.
 ```
 Update_Functional_Node(
   uuid: <projectUuid>,
-  apiKey: <apiKey>,
   label: "Scenario",
   id: <scenario UUID>,
   data: { "isDesignGenerated": true }
