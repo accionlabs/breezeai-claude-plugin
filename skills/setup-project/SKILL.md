@@ -3,24 +3,35 @@ name: setup-project
 description: >
   Initialize or validate the Breeze workspace. Sets up .breeze.json
   with API key and project UUID, links to a Breeze project, and
-  checks ontology readiness. Does NOT upload repos or documents —
-  use /breeze:onboard-repository for code uploads, and
-  /breeze:analyze-functional or /breeze:visual-to-text for document
-  and design ingestion. Use when: first time setup, "init breeze",
-  "setup breeze", or when any Breeze tool fails with authorization
-  errors.
+  checks ontology readiness. MCP access uses Keycloak OAuth (handled
+  automatically by Claude Code on the first MCP tool call); the API
+  key in .breeze.json is used by non-MCP consumers — the
+  ontology-generator CLI and the REST upsert path. Does NOT
+  upload repos or documents — use /breeze:onboard-repository for
+  code uploads, and /breeze:analyze-functional or
+  /breeze:visual-to-text for document and design ingestion. Use
+  when: first time setup, "init breeze", "setup breeze", or when
+  any Breeze tool fails with authorization errors.
 ---
 
 ## Scope
 
 This skill is responsible for **workspace bootstrap only**:
 
-- API key setup
+- API key setup (used by the ontology-generator CLI and REST upsert — MCP itself uses Keycloak OAuth)
 - Project linking (select existing or create new)
 - Optional AWS credentials for the deprecated cluster pipeline
 - Ontology readiness check
 - Pointing the user at the right next-step skill based on what they
   want to do
+
+MCP access is authenticated via Keycloak OAuth — Claude Code handles
+the sign-in automatically on the first MCP tool call and does **not**
+use `apiKey` from `.breeze.json`. The stored `apiKey` is still needed
+by non-MCP consumers: the `breeze-code-ontology-generator` CLI, the
+REST `/functional-graph/upsert` path used by the deprecated
+`generate-functional-from-code` subprocess, and any other direct REST
+calls.
 
 This skill does **NOT** upload repositories or documents. That
 responsibility now lives in dedicated skills:
@@ -41,6 +52,11 @@ both `apiKey` and `projectUuid`, skip to **Step 3 — Ontology Status
 Check**.
 
 ## Step 1 — API Key Setup
+
+The API key is **not** used for MCP tool calls (those authenticate via
+Keycloak OAuth automatically). It is required by the
+ontology-generator CLI (`--user-api-key`) and by the REST upsert path
+used by the deprecated cluster pipeline.
 
 If `apiKey` is missing from `.breeze.json`:
 
@@ -69,14 +85,14 @@ Ask: "Would you like to:
 
 **Option 1 — Select existing:**
 
-- Call `Call_List_Project_` with the apiKey
+- Call `Call_List_Project_`
 - Display the project list (name + UUID)
 - User selects one → save `projectUuid` to `.breeze.json`
 
 **Option 2 — Create new:**
 
 - Ask for project name and description (optional)
-- Call `Call_Create_Project_` with name, description, apiKey
+- Call `Call_Create_Project_` with name and description
 - Save returned `projectUuid` to `.breeze.json`
 
 Confirm: "Project linked successfully."

@@ -373,7 +373,8 @@ then supplement with local file reading for UI template details that the code gr
 ## Guard
 
 Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:setup-project`.
-Extract `apiKey`, `projectUuid`, and `apiBase`.
+Extract `projectUuid`. Call `Call_Get_Project_Details_` with `uuid=<projectUuid>` once
+and cache the returned project `name` — required by the bulk upsert in Phase 7.
 
 The project must have at least one code ontology indexed. If the code graph returns no results,
 the repository has not been uploaded yet — follow the upload instructions in Mode A's Guard section.
@@ -640,45 +641,50 @@ Before presenting, verify:
 Show the ontology with: personas, outcomes, scenarios with steps/actions, API summary table.
 Ask user to approve, adjust, or skip.
 
-## Phase 7: Write to Functional Graph via Upsert API
+## Phase 7: Write to Functional Graph via MCP Bulk Upsert
 
-Build nested JSON payload and POST to the upsert endpoint:
+Build the nested `data` payload (top-level `personas` array) and call
+the `bulk_update_functional_nodes` MCP tool:
 
-```bash
-curl -X POST "${API_BASE}/functional-graph/upsert?embedding=true&llmPlatform=AWSBEDROCK" \
-  -H "api-key: ${API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d @/tmp/upsert_payload.json
+```
+bulk_update_functional_nodes(
+  uuid: <projectUuid>,
+  name: <project name from Call_Get_Project_Details_>,
+  data: <payload below>,
+  skip_step_and_action: false,
+  embedding: true,
+  llm_platform: "AWSBEDROCK"
+)
 ```
 
-Upsert payload structure:
+`data` payload structure:
 ```json
 {
-  "project": {"uuid": "<projectUuid>", "name": "<projectName>"},
-  "payload": {
-    "personas": [{
-      "persona": "User",
-      "citations": [{"type": "code", "name": "<file>", "reference": "<file>"}],
-      "outcomes": [{
-        "outcome": "Manage Invoices",
-        "scenarios": [{
-          "scenario": "Create Invoice",
-          "description": "...",
-          "steps": [{
-            "step": "Enter details",
-            "actions": [{
-              "action": "Select type",
-              "description": "...",
-              "apis": [{"type": "REST", "method": "POST", "url": "/invoice", "request": "...", "response": "..."}]
-            }]
+  "personas": [{
+    "persona": "User",
+    "citations": [{"type": "code", "name": "<file>", "reference": "<file>"}],
+    "outcomes": [{
+      "outcome": "Manage Invoices",
+      "scenarios": [{
+        "scenario": "Create Invoice",
+        "description": "...",
+        "steps": [{
+          "step": "Enter details",
+          "actions": [{
+            "action": "Select type",
+            "description": "...",
+            "apis": [{"type": "REST", "method": "POST", "url": "/invoice", "request": "...", "response": "..."}]
           }]
         }]
       }]
     }]
-  },
-  "skipStepAndAction": false
+  }]
 }
 ```
+
+The project `uuid`, `name`, `skip_step_and_action`, `embedding`, and
+`llm_platform` are passed as sibling MCP arguments — they do NOT go
+inside `data`.
 
 The upsert is **idempotent** — match keys are string names. Re-running updates, not duplicates.
 The upsert **merges across calls** — you can add scenarios to the same outcome in separate calls.

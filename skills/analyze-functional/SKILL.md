@@ -9,7 +9,7 @@ description: >
 ## Guard
 
 Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
-Extract `apiKey` and `projectUuid`.
+Extract `projectUuid`.
 
 # requirement-analysis:
 
@@ -118,7 +118,7 @@ After the user confirms the functional graph in Step 3, determine the citation s
 **Choose one of two strategies:**
 
 **A. Same citation for all nodes** — When all nodes come from a single source (e.g., one Jira ticket, one document, one prompt):
-- Call `Call_Create_Citation_` MCP tool once with `projectUuid`, `apiKey`, `name`, `reference`, `type`, and `inputText`.
+- Call `Call_Create_Citation_` MCP tool once with `projectUuid`, `name`, `reference`, `type`, and `inputText`.
 - Save the returned citation `id` — you will pass it as `citationIds: [<citationId>]` on every node in Step 5.
 
 **B. Different citations per node** — When nodes originate from multiple distinct sources (e.g., part from a Jira ticket, part from a document, part from code):

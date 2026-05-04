@@ -120,7 +120,7 @@ def fetch_unprocessed_scenarios(args) -> list[dict]:
     """Fetch all unprocessed scenarios via a quick Claude Code call."""
     log("Fetching unprocessed scenarios from functional graph...")
 
-    prompt = f"""Read .breeze.json and get the apiKey and projectUuid.
+    prompt = f"""Read .breeze.json and get the projectUuid.
 Then call Get_scenarios_by_uuid with uuid=<projectUuid>, isDesignGenerated="false", page="1", limit="200".
 Also call Get_all_personas to identify non-human personas (System, External System).
 For each non-human persona, call Get_all_outcomes_for_a_persona_id to get blocked outcome IDs.

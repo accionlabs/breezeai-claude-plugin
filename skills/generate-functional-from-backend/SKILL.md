@@ -30,7 +30,7 @@ graph as the only common surface (idempotent merge by outcome name).
 
 - **Backend repo path** — if provided as argument (`$ARGUMENTS`), use
   it directly; otherwise resolved in Phase -1
-- **`.breeze.json`** — for `apiKey`, `apiBase`, `projectUuid`
+- **`.breeze.json`** — for `projectUuid`
 - **Existing functional graph** — queried for dedup AND cross-pass
   merge reference
 - **Optional: `entrypoints.json`** if resuming from a prior session
@@ -53,8 +53,9 @@ graph as the only common surface (idempotent merge by outcome name).
 
 1. Read `.breeze.json` from the plugin working directory
 2. If missing or incomplete, tell the user to run `/breeze:setup-project`
-3. Extract `apiKey`, `projectUuid`, `apiBase`
-4. Confirm the project has at least one code ontology indexed
+3. Extract `projectUuid`
+4. Call `Call_Get_Project_Details_` with `uuid=<projectUuid>` once, cache the returned project `name` — required by the bulk upsert in Step 7
+5. Confirm the project has at least one code ontology indexed
 
 ---
 
@@ -344,63 +345,61 @@ If the repo has NO GraphQL surface, skip and record
 2. Build persona -> outcome -> scenario -> step -> action tree
 3. Populate `apis[]` on every action that performs an API operation
 
-**Payload schema:**
+**`data` payload** (top-level `personas` array, passed as the `data`
+argument to `bulk_update_functional_nodes` in Step 7):
 
 ```json
 {
-  "project": {
-    "uuid": "<projectUuid from .breeze.json>",
-    "name": "<repo or project name>"
-  },
-  "payload": {
-    "personas": [
-      {
-        "persona": "System",
-        "description": "...optional...",
-        "citations": [
-          { "type": "code", "name": "<handler file>", "reference": "<file path>" }
-        ],
-        "outcomes": [
-          {
-            "outcome": "Track Construction Project Pipeline",
-            "description": "...business capability...",
-            "citations": [
-              { "type": "code", "name": "<file>", "reference": "<file path>" }
-            ],
-            "scenarios": [
-              {
-                "scenario": "Validate and enqueue project export",
-                "description": "ProjectsController.projectExportEmailToExcel validates...",
-                "steps": [
-                  {
-                    "step": "Receive export request",
-                    "actions": [
-                      {
-                        "action": "Receive POST /v2/search/projects/export-email/xls",
-                        "description": "Body: ParamExportProjects...",
-                        "apis": [
-                          {
-                            "type": "REST",
-                            "method": "POST",
-                            "url": "/v2/search/projects/export-email/xls",
-                            "request": "ParamExportProjects + ProjectParams",
-                            "response": "ResponseApi<{queued:boolean}>"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
-  "skipStepAndAction": false
+  "personas": [
+    {
+      "persona": "System",
+      "description": "...optional...",
+      "citations": [
+        { "type": "code", "name": "<handler file>", "reference": "<file path>" }
+      ],
+      "outcomes": [
+        {
+          "outcome": "Track Construction Project Pipeline",
+          "description": "...business capability...",
+          "citations": [
+            { "type": "code", "name": "<file>", "reference": "<file path>" }
+          ],
+          "scenarios": [
+            {
+              "scenario": "Validate and enqueue project export",
+              "description": "ProjectsController.projectExportEmailToExcel validates...",
+              "steps": [
+                {
+                  "step": "Receive export request",
+                  "actions": [
+                    {
+                      "action": "Receive POST /v2/search/projects/export-email/xls",
+                      "description": "Body: ParamExportProjects...",
+                      "apis": [
+                        {
+                          "type": "REST",
+                          "method": "POST",
+                          "url": "/v2/search/projects/export-email/xls",
+                          "request": "ParamExportProjects + ProjectParams",
+                          "response": "ResponseApi<{queued:boolean}>"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }
 ```
+
+The project `uuid`, `name`, `skip_step_and_action`, `embedding`, and
+`llm_platform` are passed as sibling MCP arguments — they do NOT go
+inside `data`.
 
 > **Rules:** see [rules.md](references/rules.md) → "Persona rules", "Outcome
 > rules", "Action rules", "Quantity targets", "`apis[]` type
@@ -425,15 +424,21 @@ If the repo has NO GraphQL surface, skip and record
 
 ## Step 7 — Upsert ONE EP at a time
 
-1. Write payload to `<backendRepo>/be_ep{NN}_{name}.json`
-2. POST it:
-   ```bash
-   curl -X POST "${API_BASE}/functional-graph/upsert?embedding=true&llmPlatform=AWSBEDROCK" \
-     -H "api-key: ${API_KEY}" \
-     -H "Content-Type: application/json" \
-     -d @<backendRepo>/be_ep01_export_email.json
+1. Write the Step 6 payload to `<backendRepo>/be_ep{NN}_{name}.json`
+   for audit/resume purposes
+2. Call the `bulk_update_functional_nodes` MCP tool:
    ```
-3. If Rule A or Rule B fails, refuse to POST — fix and re-validate
+   bulk_update_functional_nodes(
+     uuid: <projectUuid>,
+     name: <project name from Call_Get_Project_Details_>,
+     data: <payload from Step 6 — top-level personas array>,
+     skip_step_and_action: false,
+     embedding: true,
+     llm_platform: "AWSBEDROCK"
+   )
+   ```
+3. If Rule A or Rule B fails, refuse to call the tool — fix and
+   re-validate
 
 > **Rules:** see [rules.md](references/rules.md) → "Pre-upsert validation
 > rules" and "Write protocol"

@@ -168,6 +168,7 @@ claude --plugin-dir ../breeze-claude-plugin
 
 ## Notes
 
-- `.breeze.json` contains your API key — add it to `.gitignore`
+- `.breeze.json` contains your API key (used by the ontology-generator CLI and the REST upsert path) — add it to `.gitignore`
+- The Breeze MCP server uses Keycloak OAuth; Claude Code handles sign-in automatically on the first MCP tool call and does not read `apiKey` from `.breeze.json`
 - The **Design** skill requires a Figma MCP server to be configured separately
 - All skills except `init` require a valid `.breeze.json` with `apiKey` and `projectUuid`
