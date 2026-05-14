@@ -497,11 +497,10 @@ and report. To resume: **"continue backend pass from entrypoints.json"**.
 ## When NOT to use
 
 - **Frontend-only repos** — use `/breeze:generate-functional-from-ui`
-- **Quick first-time exploration** — deprecated `generate-functional-from-code`
 
 ## See also
 
 - `/breeze:generate-functional-from-ui` — the frontend half
-- `/breeze:generate-functional-from-code` — deprecated legacy pipeline
 - `/breeze:validate-functional-graph` — quality checks after generation
 - `/breeze:generate-spec` — export the graph as a spec doc
+- `/breeze:deprecated-cluster-pipeline` — retired v1 pipeline; do **not** use for new work, kept only for resuming historical runs

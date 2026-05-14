@@ -1,48 +1,59 @@
 ---
-name: generate-functional-from-code
+name: deprecated-cluster-pipeline
 description: >
-  DEPRECATED legacy cluster pipeline. Generates a functional graph
-  (Persona → Outcome → Scenario → Step → Action) from the code graph
-  via a Python multi-pass pipeline (intent extraction → DBSCAN
-  dedup → outcome assignment → scenario generation). Kept for
-  reference and as a fallback for backend-heavy or no-UI repos where
-  running the split pipeline is overkill. For all other cases use the
-  recommended skills instead:
-    - /breeze:generate-functional-from-ui (frontend repos)
-    - /breeze:generate-functional-from-backend (backend repos)
-  Use when: "run legacy cluster pipeline", "generate functional via
-  DBSCAN clusters", or explicit fallback after the split pipeline has
-  been ruled out.
+  DEPRECATED. Old Python multi-pass cluster pipeline that generated a
+  functional graph from the code graph via intent extraction → DBSCAN
+  clustering → outcome assignment → scenario generation. The DBSCAN
+  clustering step produces duplicate scenarios under realistic repo
+  layouts, which is why this skill was retired. Do NOT run unless you
+  are explicitly resuming an in-progress historical run or are
+  consciously reproducing the legacy behaviour for comparison.
+  Replacements: /breeze:generate-functional-from-ui (frontend repos),
+  /breeze:generate-functional-from-backend (backend repos). Should
+  almost never auto-trigger on natural-language requests.
 ---
 
-## ⚠ DEPRECATED — read this first
+## ⚠ DEPRECATED — DO NOT USE FOR NEW WORK
 
-This skill is the **legacy v1 cluster pipeline**. It is superseded
-by the split pipeline:
+This skill is the **retired v1 cluster pipeline**. It is **not
+supported** and is kept in the tree only so that historical runs can
+be resumed and the implementation remains available for reference.
 
-- **`/breeze:generate-functional-from-ui`** — for frontend repos.
+### Why it was deprecated
+
+The Pass 1.5 DBSCAN clustering step duplicates scenarios when intents
+cluster non-deterministically across runs. The cumulative dedup logic
+across batches in Pass 2 doesn't always catch these because the same
+underlying capability shows up under slightly different intent
+phrasings. Net effect: the functional graph ends up with multiple
+near-identical scenarios under slightly-different outcome names, and
+fixing it manually is more work than rerunning the modern skills.
+
+### Use this only if
+
+- You are **resuming an in-progress historical run** that already has
+  cached passes on disk and you want to finish it for archival
+  reasons.
+- You are **consciously reproducing the legacy behaviour** for a
+  bug-replay or comparison investigation.
+
+For **all new functional-graph generation**, use one of:
+
+- **`/breeze:generate-functional-from-ui`** — frontend repos.
   Produces the human-persona side with full JSX coverage, panel
   discovery, API linking, and per-EP verification.
-- **`/breeze:generate-functional-from-backend`** — for backend repos.
+- **`/breeze:generate-functional-from-backend`** — backend repos.
   Discovers REST controllers AND non-HTTP entry points (SQS/Kafka
   consumers, cron workers, WebSocket handlers, webhook receivers)
   and writes System / External System personas with side effects
   captured in `apis[]`.
 
-The split pipeline is more accurate, has stricter per-EP discipline,
-and is the recommended approach for any project that has either a
-frontend repo or a backend repo with non-HTTP entry points. The two
-passes are independent and merge automatically by outcome name in
-the functional graph.
+The two skills are independent and merge automatically by outcome
+name in the functional graph. Together they replace everything this
+deprecated skill used to do — without the cluster duplication.
 
-**Use this legacy skill only when:**
-- The repo has no UI and no message queues / cron / WebSocket
-  handlers — just plain REST controllers — AND
-- You explicitly want a fast batched run with no per-EP review
-
-For everything else, stop and run one of the two recommended skills
-above. The rest of this file is preserved unchanged for reference
-and resume of in-progress runs.
+The rest of this file is preserved unchanged for reference and resume
+of in-progress runs. Don't read it as a guide for new work.
 
 ---
 
@@ -84,8 +95,64 @@ The pipeline uses multiple passes:
 
 ## Guard
 
-Read `.breeze.json`. If missing or incomplete, tell the user to run
-`/breeze:setup-project`. Extract `apiKey` and `projectUuid`.
+Read `.breeze.json`. It must contain `projectUuid` — if it doesn't,
+tell the user to run `/breeze:setup-project` first.
+
+### Ensure the API key is available
+
+This skill calls the Breeze REST upsert endpoint and the
+`breeze-code-ontology-generator` CLI, both of which need an
+`apiKey` (separate from your MCP login).
+
+1. If `.breeze.json` already has `apiKey`, continue.
+2. If `apiKey` is missing, tell the user:
+
+   > This skill needs a Breeze API key for REST upserts and the
+   > ontology-generator CLI. Generate one at:
+   >
+   >   **`<uiBaseUrl>/mcp/generate/key`**
+   >
+   > Then paste it here.
+
+3. Save the pasted key to `.breeze.json` under `apiKey` (no echo back).
+
+### Ensure AWS Bedrock credentials are available
+
+This skill drives the pipeline through AWS Bedrock (Claude Sonnet +
+Haiku for LLM passes, Titan for embeddings). It needs an AWS access
+key / secret pair with Bedrock invoke permissions.
+
+1. If `.breeze.json` already has both `awsAccessKey` and `awsSecretKey`
+   (or the `AWS_ACCESS_KEYID` / `AWS_SECRET_KEY` env vars are set),
+   continue.
+2. If missing, tell the user:
+
+   > This skill calls AWS Bedrock (Sonnet + Haiku + Titan embeddings)
+   > and needs an AWS access key and secret with Bedrock permissions.
+   >
+   > Paste your AWS Access Key ID, then your Secret Access Key.
+   > (If you don't have keys yet, create an IAM user with the
+   > `AmazonBedrockFullAccess` policy and generate keys from the
+   > AWS IAM console.)
+
+3. Save to `.breeze.json`:
+
+   ```json
+   {
+     "awsAccessKey": "<ACCESS_KEY>",
+     "awsSecretKey": "<SECRET_KEY>",
+     "awsRegion": "us-west-2"
+   }
+   ```
+
+   `awsRegion` defaults to `us-west-2` if not specified. Override if
+   your Bedrock models live elsewhere.
+
+**Security:** Never print AWS credentials in output. Store only in
+`.breeze.json` (gitignored). Do not commit.
+
+Then extract `apiKey`, `projectUuid`, `awsAccessKey`, `awsSecretKey`,
+and `awsRegion` for the rest of the run.
 
 The project must have at least one code ontology with clusters. If the
 pipeline reports "No intents extracted" or "Total clusters: 0", the
@@ -107,10 +174,10 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 ```
 
 Where `{apiBase}` is read from `.breeze.json` field `apiBase`
-(defaults to `https://isometric-backend.accionbreeze.com` if not set).
+(read from `.breeze.json` → `breeze.config.json` → `https://isometric-backend.accionbreeze.com` fallback).
 
 **Requirements:**
-- Node.js 22+ must be available (`node --version` to check)
+- Node.js **exactly v22.x** must be available (`node --version` to check). Node 24+ fails because of an ESM-with-TLA incompatibility in the bundled tree-sitter bindings.
 - Python 3.10+ with numpy and scikit-learn (`pip install numpy scikit-learn`)
 - The `--capture-statements` flag ensures method-level statements are
   captured, which the pipeline needs for accurate steps/actions generation
@@ -138,21 +205,17 @@ python3 {SKILL_DIR}/generate.py \
 ```
 
 Where credentials and config are read from `.breeze.json` fields:
-- `awsAccessKey` / `awsSecretKey` — AWS credentials
+- `awsAccessKey` / `awsSecretKey` — AWS credentials (collected
+  on-demand in the Guard above if missing)
 - `awsRegion` — AWS region (defaults to `us-west-2`)
 - `bedrockHaikuModel` — custom Haiku model ID (optional)
 - `bedrockSonnetModel` — custom Sonnet model ID (optional)
 
 Config loading priority: CLI args > `.breeze.json` > env vars (`AWS_ACCESS_KEYID`, `AWS_SECRET_KEY`, `AWS_REGION`) > defaults.
 
-If AWS credentials are missing from `.breeze.json`, ask the user and save them:
-```json
-{
-  "awsAccessKey": "<ACCESS_KEY>",
-  "awsSecretKey": "<SECRET_KEY>",
-  "awsRegion": "us-west-2"
-}
-```
+If you reach this step without AWS credentials (e.g. the user
+cancelled the Guard prompt), stop and re-run the Guard's "Ensure AWS
+Bedrock credentials" step — do not silently fall back.
 
 ### Arguments
 
@@ -160,7 +223,7 @@ If AWS credentials are missing from `.breeze.json`, ask the user and save them:
 |------|-------------|
 | `--project-uuid` | Project UUID (defaults to `.breeze.json`) |
 | `--api-key` | API key (defaults to `.breeze.json`) |
-| `--api-base` | API base URL (defaults to `.breeze.json` or `https://isometric-backend.accionbreeze.com`) |
+| `--api-base` | API base URL (resolves from `.breeze.json` → `breeze.config.json` → `https://isometric-backend.accionbreeze.com`) |
 | `--aws-access-key` | AWS access key for Bedrock (defaults to `.breeze.json` or env) |
 | `--aws-secret-key` | AWS secret key for Bedrock (defaults to `.breeze.json` or env) |
 | `--aws-region` | AWS region for Bedrock (defaults to `.breeze.json` field `awsRegion`, env `AWS_REGION`, or `us-west-2`) |
@@ -178,16 +241,16 @@ If AWS credentials are missing from `.breeze.json`, ask the user and save them:
 
 ```bash
 # Standard run (auto-approve for non-interactive use)
-/breeze:generate-functional-from-code
+/breeze:deprecated-cluster-pipeline
 
 # With custom DBSCAN threshold (looser clustering)
-/breeze:generate-functional-from-code --eps 0.30
+/breeze:deprecated-cluster-pipeline --eps 0.30
 
 # Resume from Pass 3 (skip intent extraction and outcome assignment)
-/breeze:generate-functional-from-code --resume-from 3
+/breeze:deprecated-cluster-pipeline --resume-from 3
 
 # Test with a single cluster first
-/breeze:generate-functional-from-code --cluster 45
+/breeze:deprecated-cluster-pipeline --cluster 45
 ```
 
 ## What Happens

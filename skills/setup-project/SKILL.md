@@ -1,37 +1,48 @@
 ---
 name: setup-project
 description: >
-  Initialize or validate the Breeze workspace. Sets up .breeze.json
-  with API key and project UUID, links to a Breeze project, and
-  checks ontology readiness. MCP access uses Keycloak OAuth (handled
-  automatically by Claude Code on the first MCP tool call); the API
-  key in .breeze.json is used by non-MCP consumers — the
-  ontology-generator CLI and the REST upsert path. Does NOT
-  upload repos or documents — use /breeze:onboard-repository for
-  code uploads, and /breeze:analyze-functional or
-  /breeze:visual-to-text for document and design ingestion. Use
-  when: first time setup, "init breeze", "setup breeze", or when
-  any Breeze tool fails with authorization errors.
+  Initialize or validate the Breeze workspace. Links .breeze.json to a
+  Breeze project (UUID) and checks ontology readiness. MCP access uses
+  Keycloak OAuth (handled automatically by Claude Code on the first MCP
+  tool call), so no API key is collected here — skills that talk to
+  non-MCP consumers (the ontology-generator CLI, the deprecated REST
+  upsert path) prompt for the API key on-demand. Does NOT upload repos
+  or documents — use /breeze:onboard-repository for code uploads, and
+  /breeze:analyze-functional or /breeze:visual-to-text for document
+  and design ingestion. Use when: first time setup, "init breeze",
+  "setup breeze", or when any Breeze tool fails with authorization
+  errors.
 ---
 
 ## Scope
 
 This skill is responsible for **workspace bootstrap only**:
 
-- API key setup (used by the ontology-generator CLI and REST upsert — MCP itself uses Keycloak OAuth)
 - Project linking (select existing or create new)
-- Optional AWS credentials for the deprecated cluster pipeline
 - Ontology readiness check
 - Pointing the user at the right next-step skill based on what they
   want to do
 
-MCP access is authenticated via Keycloak OAuth — Claude Code handles
-the sign-in automatically on the first MCP tool call and does **not**
-use `apiKey` from `.breeze.json`. The stored `apiKey` is still needed
-by non-MCP consumers: the `breeze-code-ontology-generator` CLI, the
-REST `/functional-graph/upsert` path used by the deprecated
-`generate-functional-from-code` subprocess, and any other direct REST
-calls.
+**No API key is collected here.** MCP access is authenticated via
+Keycloak OAuth — Claude Code handles the sign-in automatically on the
+first MCP tool call and does **not** read `apiKey` from `.breeze.json`.
+Skills that hit the non-MCP REST surface prompt for the key locally,
+at the point of need, with the generation URL:
+
+- `/breeze:onboard-repository` — only if the user picks **automatic
+  upload** mode. The **manual upload** mode generates ndjson locally
+  and the user uploads it via the Breeze UI at
+  `<uiBaseUrl>/code-ontology/<projectUuid>` — no key required.
+- `/breeze:deprecated-cluster-pipeline` (retired) — needs the key for
+  its REST upsert path if resuming a historical run.
+
+Keeping the prompt out of bootstrap means MCP-only and manual-upload
+workflows never have to paste a secret.
+
+AWS Bedrock credentials needed by `/breeze:deprecated-cluster-pipeline`
+are likewise collected on-demand by that skill and are not part of
+this bootstrap. (You should almost never need to run that skill — see
+its own SKILL.md for the deprecation rationale.)
 
 This skill does **NOT** upload repositories or documents. That
 responsibility now lives in dedicated skills:
@@ -43,39 +54,44 @@ responsibility now lives in dedicated skills:
 | Convert a UI design visual into user stories | `/breeze:visual-to-text` |
 
 If the user asks for any of those during setup, finish the bootstrap
-steps first and then point them at the right skill in Step 4.
+steps first and then point them at the right skill in Step 3.
 
 ## Prerequisites
 
 Read `.breeze.json` from the project root. If it exists and contains
-both `apiKey` and `projectUuid`, skip to **Step 3 — Ontology Status
-Check**.
+`projectUuid`, skip to **Step 2 — Ontology Status Check**.
 
-## Step 1 — API Key Setup
+If the file doesn't exist yet, create it with an empty object (`{}`)
+so subsequent steps can append fields. `apiKey` is intentionally not
+required at this stage — it's collected on-demand by the skills that
+actually use it.
 
-The API key is **not** used for MCP tool calls (those authenticate via
-Keycloak OAuth automatically). It is required by the
-ontology-generator CLI (`--user-api-key`) and by the REST upsert path
-used by the deprecated cluster pipeline.
+### URL resolution (shared across all Breeze skills)
 
-If `apiKey` is missing from `.breeze.json`:
+Breeze service URLs come from `breeze.config.json` at the plugin
+root. The fields used by the skills are:
 
-1. Ask the user to generate an API key at:
-   https://ai.accionbreeze.com/mcp/generate/key
-2. Prompt: "Paste your Breeze API key."
-3. Save the key to `.breeze.json`
+- `uiBaseUrl` — the Breeze web UI base (default
+  `https://ai.accionbreeze.com`). Used for API-key generation, the
+  manual code-graph upload page, and the ontology console.
+- `apiBase` — the Breeze REST backend base (default
+  `https://isometric-backend.accionbreeze.com`). Used by the
+  ontology-generator CLI and the deprecated cluster pipeline.
 
-Also set the `apiBase` field (defaults to `https://isometric-backend.accionbreeze.com`):
+**Resolution order** (each skill follows this when it needs a URL):
 
-    {
-      "apiKey": "<USER_API_KEY>",
-      "apiBase": "https://isometric-backend.accionbreeze.com"
-    }
+1. Field on `.breeze.json` (per-project override, if set).
+2. Field on `breeze.config.json` at the plugin root (canonical default).
+3. Built-in fallback string in the SKILL.md (last-resort hardcoded
+   value; matches whatever was in `breeze.config.json` when the plugin
+   was authored).
 
-**Security:** Never print API keys in output. Store only in
-`.breeze.json`. Ensure `.breeze.json` is in `.gitignore`.
+To repoint every skill at a different Breeze deployment, you only
+need to change `breeze.config.json` (plugin-wide) or set
+`uiBaseUrl` / `apiBase` in `.breeze.json` (per-project). Do **not**
+edit URLs inside individual SKILL.md files.
 
-## Step 2 — Project Linking
+## Step 1 — Project Linking
 
 If `projectUuid` is missing from `.breeze.json`:
 
@@ -97,33 +113,10 @@ Ask: "Would you like to:
 
 Confirm: "Project linked successfully."
 
-## Step 2b — AWS Credentials (Optional)
+## Step 2 — Ontology Status Check
 
-If `awsAccessKey` and `awsSecretKey` are missing from `.breeze.json`:
-
-Ask: "Do you have AWS credentials for Bedrock? (needed for code-to-functional graph generation)"
-
-If yes:
-1. Prompt for AWS Access Key ID and AWS Secret Access Key
-2. Save to `.breeze.json`:
-
-```json
-{
-  "awsAccessKey": "<ACCESS_KEY>",
-  "awsSecretKey": "<SECRET_KEY>"
-}
-```
-
-**Security:** Never print AWS credentials in output. Store only in
-`.breeze.json`.
-
-If no, skip — these can be added later when running
-`/breeze:generate-functional-from-code`.
-
-## Step 3 — Ontology Status Check
-
-With `apiKey` and `projectUuid` in hand, check what the project
-already contains so the user knows where to go next.
+With `projectUuid` in hand, check what the project already contains
+so the user knows where to go next.
 
 1. Call `Call_Get_Project_Details_` (or `Get_complete_functional_graph`
    via the Breeze MCP) to see what's already indexed.
@@ -137,9 +130,9 @@ already contains so the user knows where to go next.
 **Do NOT attempt to upload anything from this skill.** Just report
 what's there.
 
-## Step 4 — Next-step guidance
+## Step 3 — Next-step guidance
 
-Based on Step 3's findings, point the user at the right follow-up.
+Based on Step 2's findings, point the user at the right follow-up.
 
 ### Brownfield project (code exists, graph is empty)
 
@@ -156,7 +149,8 @@ tell them explicitly:
 >    <repo-path>`. Run this once per repo in your system — typically
 >    one frontend plus one or more backends. It wraps the Breeze code
 >    ontology generator with the required flags (including
->    `--capture-statements`) and verifies Node 22+ before running.
+>    `--capture-statements`) and verifies Node 22 (exactly v22.x —
+>    not 24+) before running.
 > 2. **Generate the functional graph from the UI repo** with
 >    `/breeze:generate-functional-from-ui <frontend-path>` — produces
 >    the User-persona side with full JSX coverage and API linking.

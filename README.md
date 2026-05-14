@@ -49,12 +49,27 @@ You can confirm everything loaded by running:
 ```
 
 This walks you through:
-- Setting up your API key (generated at https://ai.accionbreeze.com/mcp/generate/key)
-- Linking to an existing project or creating a new one
+- Linking to an existing Breeze project or creating a new one
 - Checking ontology status
-- Optionally uploading your repository or documents
+- Pointing you at the right follow-up skill (onboard-repository,
+  generate-functional-from-*, etc.)
 
-Your credentials are saved to `.breeze.json` in the project root (gitignored).
+No API key is required at this stage — MCP-based skills authenticate
+via Keycloak OAuth automatically. `/breeze:onboard-repository` only
+needs an API key if you pick its **automatic upload** mode; the
+**manual upload** mode generates ndjson locally and you upload via
+the Breeze UI at `<uiBaseUrl>/code-ontology/<projectUuid>`. The
+retired `/breeze:deprecated-cluster-pipeline` still needs a key if
+you're resuming a historical run. In all cases the relevant skill
+prompts on-demand and points you at `<uiBaseUrl>/mcp/generate/key`
+if you don't have a key yet.
+
+`<uiBaseUrl>` resolves from `breeze.config.json` at the plugin root
+(default `https://ai.accionbreeze.com`). Override per-project by
+setting `uiBaseUrl` in `.breeze.json`.
+
+Your project UUID (and, once collected, your API key) is saved to
+`.breeze.json` in the project root (gitignored).
 
 ### Updating the plugin
 
@@ -73,8 +88,8 @@ Then **restart Claude Code** again so the updated skills/hooks/MCP definitions a
 
 | Skill | Command | Description |
 |-------|---------|-------------|
-| **Setup Project** | `/breeze:setup-project` | Initialize the Breeze workspace — API key, project link, ontology status check, next-step guidance. Does **not** upload repos or documents. |
-| **Onboard Repository** | `/breeze:onboard-repository [repo-path]` | Upload a source repository into the Breeze code graph. Wraps `breeze-code-ontology-generator` with `--capture-statements`, verifies Node.js 22+, and resolves the target repo from an argument or the current directory. Run once per repo (frontend + each backend). |
+| **Setup Project** | `/breeze:setup-project` | Initialize the Breeze workspace — project link, ontology status check, next-step guidance. No API key collected here (MCP uses Keycloak OAuth; skills that need a key prompt on-demand). Does **not** upload repos or documents. |
+| **Onboard Repository** | `/breeze:onboard-repository [repo-path]` | Get a source repository into the Breeze code graph. Wraps `breeze-code-ontology-generator` with `--capture-statements`, verifies Node.js is **exactly v22.x** (Node 24+ fails silently due to a tree-sitter ESM/TLA issue), and resolves the target repo from an argument or the current directory. Supports two modes: automatic (CLI streams to backend with an API key) or manual (CLI writes ndjson locally and you upload via the Breeze UI). API key is optional. Run once per repo (frontend + each backend). |
 
 ### Search & analysis
 
@@ -93,7 +108,7 @@ The recommended approach is the **split pipeline** — one pass for the UI and o
 |-------|---------|-------------|
 | **Generate Functional from UI** | `/breeze:generate-functional-from-ui [repo-path]` | **Recommended for frontend repos.** Reads the UI codebase from the filesystem (Glob/Read/Grep), discovers routes + non-routed panels, and generates the **User-persona** side of the functional graph with full JSX coverage validation and API endpoints captured in `action.apis[]`. Persona discovery and panel discovery are both hard gates with user confirmation. |
 | **Generate Functional from Backend** | `/breeze:generate-functional-from-backend [repo-path]` | **Recommended for backend repos.** Detects the framework (LoopBack/NestJS/Express/Fastify/Spring/FastAPI/etc.) and discovers ALL entry-point types: REST routes, SQS/Kafka/RabbitMQ consumers and producers, cron workers, WebSocket handlers, webhook receivers, and internal service-to-service routes. Writes **System** / **External System** persona scenarios with side effects captured in `apis[]` (REST/GraphQL/gRPC/WebSocket/Event), plus a per-repo handoff log used for cross-repo producer/consumer correlation. Run once per backend repo. |
-| **Generate Functional from Code** *(deprecated)* | `/breeze:generate-functional-from-code` | **Legacy cluster pipeline.** Kept for reference and as a fallback for repos with no UI and no message queues / cron / WebSocket handlers. Uses a Python multi-pass pipeline (intent extraction → DBSCAN dedup → outcome assignment → scenario generation) driven by the code graph. For new work, use the two skills above instead. |
+| **Deprecated Cluster Pipeline** *(do not use)* | `/breeze:deprecated-cluster-pipeline` | **Retired v1 cluster pipeline.** Kept only so historical in-progress runs can be resumed. The DBSCAN clustering step duplicates scenarios under realistic repo layouts, which is why this skill was retired. For all new work, use `/breeze:generate-functional-from-ui` and `/breeze:generate-functional-from-backend` above. |
 
 Both new skills resolve their target repo in this order: explicit path arg → `targetRepos.frontend` / `targetRepos.backend.<name>` in `.breeze.json` → current working directory autodetect → prompt the user. Resolved paths are persisted to `.breeze.json` so re-runs do not re-prompt. Checkpoint files (`entrypoints.json`, `entrypoints_<repo>.json`, `backend_log_<repo>.json`) live next to `.breeze.json`, not inside the target repo.
 
@@ -117,8 +132,8 @@ Both new skills resolve their target repo in this order: explicit path arg → `
 
 ```
 First-time onboarding of a brownfield full-stack project:
-  /breeze:setup-project                               # API key + project link
-  /breeze:onboard-repository <frontend repo>          # index code graph (once per repo)
+  /breeze:setup-project                               # project link (no API key needed yet)
+  /breeze:onboard-repository <frontend repo>          # offers automatic (API key) or manual (UI upload) mode; indexes code graph (once per repo)
   /breeze:onboard-repository <backend repo 1>
   /breeze:onboard-repository <backend repo 2>
   ...
@@ -168,7 +183,9 @@ claude --plugin-dir ../breeze-claude-plugin
 
 ## Notes
 
-- `.breeze.json` contains your API key (used by the ontology-generator CLI and the REST upsert path) — add it to `.gitignore`
-- The Breeze MCP server uses Keycloak OAuth; Claude Code handles sign-in automatically on the first MCP tool call and does not read `apiKey` from `.breeze.json`
-- The **Design** skill requires a Figma MCP server to be configured separately
-- All skills except `init` require a valid `.breeze.json` with `apiKey` and `projectUuid`
+- `.breeze.json` may contain a Breeze API key once you've used a skill that needs one (currently `/breeze:onboard-repository`, and the retired `/breeze:deprecated-cluster-pipeline` if you're resuming a historical run). Add `.breeze.json` to `.gitignore`.
+- The Breeze MCP server uses Keycloak OAuth; Claude Code handles sign-in automatically on the first MCP tool call and does **not** read `apiKey` from `.breeze.json`. MCP-only workflows never need an API key.
+- API keys are collected **on-demand** by the skills that actually use them, with a prompt pointing at `<uiBaseUrl>/mcp/generate/key` (default `https://ai.accionbreeze.com/mcp/generate/key`; see `breeze.config.json`). No upfront paste during `setup-project`.
+- All Breeze service URLs live in `breeze.config.json` at the plugin root (`uiBaseUrl`, `apiBase`). To repoint every skill at a different Breeze deployment, edit that single file — or override `uiBaseUrl` / `apiBase` per-project in `.breeze.json`.
+- The **Design** skill requires a Figma MCP server to be configured separately.
+- All skills except `init` require a valid `.breeze.json` with at least `projectUuid`.

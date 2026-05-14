@@ -32,14 +32,14 @@ if [ ! -f ".breeze.json" ]; then
   exit 2
 fi
 
-if ! grep -q '"apiKey"' .breeze.json; then
-  echo "BLOCKED: .breeze.json is missing 'apiKey'. Run /breeze:init to complete setup." >&2
-  exit 2
-fi
-
 if ! grep -q '"projectUuid"' .breeze.json; then
   echo "BLOCKED: .breeze.json is missing 'projectUuid'. Run /breeze:init to link a project." >&2
   exit 2
 fi
+
+# Note: apiKey is intentionally NOT enforced here. MCP-based skills authenticate
+# via Keycloak OAuth. The few skills that still need an apiKey (onboard-repository,
+# and the retired deprecated-cluster-pipeline) prompt for it on-demand with the
+# generation URL.
 
 exit 0

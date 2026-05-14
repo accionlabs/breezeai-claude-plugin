@@ -1,14 +1,20 @@
 ---
 name: onboard-repository
 description: >
-  Upload a source repository into the Breeze code graph for the
-  current project. Wraps the `breeze-code-ontology-generator`
-  CLI with `--capture-statements` so method-level statements are
-  available for downstream skills (generate-functional-from-ui,
-  generate-functional-from-backend, generate-code, search). Verifies
-  Node.js 22+ before running and resolves the target repo from a path
-  argument or the current directory. Run once per repo. Re-run to
-  re-index after large changes.
+  Get a source repository into the Breeze code graph for the current
+  project. Wraps the `breeze-code-ontology-generator` CLI with
+  `--capture-statements` so method-level statements are available
+  for downstream skills (generate-functional-from-ui,
+  generate-functional-from-backend, generate-code, search). Supports
+  two upload modes: automatic (CLI streams to the backend, needs an
+  API key) or manual (CLI writes ndjson locally and the user uploads
+  via the Breeze UI at /code-ontology/<projectUuid>). API key is
+  optional — collected on-demand only if the user picks automatic
+  mode. Verifies Node.js is exactly v22.x before running (Node 24
+  fails silently due to a tree-sitter native-binding + ESM-TLA
+  incompatibility) and resolves the target
+  repo from a path argument or the current directory. Run once per
+  repo. Re-run to re-index after large changes.
   Use when: "onboard repo", "upload repository", "index repo into
   breeze", "add repo to project", "ingest codebase", "register code
   graph", or whenever a Breeze skill reports the project has no code
@@ -25,7 +31,7 @@ downstream Breeze skill reads from:
 
 - `/breeze:generate-functional-from-ui`
 - `/breeze:generate-functional-from-backend`
-- `/breeze:generate-functional-from-code` *(deprecated)*
+- `/breeze:deprecated-cluster-pipeline` *(retired — do not use)*
 - `/breeze:generate-code`
 - `/breeze:search`
 - `/breeze:analyze-functional`
@@ -44,43 +50,106 @@ structured user stories that feed into the same flow).
 ## Guard
 
 Read `.breeze.json` from the **plugin working directory**. Required
-fields:
+field:
 
-- `apiKey`
 - `projectUuid`
-- `apiBase` (defaults to `https://isometric-backend.accionbreeze.com`)
 
-If any are missing, tell the user to run `/breeze:setup-project`
-first and stop.
+If `projectUuid` is missing, tell the user to run `/breeze:setup-project`
+first and stop. `apiKey` is **not** required here — it's collected
+on-demand in Step 1 below, because the ontology-generator CLI is one
+of the few consumers that actually needs it.
 
-## Step 1 — Verify Node.js 22+
+URLs (`apiBase`, `uiBaseUrl`) come from `breeze.config.json` at the
+plugin root, overridable per-project via `.breeze.json`. See
+`/breeze:setup-project` → "URL resolution" for the full rule.
+Throughout this skill, `<apiBase>` and `<uiBaseUrl>` are placeholders
+the LLM substitutes at runtime — don't hardcode the literal hosts.
 
-The `breeze-code-ontology-generator` CLI requires Node.js 22 or
-later. Check the installed version:
+## Step 1 — Pick the upload mode
+
+This skill runs the `breeze-code-ontology-generator` CLI to parse the
+repo into an ndjson tree. There are **two ways** to get that tree
+into the Breeze backend, and the user picks which one based on
+whether they have an API key handy:
+
+### Mode A — Automatic upload (CLI streams to backend)
+
+Requires an `apiKey` in `.breeze.json`. The CLI does not authenticate
+via Keycloak OAuth like the MCP tools — it needs an explicit key.
+
+1. Read `.breeze.json`. If `apiKey` is present → set
+   `uploadMode = "automatic"` and continue to Step 2.
+2. If `apiKey` is missing, prompt the user with **both options**:
+
+   > This skill can either upload your code graph automatically (needs
+   > a Breeze API key), or generate the ndjson locally so you can
+   > upload it manually via the Breeze UI. Pick one:
+   >
+   > **A. Paste API key now (recommended for repeat onboardings)** —
+   > generate one at **`<uiBaseUrl>/mcp/generate/key`** and paste it.
+   > I'll save it to `.breeze.json` for next time.
+   >
+   > **B. Skip — I'll upload manually via the UI** — I'll just
+   > generate the ndjson locally in `./breezeai/`, and at the end
+   > I'll give you the upload URL.
+
+3. Based on the choice:
+   - **A:** save the pasted key to `.breeze.json` under `apiKey` (no
+     echo back, "API key saved" only) and set
+     `uploadMode = "automatic"`.
+   - **B:** set `uploadMode = "manual"` and continue without writing
+     anything to `.breeze.json`.
+
+### Mode B — Manual upload (UI)
+
+When `uploadMode = "manual"`, this skill will run the CLI **without**
+`--upload`, producing only the local ndjson tree under `./breezeai/`.
+At the end (Step 6), it points the user at the Breeze UI to drop the
+ndjson in:
+
+```
+<uiBaseUrl>/code-ontology/<projectUuid>?page=1
+```
+
+**Security (Mode A only):** Never print the key in output or commit
+it. Make sure `.breeze.json` is in `.gitignore`.
+
+## Step 2 — Verify Node.js is exactly v22.x
+
+The `breeze-code-ontology-generator` CLI requires **Node.js 22
+specifically — not 22+**. Node 24 (and any other newer major) fails
+because the CLI eagerly `require()`s several tree-sitter language
+bindings that became ESM with top-level await; the result under Node
+24 is either a silent zero-output exit or a thrown
+`ERR_REQUIRE_ASYNC_MODULE`. Node 20 and older fail earlier with
+syntax/ESM errors. Only Node 22 is known-good.
 
 ```bash
 node --version
 ```
 
-- If the output is `v22.x.x` or higher → continue.
-- If the output is lower (e.g. `v20.x.x`, `v18.x.x`) → STOP and tell
-  the user how to upgrade. Do not attempt to run the upload — it will
-  fail with cryptic ESM/syntax errors. Suggested upgrade paths:
+- If the output is `v22.x.x` → continue.
+- If the output is **any other major** (e.g. `v18.x.x`, `v20.x.x`,
+  `v23.x.x`, `v24.x.x`) → **STOP**. Do not attempt to run the upload
+  — it will fail with cryptic ESM / native-binding errors or, worse,
+  exit silently with no output. Switch to Node 22 first. Suggested
+  paths:
   - **nvm**: `nvm install 22 && nvm use 22`
   - **fnm**: `fnm install 22 && fnm use 22`
-  - **volta**: `volta install node@22`
-  - **System install**: download from https://nodejs.org/
-- If `node` is not installed at all → STOP and ask the user to install
-  Node.js 22+ before continuing.
+  - **volta**: `volta install node@22 && volta pin node@22`
+  - **System install**: download the Node 22 LTS line from
+    https://nodejs.org/
+- If `node` is not installed at all → STOP and ask the user to
+  install Node 22 before continuing.
 
-After the user upgrades, ask them to confirm and re-run the skill.
+After the user switches, ask them to confirm `node --version` shows
+`v22.x.x` and re-run the skill.
 
-Node 22+ is the only runtime this skill needs. (Python with numpy /
-scikit-learn is only required by the deprecated
-`/breeze:generate-functional-from-code` cluster pipeline — not by
-this skill.)
+Node 22 is the only runtime this skill needs. (Python with numpy /
+scikit-learn is only required by the retired
+`/breeze:deprecated-cluster-pipeline` — not by this skill.)
 
-## Step 2 — Resolve the target repo
+## Step 3 — Resolve the target repo
 
 Resolve the **absolute path of the repo to upload** in this order:
 
@@ -112,7 +181,7 @@ happen** and ask them to confirm:
 
 Wait for confirmation before running the command.
 
-## Step 3 — Suggest related repos (brownfield onboarding)
+## Step 4 — Suggest related repos (brownfield onboarding)
 
 Brownfield projects almost always have **more than one repo** — a
 frontend plus one or more backends, or a set of microservices. After
@@ -127,7 +196,11 @@ the user confirms the first repo, gently surface this:
 
 This is informational — do not block on it. Continue with the upload.
 
-## Step 4 — Run the generator
+## Step 5 — Run the generator
+
+The exact command depends on `uploadMode` from Step 1.
+
+### Mode A — `uploadMode = "automatic"`
 
 Read `apiKey`, `projectUuid`, and `apiBase` from `.breeze.json`, then
 run:
@@ -143,35 +216,54 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
   --baseurl <apiBase>
 ```
 
+### Mode B — `uploadMode = "manual"`
+
+Omit the `--upload`, `--user-api-key`, `--uuid`, and `--baseurl`
+flags. The CLI then only parses the repo and writes the ndjson tree
+to `./breezeai/` — no network call:
+
+```bash
+npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+  --repo <resolved-repo-path> \
+  --out breezeai \
+  --capture-statements
+```
+
 **Flag rationale:**
 
-- `--repo` — absolute path resolved in Step 2
+- `--repo` — absolute path resolved in Step 3
 - `--out breezeai` — local output directory for the intermediate JSON
-  tree (kept for debugging)
-- `--upload` — sends the parsed graph to the Breeze backend in
-  addition to writing it locally
-- `--capture-statements` — **mandatory**. Without this flag, the
-  generator only captures method signatures, not their bodies.
-  Downstream skills (especially `generate-functional-from-backend`)
-  need statement-level data to extract route decorators, queue env
-  vars, cron expressions, side effects, and call chains. Re-uploading
-  without this flag silently degrades the graph.
-- `--user-api-key`, `--uuid`, `--baseurl` — credentials and project
-  link from `.breeze.json`
+  tree (always written; this is what the user uploads in Mode B)
+- `--upload` *(Mode A only)* — streams the parsed graph to the Breeze
+  backend in addition to writing it locally
+- `--capture-statements` — **mandatory in both modes**. Without this
+  flag, the generator only captures method signatures, not their
+  bodies. Downstream skills (especially
+  `generate-functional-from-backend`) need statement-level data to
+  extract route decorators, queue env vars, cron expressions, side
+  effects, and call chains. Re-uploading without this flag silently
+  degrades the graph.
+- `--user-api-key`, `--uuid`, `--baseurl` *(Mode A only)* —
+  credentials and project link from `.breeze.json`
 
 **Run it foregrounded so the user can see progress.** Large repos
 (100K+ LOC) can take 5–15 minutes. If the command fails, surface the
 error verbatim — don't paraphrase. Common failure modes:
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `SyntaxError: Unexpected token` from npx | Node < 22 | Re-check Step 1 and upgrade |
-| `401 Unauthorized` | Wrong / expired API key | Re-run `/breeze:setup-project` to refresh |
-| `404 Project not found` | Wrong projectUuid in `.breeze.json` | Re-run `/breeze:setup-project` and re-link |
-| `ECONNREFUSED` / DNS error on baseurl | Wrong `apiBase` | Check the value in `.breeze.json` |
-| Hangs at "Uploading…" for many minutes | Large repo, slow link | Wait — uploads are streamed; cancel only if 30+ min with no progress |
+| Symptom | Likely cause | Fix | Mode |
+|---|---|---|---|
+| `SyntaxError: Unexpected token` from npx | Node < 22 | Switch to Node 22.x (Step 2) | both |
+| Silent exit with no output beyond `npm warn …` lines | Node 24 or newer — tree-sitter native bindings can't be loaded via `require()` because the bindings are ESM with top-level await | Switch to Node 22.x (Step 2). Don't trust a "completed with exit 0" if no `./breezeai/` directory was created | both |
+| `Error [ERR_REQUIRE_ASYNC_MODULE]: ... tree-sitter-c-sharp/bindings/node/index.js` | Same root cause — bindings use top-level await; surfaces visibly on some Node versions | Switch to Node 22.x | both |
+| `401 Unauthorized` | Wrong / expired API key | Delete the `apiKey` field from `.breeze.json` and re-run this skill — Step 1 will prompt again (or pick Mode B) | A |
+| `404 Project not found` | Wrong projectUuid in `.breeze.json` | Re-run `/breeze:setup-project` and re-link | A |
+| `ECONNREFUSED` / DNS error on baseurl | Wrong `apiBase` | Check the value in `.breeze.json` | A |
+| Hangs at "Uploading…" for many minutes | Large repo, slow link | Wait — uploads are streamed; cancel only if 30+ min with no progress | A |
+| Parser errors during walk | Unsupported language / encoding | Surface verbatim; the ndjson written so far still uploads in Mode B | both |
 
-## Step 5 — Verify the upload landed
+## Step 6 — Finalize (mode-dependent)
+
+### Mode A — verify the upload landed
 
 After the command exits successfully, run a quick smoke test against
 the code graph to confirm the repo is queryable:
@@ -185,10 +277,36 @@ empty after a successful upload, ask the user to wait ~30 seconds
 for indexing and try again — the upload returns when bytes land,
 indexing finishes shortly after.
 
-## Step 6 — Tell the user what to do next
+### Mode B — hand off the ndjson for manual upload
 
-After a successful upload, present a clear next-step menu based on
-what kind of repo was just onboarded:
+The CLI has finished writing `./breezeai/` but the backend doesn't
+have the data yet. Tell the user:
+
+> ✅ ndjson generated under `./breezeai/`. To finish onboarding,
+> upload it via the Breeze UI:
+>
+>   **`<uiBaseUrl>/code-ontology/<projectUuid>?page=1`**
+>
+> Drop the contents of `./breezeai/` into the upload area on that
+> page. Until you do this, downstream skills like
+> `/breeze:generate-functional-from-ui` and `/breeze:search` will
+> report "no code ontology" because the graph is still empty.
+
+Substitute the actual `uiBaseUrl` (from `.breeze.json` → `breeze.config.json`
+→ `https://ai.accionbreeze.com`) and `projectUuid` (from
+`.breeze.json`) into the URL before showing it — don't print the
+placeholders verbatim.
+
+After the user confirms they've uploaded, optionally run the same
+`Code_Graph_Search` smoke test as Mode A to confirm the manual
+upload landed.
+
+## Step 7 — Tell the user what to do next
+
+Present a clear next-step menu based on what kind of repo was just
+onboarded. **In Mode B, gate this on the user having completed the
+manual UI upload** — none of the downstream skills work until the
+graph is populated.
 
 > ✅ Repo `<name>` is now indexed in Breeze project `<projectUuid>`.
 >
@@ -233,8 +351,9 @@ If the user has a multi-repo system, suggest the recommended order:
 
 ## See also
 
-- `/breeze:setup-project` — must be run first to create
-  `.breeze.json` and link the project
+- `/breeze:setup-project` — must be run first to create `.breeze.json`
+  and link a `projectUuid`. The API key is **not** collected there
+  any more; this skill prompts for it in Step 1 when needed.
 - `/breeze:generate-functional-from-ui` — next step after onboarding
   a frontend repo
 - `/breeze:generate-functional-from-backend` — next step after

@@ -1536,7 +1536,7 @@ def main():
             print(f"    --user-api-key {api_key} \\")
             print(f"    --uuid {project_uuid} \\")
             print(f"    --baseurl {args.api_base}")
-            print(f"\nRequires Node.js 22+. Once uploaded, re-run this script.")
+            print(f"\nRequires Node.js exactly v22.x (Node 24+ fails silently due to tree-sitter ESM/TLA). Once uploaded, re-run this script.")
             return
 
         # Cache Pass 1 results

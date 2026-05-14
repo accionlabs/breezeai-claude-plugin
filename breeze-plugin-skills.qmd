@@ -30,9 +30,9 @@ breeze-plugin/
     │   └── SKILL.md                         ← Skill 4: Analyze Architecture
     ├── analyze-design/
     │   └── SKILL.md                         ← Skill 5: Analyze Design (Figma)
-    ├── generate-functional-from-code/
-    │   ├── SKILL.md                         ← Skill 6: Generate Functional Graph from Code
-    │   └── generate.py                      ← Three-pass pipeline script
+    ├── deprecated-cluster-pipeline/
+    │   ├── SKILL.md                         ← (retired) v1 cluster pipeline — do not use
+    │   └── generate.py                      ← Three-pass pipeline script (kept for resume of historical runs)
     ├── generate-code/
     │   └── SKILL.md                         ← Skill 7: Generate Code & Tests
     ├── generate-spec/
@@ -108,44 +108,28 @@ breeze-plugin/
 ---
 name: init
 description: >
-  Initialize or validate the Breeze workspace. Sets up .breeze.json
-  with API key and project UUID, checks ontology readiness, and
-  optionally uploads repo or documents. Use when: first time setup,
-  "init breeze", "setup breeze", or when any Breeze tool fails with
+  Initialize or validate the Breeze workspace. Links .breeze.json to a
+  Breeze project (UUID), checks ontology readiness, and optionally
+  uploads repo or documents. No API key is collected here — skills
+  that need one prompt on-demand. Use when: first time setup, "init
+  breeze", "setup breeze", or when any Breeze tool fails with
   authorization errors.
 ---
 
 ## Prerequisites
 
 Read `.breeze.json` from the project root. If it exists and contains
-both `apiKey` and `projectUuid`, skip to **Step 3 — Ontology Status
-Check**.
+`projectUuid`, skip to **Step 2 — Ontology Status Check**.
 
 Authentication note: MCP tool calls authenticate via Keycloak OAuth —
 Claude Code handles the sign-in automatically on the first MCP call
-and does not read `apiKey` from `.breeze.json`. The stored `apiKey`
-is used by non-MCP consumers (the ontology-generator CLI and the
-REST upsert path).
+and does **not** read `apiKey` from `.breeze.json`. The few skills
+that talk to non-MCP consumers (the ontology-generator CLI invoked
+by `onboard-repository`, the REST upsert path used by the retired
+`deprecated-cluster-pipeline`) prompt for the API key on-demand
+with the generation URL — so this init step never asks for it.
 
-## Step 1 — API Key Setup
-
-If `apiKey` is missing from `.breeze.json`:
-
-1. Ask the user to generate an API key at:
-   https://ai.accionbreeze.com/mcp/generate/key
-2. Prompt: "Paste your Breeze API key."
-3. Save the key to `.breeze.json`
-
-Example `.breeze.json` after this step:
-
-    {
-      "apiKey": "<USER_API_KEY>"
-    }
-
-**Security:** Never print API keys in output. Store only in
-`.breeze.json`. Ensure `.breeze.json` is in `.gitignore`.
-
-## Step 2 — Project Linking
+## Step 1 — Project Linking
 
 If `projectUuid` is missing from `.breeze.json`:
 
@@ -167,7 +151,7 @@ Ask: "Would you like to:
 
 Confirm: "Project linked successfully."
 
-## Step 3 — Ontology Status Check
+## Step 2 — Ontology Status Check
 
 Call `Call_Get_Project_Details_` with `uuid`.
 Inspect the response for these status fields:
@@ -188,7 +172,7 @@ Inspect the response for these status fields:
 - `funcOntologyStatus`: none | inprogress | done | error
 - `arcOntologyStatus`: none | inprogress | done | error
 
-## Step 4 — Report Status & Recommend Next Steps
+## Step 3 — Report Status & Recommend Next Steps
 
 Based on the status fields, report ONE of these:
 
@@ -202,7 +186,7 @@ once complete."
 
 **fileGraphStatus = active AND funcOntologyStatus = none:**
 "Repository graph ready. Generate ontology at:
-https://ai.accionbreeze.com/ontology/{projectUuid}/functional"
+<uiBaseUrl>/ontology/{projectUuid}/functional"
 
 **Any ontology status = inprogress:**
 "Ontology generation is currently in progress."
@@ -210,7 +194,18 @@ https://ai.accionbreeze.com/ontology/{projectUuid}/functional"
 **funcOntologyStatus = done:**
 "Ontology is ready for queries."
 
-## Step 5 — Artifact Upload (if user chooses)
+## Step 4 — Artifact Upload (if user chooses)
+
+These commands take a `--user-api-key` flag. If `.breeze.json`
+doesn't have `apiKey` yet, prompt for it first:
+
+> Generate at **`<uiBaseUrl>/mcp/generate/key`** and paste here.
+
+Save the pasted key to `.breeze.json` (no echo), then run the
+upload. (In practice this responsibility now lives in
+`/breeze:onboard-repository` and the retired
+`/breeze:deprecated-cluster-pipeline` — this section is kept for
+reference.)
 
 **Repository upload:**
 
@@ -221,7 +216,7 @@ https://ai.accionbreeze.com/ontology/{projectUuid}/functional"
       --upload \
       --user-api-key <apiKey> \
       --uuid <uuid> \
-      --baseurl https://isometric-backend.accionbreeze.com
+      --baseurl <apiBase>
 
 **Document upload:**
 
@@ -230,12 +225,12 @@ https://ai.accionbreeze.com/ontology/{projectUuid}/functional"
       --path <docs-path> \
       --uuid <uuid> \
       --user-api-key <apiKey> \
-      --baseurl https://isometric-backend.accionbreeze.com
+      --baseurl <apiBase>
 
 After upload, report:
 "Upload complete. Artifact indexing has started.
 Next: Generate ontology at
-https://ai.accionbreeze.com/ontology/{projectUuid}/functional"
+<uiBaseUrl>/ontology/{projectUuid}/functional"
 ````
 
 ---
@@ -912,27 +907,55 @@ See `skills/validate-graph/SKILL.md` for the full content.
 
 ## Configuration
 
+### breeze.config.json (plugin root, canonical defaults)
+
+```json
+{
+  "uiBaseUrl": "https://ai.accionbreeze.com",
+  "apiBase": "https://isometric-backend.accionbreeze.com"
+}
+```
+
+These are the URLs every skill renders to the user. The plugin ships
+with these defaults; changing the values here repoints **every**
+skill at a different Breeze deployment in one edit. Skills must read
+these fields rather than hardcode URL literals.
+
 ### .breeze.json (project root, gitignored)
 
 ```json
 {
-  "apiKey": "<BREEZE_API_KEY>",
-  "projectUuid": "<PROJECT_UUID>"
+  "projectUuid": "<PROJECT_UUID>",
+  "apiKey": "<BREEZE_API_KEY — added on-demand, not required at init>",
+  "uiBaseUrl": "<optional override of breeze.config.json>",
+  "apiBase": "<optional override of breeze.config.json>"
 }
 ```
 
 MCP tool calls authenticate via Keycloak OAuth — Claude Code performs
-the sign-in flow on the first MCP tool call and does not read
-`apiKey` from `.breeze.json`. The stored `apiKey` is used by non-MCP
-consumers (the ontology-generator CLI and the REST upsert path).
+the sign-in flow on the first MCP tool call and does **not** read
+`apiKey` from `.breeze.json`. The `apiKey` field is only populated
+when a skill that needs it (`onboard-repository`, the retired
+`deprecated-cluster-pipeline`) prompts the user. Pure MCP workflows
+work with `projectUuid` alone.
+
+**URL resolution order** (every skill follows this when rendering a
+URL): `.breeze.json` field → `breeze.config.json` field → SKILL.md
+fallback literal.
 
 ### Guard Rule (all skills except init)
 
 Every skill MUST start with:
 
 1. Read `.breeze.json`
-2. If missing or incomplete → tell user: "Run `/breeze:init` first."
-3. Extract `apiKey` and `projectUuid` for tool calls
+2. If `projectUuid` is missing → tell user: "Run `/breeze:init` first."
+3. Extract `projectUuid` for MCP tool calls.
+4. If the skill also needs an `apiKey` (only `onboard-repository`
+   and the retired `deprecated-cluster-pipeline`), check `.breeze.json` —
+   if absent, prompt the user with the generation URL
+   (`<uiBaseUrl>/mcp/generate/key`, resolved from `.breeze.json` →
+   `breeze.config.json`), save it, and
+   continue. Do not block at the guard for apiKey.
 
 ---
 
@@ -1053,8 +1076,10 @@ Commit this file. Now when any developer runs `claude` in this
 project, the plugin loads automatically. No flag needed.
 
 **Note:** Each developer still runs `/breeze:init` once to create
-their personal `.breeze.json` (API key + project UUID). This file
-is gitignored.
+their personal `.breeze.json` (project UUID). The API key — needed
+only by `onboard-repository` and the retired
+`deprecated-cluster-pipeline` — is collected on-demand the first
+time those skills run. This file is gitignored either way.
 
 ---
 

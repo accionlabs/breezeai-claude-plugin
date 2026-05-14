@@ -33,12 +33,15 @@ if echo "$LOWER_PROMPT" | grep -qE "(create|add|update|delete|remove|build|imple
   exit 0
 fi
 
-# ── Guard: .breeze.json must exist with apiKey + projectUuid ────────
+# ── Guard: .breeze.json must exist with projectUuid ─────────────────
+# (apiKey is no longer required for MCP-based analysis — Keycloak OAuth
+# handles the MCP auth handshake. Skills that still need an apiKey
+# collect it on-demand.)
 if [ ! -f ".breeze.json" ]; then
   exit 0
 fi
 
-if ! grep -q '"apiKey"' .breeze.json || ! grep -q '"projectUuid"' .breeze.json; then
+if ! grep -q '"projectUuid"' .breeze.json; then
   exit 0
 fi
 

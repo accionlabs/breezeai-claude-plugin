@@ -516,11 +516,10 @@ To resume, paste:"_
 ## When NOT to use
 
 - **Backend-only repos** — use `/breeze:generate-functional-from-backend`
-- **Quick first-time exploration** — deprecated `generate-functional-from-code`
 
 ## See also
 
 - `/breeze:generate-functional-from-backend` — the backend half
-- `/breeze:generate-functional-from-code` — deprecated legacy pipeline
 - `/breeze:validate-functional-graph` — quality checks after generation
 - `/breeze:generate-spec` — export the graph as a spec doc
+- `/breeze:deprecated-cluster-pipeline` — retired v1 pipeline; do **not** use for new work, kept only for resuming historical runs
