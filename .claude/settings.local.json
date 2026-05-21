@@ -23,7 +23,22 @@
       "Bash(git add:*)",
       "Bash(git rebase:*)",
       "Bash(GIT_EDITOR=true git rebase --continue)",
-      "Bash(chmod +x /Users/pranavpatil/Desktop/Projects/breezeai-claude-plugin/scripts/batch-design-from-ui.py)"
+      "Bash(chmod +x /Users/pranavpatil/Desktop/Projects/breezeai-claude-plugin/scripts/batch-design-from-ui.py)",
+      "mcp__plugin_atlassian_atlassian__getConfluencePage",
+      "mcp__plugin_atlassian_atlassian__updateConfluencePage",
+      "mcp__plugin_atlassian_atlassian__getConfluenceSpaces",
+      "mcp__plugin_atlassian_atlassian__createConfluencePage",
+      "WebSearch",
+      "WebFetch(domain:support.claude.com)",
+      "WebFetch(domain:claude.com)",
+      "WebFetch(domain:apidog.com)",
+      "WebFetch(domain:lord.technology)",
+      "WebFetch(domain:www.thevccorner.com)",
+      "WebFetch(domain:www.anthropic.com)",
+      "WebFetch(domain:pasqualepillitteri.it)",
+      "WebFetch(domain:www.morphllm.com)",
+      "WebFetch(domain:www.ssdnodes.com)",
+      "WebFetch(domain:teamcopilot.ai)"
     ]
   },
   "disabledMcpjsonServers": [

@@ -114,36 +114,61 @@ ndjson in:
 **Security (Mode A only):** Never print the key in output or commit
 it. Make sure `.breeze.json` is in `.gitignore`.
 
-## Step 2 — Verify Node.js is exactly v22.x
+## Step 2 — Activate Node.js v22.x
 
-The `breeze-code-ontology-generator` CLI requires **Node.js 22
-specifically — not 22+**. Node 24 (and any other newer major) fails
-because the CLI eagerly `require()`s several tree-sitter language
-bindings that became ESM with top-level await; the result under Node
-24 is either a silent zero-output exit or a thrown
-`ERR_REQUIRE_ASYNC_MODULE`. Node 20 and older fail earlier with
-syntax/ESM errors. Only Node 22 is known-good.
+The CLI requires **Node.js 22 specifically**. Node 24+ fails with
+`ERR_REQUIRE_ASYNC_MODULE` (or silently exits depending on stdout
+buffering) because tree-sitter native bindings became ESM with
+top-level await. Node 20 and older fail with syntax/ESM errors.
+
+**Try to activate Node 22 automatically. STOP and ask the user only
+if no version manager is installed.**
+
+### 2a. Check what's on PATH
 
 ```bash
 node --version
 ```
 
-- If the output is `v22.x.x` → continue.
-- If the output is **any other major** (e.g. `v18.x.x`, `v20.x.x`,
-  `v23.x.x`, `v24.x.x`) → **STOP**. Do not attempt to run the upload
-  — it will fail with cryptic ESM / native-binding errors or, worse,
-  exit silently with no output. Switch to Node 22 first. Suggested
-  paths:
-  - **nvm**: `nvm install 22 && nvm use 22`
-  - **fnm**: `fnm install 22 && fnm use 22`
-  - **volta**: `volta install node@22 && volta pin node@22`
-  - **System install**: download the Node 22 LTS line from
-    https://nodejs.org/
-- If `node` is not installed at all → STOP and ask the user to
-  install Node 22 before continuing.
+If the output is `v22.x.x`, the system default is already correct —
+record an empty activation prefix and skip to Step 3.
 
-After the user switches, ask them to confirm `node --version` shows
-`v22.x.x` and re-run the skill.
+### 2b. Try managers in order, capture an activation prefix
+
+If `node` is missing or any other major, try each manager in this
+order. **Each Bash tool call is a fresh shell**, so the manager's
+init must be sourced *in the same command* as the `use 22`:
+
+| Manager | Detect | Activate + verify |
+|---|---|---|
+| nvm | `[ -s "$HOME/.nvm/nvm.sh" ]` | `. "$HOME/.nvm/nvm.sh" && nvm use 22 && node --version` |
+| fnm | `command -v fnm >/dev/null` | `eval "$(fnm env)" && fnm use 22 && node --version` |
+| volta | `command -v volta >/dev/null` | `volta run --node 22 node --version` |
+
+If a manager exists but reports `version "22" is not installed` (or
+similar), install it first, then retry:
+
+- nvm: `nvm install 22 && nvm use 22`
+- fnm: `fnm install 22 && fnm use 22`
+- volta: `volta install node@22`
+
+Once one of them prints `v22.x.x`, **remember the exact activation
+prefix that worked** — you'll prepend it to every CLI call in Step 5,
+because fresh shells lose the activation. Examples:
+
+- nvm → prefix is `. "$HOME/.nvm/nvm.sh" && nvm use 22 >/dev/null && `
+- fnm → prefix is `eval "$(fnm env)" && fnm use 22 >/dev/null && `
+- volta → wrap the whole CLI invocation in `volta run --node 22 …`
+  instead of using a prefix
+
+### 2c. STOP — no manager available
+
+If none of nvm/fnm/volta is detected, surface this and stop:
+
+> Your current Node is `<version>`. The CLI requires Node 22. I
+> couldn't find nvm, fnm, or volta on your machine to switch
+> automatically. Install one of them (recommended: nvm) and re-run
+> this skill, or download Node 22 LTS from https://nodejs.org/.
 
 Node 22 is the only runtime this skill needs. (Python with numpy /
 scikit-learn is only required by the retired
@@ -198,6 +223,11 @@ This is informational — do not block on it. Continue with the upload.
 
 ## Step 5 — Run the generator
 
+**Prepend the activation prefix from Step 2** to every command below.
+If Step 2a succeeded (system default is already Node 22), the prefix
+is empty and the command starts at `npx -y …`. Examples shown use the
+nvm prefix.
+
 The exact command depends on `uploadMode` from Step 1.
 
 ### Mode A — `uploadMode = "automatic"`
@@ -206,7 +236,8 @@ Read `apiKey`, `projectUuid`, and `apiBase` from `.breeze.json`, then
 run:
 
 ```bash
-npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+. "$HOME/.nvm/nvm.sh" && nvm use 22 >/dev/null && \
+  npx -y github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
   --repo <resolved-repo-path> \
   --out breezeai \
   --upload \
@@ -223,7 +254,8 @@ flags. The CLI then only parses the repo and writes the ndjson tree
 to `./breezeai/` — no network call:
 
 ```bash
-npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+. "$HOME/.nvm/nvm.sh" && nvm use 22 >/dev/null && \
+  npx -y github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
   --repo <resolved-repo-path> \
   --out breezeai \
   --capture-statements
