@@ -497,7 +497,7 @@ inside `data`.
      name: <project name from Call_Get_Project_Details_>,
      data: <payload from Step 6 — top-level personas array>,
      skip_step_and_action: false,
-     embedding: true,
+     embedding: false,
      llm_platform: "AWSBEDROCK"
    )
    ```
