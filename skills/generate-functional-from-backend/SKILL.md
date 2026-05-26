@@ -170,7 +170,44 @@ If the repo has NO GraphQL surface, skip and record
 
 ---
 
-### Sub-step 0.8 — Cross-reference frontend API callers (optional)
+### Sub-step 0.8 — Discover queue / event entry points
+
+If the repo has NO queue / event-consumer surface, skip and record
+`"queueHandlers": []`.
+
+1. Enumerate queue consumer files — grep for decorators / registrations:
+   - **NestJS Bull / BullMQ:** `@Processor(...)`, `@Process(...)`
+   - **NestJS microservices:** `@MessagePattern(...)`, `@EventPattern(...)`
+   - **AWS SQS (nestjs-sqs / raw SDK):** `@SqsMessageHandler(...)`,
+     `Consumer.create({ queueUrl, handleMessage })`
+   - **Kafka:** `@KafkaListener(...)`, `@MessagePattern(topic)`
+   - **RabbitMQ (amqplib / @golevelup):** `@RabbitSubscribe(...)`,
+     `@RabbitHandler(...)`, `channel.consume(queue, ...)`
+   - **Google Pub/Sub:** `subscription.on('message', ...)`
+   - **Azure Service Bus:** `receiver.subscribe(...)`
+2. For each handler capture: `queueName` / `topic` / `pattern`,
+   `transport` (SQS / Kafka / RabbitMQ / Bull / PubSub / ServiceBus),
+   `handlerClass`, `methodName`, `file`, `line`, `messageShape`,
+   `consumerGroup` (if applicable)
+3. Resolve template literals (env vars, config) by `Read`ing the
+   imported config file — never leave `${...}` in `queueName`
+4. Read each handler body — enumerate downstream side effects as with
+   REST handlers
+5. Classify by `subType`:
+   - `queue-consumer` — consumes messages a producer in this or another
+     system published
+   - `event-handler` — reacts to domain events on a shared bus
+   - `scheduled-job` — cron-triggered handler (map `type:"Event"`,
+     `method:"trigger"`)
+6. Record in `entrypoints.json` under `queueHandlers[]` AND append to
+   `entryPoints[]` with `type: "Queue"`
+
+> **Rules:** see [rules.md](references/rules.md) → "Queue / event EP
+> discovery rules" and "`apis[]` type reference" (Event row).
+
+---
+
+### Sub-step 0.9 — Cross-reference frontend API callers (optional)
 
 1. If frontend repo is indexed in code graph, list every endpoint the
    frontend calls
@@ -179,7 +216,7 @@ If the repo has NO GraphQL surface, skip and record
 
 ---
 
-### Sub-step 0.9 — Write `entrypoints.json`
+### Sub-step 0.10 — Write `entrypoints.json`
 
 1. Write the full inventory to disk with this schema:
 
@@ -204,6 +241,19 @@ If the repo has NO GraphQL surface, skip and record
       "returnType": "Project",
       "args": "id: ID!",
       "category": "Projects"
+    }
+  ],
+  "queueHandlers": [
+    {
+      "transport": "SQS",
+      "queueName": "project-export-jobs",
+      "handlerClass": "ProjectExportConsumer",
+      "methodName": "handleExportMessage",
+      "file": "src/consumers/project-export.consumer.ts",
+      "line": 28,
+      "messageShape": "ProjectExportJob",
+      "subType": "queue-consumer",
+      "category": "Export"
     }
   ],
   "totalEntryPoints": 47,
@@ -252,10 +302,24 @@ If the repo has NO GraphQL surface, skip and record
       "category": "Webhooks",
       "subType": "webhook",
       "status": "pending"
+    },
+    {
+      "id": 4,
+      "type": "Queue",
+      "transport": "SQS",
+      "queueName": "project-export-jobs",
+      "handlerClass": "ProjectExportConsumer",
+      "methodName": "handleExportMessage",
+      "file": "src/consumers/project-export.consumer.ts",
+      "line": 28,
+      "messageShape": "ProjectExportJob",
+      "category": "Export",
+      "subType": "queue-consumer",
+      "status": "pending"
     }
   ],
   "completed": [],
-  "remaining": [1, 2, 3, "...", 47],
+  "remaining": [1, 2, 3, 4, "...", 47],
   "orphans": {
     "deadCode": [],
     "orphanHandlersFolded": [],

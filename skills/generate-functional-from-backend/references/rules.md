@@ -118,6 +118,9 @@ The backend pass uses **only** two personas — assignment is mechanical:
 | Internal-only routes (`/internal/*`, `/admin/*`, `/health`) | **System** |
 | Webhook receiver (HMAC-validated, partner-pushes-data-in) | **External System** |
 | Payment gateway / partner API callback route | **External System** |
+| Queue consumer / event handler (internal bus, same system's producer) | **System** |
+| Scheduled job / cron handler | **System** |
+| Queue consumer for a 3rd-party provider's event stream | **External System** |
 
 **The backend pass NEVER:**
 - Reads JWT decoders, role guards, or auth middleware to derive
@@ -141,6 +144,45 @@ The backend pass uses **only** two personas — assignment is mechanical:
 | WebSocket handler | `"WebSocket"` | event name | namespace/room |
 | Queue publish/consume | `"Event"` | `"publish"` / `"consume"` | `sqs://${ENV_VAR}` / `kafka://${TOPIC}` |
 | Cron handler | `"Event"` | `"trigger"` | `cron:0 0 * * *` |
+
+---
+
+### Queue / event EP discovery rules
+
+**Transports recognized** (framework → signals):
+
+| Transport | Detection signal | EP shape |
+|---|---|---|
+| **NestJS Bull / BullMQ** | `@Processor(queueName)` + `@Process(jobName?)` | One EP per `@Process` method |
+| **NestJS microservices** | `@MessagePattern(pattern)` / `@EventPattern(pattern)` | One EP per pattern handler |
+| **AWS SQS (nestjs-sqs)** | `@SqsMessageHandler(queueName)` | One EP per handler method |
+| **AWS SQS (raw SDK)** | `Consumer.create({ queueUrl, handleMessage })` | One EP per consumer instance |
+| **Kafka (kafkajs / NestJS)** | `@KafkaListener(topic)` / `@MessagePattern(topic, Transport.KAFKA)` | One EP per topic handler |
+| **RabbitMQ (@golevelup/nestjs-rabbitmq)** | `@RabbitSubscribe({ exchange, routingKey, queue })`, `@RabbitHandler` | One EP per subscribe method |
+| **RabbitMQ (amqplib)** | `channel.consume(queue, handler)` | One EP per consume call |
+| **Google Pub/Sub** | `subscription.on('message', handler)` | One EP per subscription |
+| **Azure Service Bus** | `receiver.subscribe({ processMessage })` | One EP per receiver |
+| **Cron / scheduled** | `@Cron(expression)`, `@Scheduled` (Spring), `@shared_task` (Celery) | One EP per scheduled method |
+
+**Required fields per queue EP:**
+- `transport` — SQS / Kafka / RabbitMQ / Bull / PubSub / ServiceBus / Cron
+- `queueName` / `topic` / `pattern` — resolved (no `${...}` placeholders)
+- `handlerClass`, `methodName`, `file`, `line`
+- `messageShape` — DTO or type of the consumed message
+- `subType` — `queue-consumer`, `event-handler`, or `scheduled-job`
+
+**Resolve template literals:** queue names / topics are frequently
+constructed from env vars or config tokens. Always `Read` the config
+file and resolve to the literal queue/topic name before recording.
+
+**`apis[]` for queue handlers:** use `type: "Event"`, `method:
+"consume"` (or `"trigger"` for scheduled), `url` as
+`sqs://<queueName>` / `kafka://<topic>` / `rabbit://<exchange>:<routingKey>`
+/ `cron:<expression>`.
+
+**Persona assignment:** default is `System`. Use `External System`
+only when the producer is a documented 3rd-party provider pushing
+data into your bus (e.g. Stripe webhook → SQS → consumer).
 
 ---
 
@@ -297,6 +339,8 @@ No file-based handoff.
 |---|---|---|
 | Reading code-graph summary instead of handler file | Hallucinated route strings, wrong call chains | Always `Read` the controller/resolver |
 | Skipping GraphQL sub-step when repo has GraphQL | System persona missing query/mutation flows | Sub-step 0.7 is a HARD GATE |
+| Skipping queue sub-step when repo has consumers | Async/background flows missing from graph | Sub-step 0.8 — scan for `@Processor`, `@MessagePattern`, `@SqsMessageHandler`, `@RabbitSubscribe`, `channel.consume` |
+| Leaving `${QUEUE_URL}` unresolved | Queue name is a template variable instead of literal | Read the config module and resolve |
 | Wrong GraphQL granularity | EP list explodes or collapses | Default per-operation |
 | Inventing human personas from auth code | Conflicts with UI pass | Backend pass NEVER writes human personas |
 | Not resolving template literals / route prefixes | Routes written as `${...}` | Resolve at Step 3 |
