@@ -211,7 +211,7 @@ Use `parameters3_Value` for project UUID — wrong slot fails silently.
 
 ---
 
-### Side-effect coverage validator rules (Step 6.5)
+### Side-effect coverage validator rules (agent Phase 6, check #6)
 
 - >=90% of the side-effect inventory must be matched to an action
 - Log/metric emission CAN be added to `trivialSideEffects[]` but
@@ -225,7 +225,7 @@ Use `parameters3_Value` for project UUID — wrong slot fails silently.
 
 ---
 
-### Pre-upsert validation rules (Step 7)
+### Pre-upsert validation rules (agent Phase 6, checks #1-2)
 
 **Rule A — side-effect-verb actions must have `apis[]` or DB/ES/S3
 identifiers in description.** If `action.action` contains any of:
@@ -238,7 +238,7 @@ Forward, Notify, Invoke, Call, Resolve — then either:
 3. If no side effect, rename the action to remove the verb
 
 **Rule B — every service / repository / client injected into the
-handler's constructor (from Step 4) must resolve to a `Read` of the
+handler's constructor (from Phase 1 discovery) must resolve to a `Read` of the
 file.** If you have a reference you never followed, go back, read
 the file, add the missing identifiers.
 
