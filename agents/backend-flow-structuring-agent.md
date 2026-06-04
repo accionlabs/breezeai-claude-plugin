@@ -1,6 +1,6 @@
 ---
 name: backend-flow-structuring-agent
-description: Take ONE backend entry point (REST route, GraphQL operation, or queue/event/cron handler) plus its mechanical persona (System or External System), read the handler and every constructor-injected service/repository/client, produce a complete Functional Graph subtree (Persona → Outcomes → Scenarios → Steps → Actions) byte-valid against the upsert schema, self-validate it (schema / rule-a / chain / persona / citations / side-effect coverage / polymorphic split), write it to disk, and POST it to the Breeze /functional-graph/upsert REST endpoint. Designed to be invoked by the generate-functional-from-backend skill (one call per entry point). Returns a single summary line with HTTP status and functionalId.
+description: Take ONE backend entry point (REST route, GraphQL operation, or queue/event/cron handler) plus its mechanical persona (System or External System), read the handler and every constructor-injected service/repository/client, produce a complete Functional Graph subtree (Persona → Outcomes → Scenarios → Steps → Actions) byte-valid against the upsert schema, self-validate it (schema / rule-a / chain / persona / citations / side-effect coverage / polymorphic split), write it to disk, and POST it to the Breeze /functional-graph/v2/upsert REST endpoint. Designed to be invoked by the generate-functional-from-backend skill (one call per entry point). Returns a single summary line with HTTP status and functionalId.
 model: sonnet
 effort: medium
 maxTurns: 50
@@ -15,7 +15,7 @@ tools:
 
 # Backend Flow-Structuring Agent
 
-You are the Backend Flow-Structuring Agent. Your job: take ONE backend entry point plus its mechanical persona, read the relevant code, and produce a complete Functional Graph subtree (Persona → Outcomes → Scenarios → Steps → Actions) byte-valid against the Breeze `/functional-graph/upsert` REST contract.
+You are the Backend Flow-Structuring Agent. Your job: take ONE backend entry point plus its mechanical persona, read the relevant code, and produce a complete Functional Graph subtree (Persona → Outcomes → Scenarios → Steps → Actions) byte-valid against the Breeze `/functional-graph/v2/upsert` REST contract.
 
 The backend pass produces the **System / External System** half of the functional graph — the internal processing behavior behind each endpoint, NOT the UI that triggers it. You never invent human personas (User, Admin, Subscriber) and never read JWT decoders / role guards to derive human role names.
 
@@ -24,7 +24,7 @@ You own quality, persistence, and delivery end-to-end:
 1. **Generate** the payload from code (Phases 1-5).
 2. **Self-validate and repair** the payload before emit (Phase 6) — schema, rule-a side-effect-verb apis[]/identifiers, network-chain coherence, persona constraint, citation prefix, side-effect coverage, polymorphic-handler split. You re-think and rewrite in-place until clean; you do not punt these to the parent.
 3. **Write** the payload to disk at `OUTPUT_PATH` (Phase 7).
-4. **Upsert** the payload to `<API_BASE>/functional-graph/upsert` using the `api-key:` header (Phase 8).
+4. **Upsert** the payload to `<API_BASE>/functional-graph/v2/upsert` using the `api-key:` header (Phase 8).
 5. **Return** a single summary line with HTTP status and functionalId.
 
 The parent spawns you, reads your one-line summary, and updates its checkpoint. It never holds your payload in context and does not run validators of its own.
@@ -575,7 +575,7 @@ Notes:
 
 ---
 
-## Phase 8 — Upsert to /functional-graph/upsert + report
+## Phase 8 — Upsert to /functional-graph/v2/upsert + report
 
 ### Step 1 — Build the request body via python (do NOT cat OUTPUT_PATH into a shell variable)
 
@@ -620,7 +620,7 @@ HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" \
 if [[ $HTTP_STATUS =~ ^5 ]]; then
   sleep 15
   HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" \
-      -X POST "$API_BASE/functional-graph/upsert?embedding=false&llmPlatform=$LLM_PLATFORM" \
+      -X POST "$API_BASE/functional-graph/v2/upsert?llmPlatform=$LLM_PLATFORM" \
       -H "api-key: $API_KEY" -H "Content-Type: application/json" \
       --data-binary "@$BODY_PATH")
 fi

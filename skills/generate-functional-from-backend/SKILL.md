@@ -9,7 +9,7 @@ description: >
   enumerates DTO / enum / validation fields, runs a branch & error-path audit,
   traces side effects, self-validates (schema / rule-a / chain / persona /
   citations / coverage / polymorphic split), writes the payload to disk, and
-  POSTs directly to /functional-graph/upsert with an api-key header (no MCP
+  POSTs directly to /functional-graph/v2/upsert with an api-key header (no MCP
   argument-size clipping). Use when: generate functional from backend, backend
   to functional, backend functional pass.
 argument-hint: "[repo-path]"
@@ -48,7 +48,7 @@ inventory in context; it reads a single summary line back from each sub-agent.
 | Branch & error paths | Implicit | **Mandatory Phase 2.5** — error/rejection branches, guard / transaction / idempotency / retry constraints captured |
 | Side-effect coverage | Step 6.5 parent validator | **Self-validated inside the sub-agent** (Phase 6) with in-place repair |
 | Output validation | Parent runs Rule A / Rule B / coverage | **Self-validation inside the sub-agent** (Phase 6: schema / rule-a / chain / persona / citations / coverage / polymorphic) — parent runs NO validators |
-| Upsert | MCP `bulk_update_functional_nodes` (arg-size limit clips large payloads) | **Sub-agent POSTs directly** to `/functional-graph/upsert` with `api-key:` header via `curl --data-binary @file` — payload never crosses a tool-call argument, so it is never truncated |
+| Upsert | MCP `bulk_update_functional_nodes` (arg-size limit clips large payloads) | **Sub-agent POSTs directly** to `/functional-graph/v2/upsert` with `api-key:` header via `curl --data-binary @file` — payload never crosses a tool-call argument, so it is never truncated |
 | Citations | File paths | `<repo_name>/<relative path>` enforced; backend paths only |
 
 ## Resources
@@ -58,7 +58,7 @@ inventory in context; it reads a single summary line back from each sub-agent.
 - **Installed per-EP agent** — `agents/backend-flow-structuring-agent.md` (plugin root). Invokable as `subagent_type: "breeze:backend-flow-structuring-agent"`. Its full methodology — phases, rules, schema, self-check, self-validate, write-to-disk, upsert — lives in its system prompt.
 - `references/backend-flow-structuring-agent.prompt.md` — short **per-call input renderer** with `{{...}}` placeholders. The parent substitutes and passes the rendered text as the `prompt` argument.
 - `references/rules.md` — backend functional graph semantics (framework detection, route/GraphQL/queue discovery recipes, persona mechanical mapping, `apis[]` type reference, pitfalls). Carried over and also embedded in the agent's system prompt.
-- `schemas/upsert.schema.json` — JSON-schema for the `/functional-graph/upsert` REST payload. Reference only; the agent self-validates against the rules in its system prompt.
+- `schemas/upsert.schema.json` — JSON-schema for the `/functional-graph/v2/upsert` REST payload. Reference only; the agent self-validates against the rules in its system prompt.
 - `validators/validate.py` — Deterministic payload validators (subcommands `schema | rule-a | persona | citations | coverage`). **Invoked by the sub-agent in Phase 6** as a hard gate before write/upsert (the skill passes its absolute directory in as `VALIDATORS_PATH`). The agent falls back to prose-only checks if the script or its `jsonschema` dependency is unavailable. Also runnable standalone for manual inspection of `be_ep{NN}_{name}.json` files.
 - `validators/requirements.txt` — Python dependency: `jsonschema`
 
@@ -360,7 +360,7 @@ When context budget hits ~75%, flush the current checkpoint and stop. Resume wit
 
 `entrypoints.failed[]` holds per-EP failures mapped to the agent's summary-line prefixes (`FAIL_VALIDATE`, `FAIL_WRITE`, `FAIL_UPSERT`). For each:
 
-- **`FAIL_UPSERT` only** — the payload is sound but the POST failed. Re-curl the same OUTPUT_PATH directly via `<apiBase>/functional-graph/upsert` with the `api-key:` header. No re-spawn needed.
+- **`FAIL_UPSERT` only** — the payload is sound but the POST failed. Re-curl the same OUTPUT_PATH directly via `<apiBase>/functional-graph/v2/upsert?llmPlatform=<LLM_PLATFORM>` with the `api-key:` header. No re-spawn needed.
 - **`FAIL_VALIDATE` / `FAIL_WRITE`** — re-spawn the sub-agent with the same input block. If the same failure repeats, inspect the OUTPUT_PATH on disk to understand the defect class, then patch the agent prompt.
 - **Recovery loop**: clear matching entries from `failed[]`, re-add `epId` to `remaining[]`, resume the skill.
 
