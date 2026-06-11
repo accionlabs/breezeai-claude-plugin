@@ -10,6 +10,8 @@ description: >
   intent from design".
 ---
 
+## Project — This skill is exempt: it reads a design and writes local user stories without Breeze MCP calls. See CLAUDE.md's exempt-skills list.
+
 **Before generating the functional graph, read `./references/guide.md` to understand the full definition and rules for each node type: Persona, Outcome, Scenario, Step, and Action.**
 
 ## Visual-to-Text Flow

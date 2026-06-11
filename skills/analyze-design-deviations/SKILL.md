@@ -14,6 +14,10 @@ description: >
 argument-hint: "<figmaComponents.json path>"
 ---
 
+## Project
+
+This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
+
 ## What this skill does
 
 Compares two component registries — one from the **Breeze design graph**
@@ -56,10 +60,7 @@ Comparison Dimensions
 
 ## Guard
 
-1. Read `.breeze.json` from the project root. If missing, tell user to
-   run `/breeze:setup-project`.
-2. Extract `projectUuid`.
-3. Validate `$ARGUMENTS`:
+1. Validate `$ARGUMENTS`:
    - If empty, ask user: "Please provide the path to your
      figmaComponents.json file."
    - If provided, verify the file exists and is valid JSON.
@@ -68,7 +69,7 @@ Comparison Dimensions
 
 > **Parameter naming hint:** All Breeze MCP tools require the project ID
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
-> `projectUuid`). Pass `.breeze.json`'s `projectUuid` value as `uuid`.
+> `projectUuid`). Pass the resolved `projectUuid` value as `uuid`.
 >
 > **Design-by-label hint:** When calling `Get_all_Design_By_Label`, pass
 > the node label as **`label`** (e.g., `label: "Component"`), NOT as

@@ -9,9 +9,11 @@ When the user asks about Breeze capabilities or wants to perform a Breeze task, 
 
 | User wants to... | Skill |
 |---|---|
-| First-time setup, init, API key | `/breeze:setup-project` |
+| First-time setup, init, bootstrap | `/breeze:project setup` (alias: `/breeze:setup-project`) |
+| Show / list / switch / create project, re-auth | `/breeze:project [show \| list \| use <name> \| create <name> \| auth \| status]` |
 | Upload/onboard a source repo | `/breeze:onboard-repository` |
 | Search features, code, "how does X work" | `/breeze:search` |
+| Impact analysis, blast radius, "what breaks if X" | `/breeze:impact-analysis` |
 | Analyze a requirement, check coverage | `/breeze:analyze-functional` |
 | Check architecture impact | `/breeze:analyze-architecture` |
 | Analyze a Figma design | `/breeze:analyze-design` |
@@ -28,7 +30,7 @@ When the user asks about Breeze capabilities or wants to perform a Breeze task, 
 ## Recommended Pipelines
 
 **Brownfield (existing code):**
-1. `/breeze:setup-project`
+1. `/breeze:project setup`
 2. `/breeze:onboard-repository` (once per repo)
 3. `/breeze:generate-functional-from-ui` (frontend)
 4. `/breeze:generate-functional-from-backend` (each backend)
@@ -36,12 +38,21 @@ When the user asks about Breeze capabilities or wants to perform a Breeze task, 
 6. `/breeze:generate-spec`
 
 **Greenfield (from designs/docs):**
-1. `/breeze:setup-project`
+1. `/breeze:project setup`
 2. `/breeze:visual-to-text` (Figma/PDF/images)
 3. `/breeze:analyze-functional` (requirement documents)
 
 **New feature:**
-1. `/breeze:analyze-functional`
-2. `/breeze:analyze-architecture`
-3. `/breeze:update-functional-graph`
-4. `/breeze:generate-code`
+1. `/breeze:impact-analysis` (cross-layer blast radius)
+2. `/breeze:analyze-functional`
+3. `/breeze:analyze-architecture`
+4. `/breeze:update-functional-graph`
+5. `/breeze:generate-code`
+
+## Project targeting
+
+Every project-bound skill accepts a one-shot `--project <name|uuid>` override (or
+a bare UUID / natural-language project hint) that applies to that invocation only
+and does not touch `.breeze.json`. Persistent switches go through
+`/breeze:project use <name|uuid>`. Full rules live in `CLAUDE.md` at the plugin
+root.

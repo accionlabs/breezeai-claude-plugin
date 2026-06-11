@@ -88,7 +88,7 @@ by persona type:
 |---|---|---|
 | `Glob` / `Read` / `Grep` on the backend folder | **Primary** — controllers, resolvers, services, DTOs, decorators | Filesystem has literal `@Post(...)` strings, `@Resolver`, full handler body, injection chain |
 | `Code_Graph_Search` on the backend repo | **Optional accelerator** — locate controllers or trace call chains | Faster than blind globbing, but always confirm by `Read`ing the actual file |
-| `Get_Code_File_Details` | **Allowed for backend** — extracting decorator strings + class structure | Backend route extraction is what this tool was designed for |
+| `Get_Code_Nodes_By_Label` (label `File`, `children=true`) | **Allowed for backend** — extracting decorator strings + class structure | Backend route extraction; filter by `path` + `repositoryName` or `id` |
 | `Functional_Graph_Search` | **Dedup check only** — never as a source of code knowledge | See Step 1 |
 
 ---

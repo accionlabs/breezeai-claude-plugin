@@ -10,10 +10,9 @@ description: >
   and full-project generation.
 ---
 
-## Guard
+## Project
 
-Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
-Extract `projectUuid`.
+This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
 
 ---
 
@@ -54,7 +53,7 @@ For generating code for a specific feature, scenario, or user story.
 ### A2. DISCOVER — Find existing code patterns
 
 - Call `Code_Graph_Search` with related terms
-- Call `Get_Code_File_Details` on the most relevant files to inspect
+- Call `Get_Code_Nodes_By_Label(label="File", filters={"path": <path>, "repositoryName": <repo>} OR {"id": <fileId>}, children=true)` on the most relevant files to inspect
   class structure, methods, and patterns
 - Find existing files, functions, patterns, utilities
 - This gives you the HOW: conventions, imports, patterns to follow

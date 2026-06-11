@@ -11,6 +11,12 @@ description: >
 argument-hint: "[repo-path]"
 ---
 
+## Project
+
+This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
+
+> **API key:** this skill additionally needs a Breeze `apiKey` for its non-MCP REST upsert path. Collect it on-demand as described below — MCP calls themselves do not use it.
+
 ## What this skill does
 
 Same goal as `/breeze:generate-functional-from-ui` (v1) — turn a frontend
@@ -60,16 +66,14 @@ structurally in `action.apis[]`.
 
 ## Bootstrap (run ONCE at skill start)
 
-1. Read `.breeze.json` from the plugin working directory.
-2. If missing or incomplete → tell the user to run `/breeze:setup-project`.
-3. Extract `projectUuid`. Cache it.
-4. **Resolve URLs** from `breeze.config.json` (plugin root), overridable per-project via `.breeze.json`:
+1. Resolve `projectUuid` per the **## Project** section above (defers to `CLAUDE.md`). Cache it.
+2. **Resolve URLs** from `breeze.config.json` (plugin root), overridable per-project via `.breeze.json`:
    - `apiBase` — Breeze backend host (e.g. `https://isometric-backend.accionbreeze.com`)
    - `uiBaseUrl` — Breeze UI host (e.g. `https://app.accionbreeze.com`)
 
    See `/breeze:setup-project` → "URL resolution" for the canonical rule. Throughout this skill, `<apiBase>` and `<uiBaseUrl>` are placeholders the parent substitutes at runtime — never hardcode literal hosts.
 
-5. **Resolve `apiKey`** (required — the sub-agent POSTs the upsert directly):
+3. **Resolve `apiKey`** (required — the sub-agent POSTs the upsert directly):
    - Check `.breeze.json` for `apiKey`. If present → cache and continue.
    - If missing, prompt the user with this exact wording (mirrors `/breeze:onboard-repository` → Step 1 convention):
 
@@ -83,8 +87,8 @@ structurally in `action.apis[]`.
 
    **Security:** Never print the key in output, logs, or commits. `.breeze.json` must be in `.gitignore`. The parent passes the key into the sub-agent's input block — both the parent and the agent must avoid echoing it.
 
-6. Call `Call_Get_Project_Details_` with `uuid=<projectUuid>` once; cache the returned `name` — passed to the sub-agent as `PROJECT_NAME` and used in its upsert body.
-7. **Resolve the frontend repo's `codeOntologyId`** (required for sub-agent's `Code_Graph_Search` scoping):
+4. Call `Call_Get_Project_Details_` with `uuid=<projectUuid>` once; cache the returned `name` — passed to the sub-agent as `PROJECT_NAME` and used in its upsert body.
+5. **Resolve the frontend repo's `codeOntologyId`** (required for sub-agent's `Code_Graph_Search` scoping):
    - Check `.breeze.json` → `targetRepos.frontendCodeOntologyId`. If present and `targetRepos.frontendRepoName` is also present → cache both and continue.
    - Otherwise call `Call_List_Repositories_(projectUuid=<projectUuid>)`. The response has `data: [{ _id, name, fileCount, ... }]`.
    - Confirm at least one indexed repo exists with `fileCount > 0` and `status: "active"`. If none → stop and tell the user to run `/breeze:onboard-repository` first.
@@ -193,13 +197,13 @@ Then load `references/flow-structuring-agent.prompt.md` and substitute the `{{..
 | `{{repo_name}}` | basename of the UI repo path |
 | `{{repo_root_absolute_path}}` | absolute path to the UI repo |
 | `{{project_uuid}}` | `projectUuid` from `.breeze.json` |
-| `{{project_name}}` | project name cached in Bootstrap step 6 |
+| `{{project_name}}` | project name cached in Bootstrap step 4 |
 | `{{llm_platform}}` | `"AWSBEDROCK"` (passed to upsert URL) |
 | `{{output_path}}` | the pre-computed `OUTPUT_PATH` above |
-| `{{api_base}}` | `apiBase` from Bootstrap step 4 |
+| `{{api_base}}` | `apiBase` from Bootstrap step 2 |
 | `{{api_key}}` | `apiKey` from `.breeze.json` (NEVER echo, NEVER log) |
-| `{{code_ontology_id}}` | `frontendCodeOntologyId` resolved in Bootstrap step 7 |
-| `{{indexed_repo_name}}` | `frontendRepoName` resolved in Bootstrap step 7 (server-side name, may differ from on-disk basename) |
+| `{{code_ontology_id}}` | `frontendCodeOntologyId` resolved in Bootstrap step 5 |
+| `{{indexed_repo_name}}` | `frontendRepoName` resolved in Bootstrap step 5 (server-side name, may differ from on-disk basename) |
 | `{{existing_neighborhood_json}}` | `json.dumps(EXISTING_NEIGHBORHOOD)` |
 
 ## Step 3 — Spawn sub-agent

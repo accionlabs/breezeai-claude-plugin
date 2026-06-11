@@ -3,10 +3,9 @@ name: analyze-architecture
 description: Analyze a requirement (from Jira, document, image, diagram, or text) against the existing Architecture Graph. Maps the requirement to the 8-layer model, runs impact analysis via the Code Graph, anchors user-facing components to Functional Scenarios, detects reuse opportunities and gaps, and writes a structured analysis report back to the Jira ticket. The Architecture Graph persists only the 8 layers — all analysis output is ephemeral and lives in the write-back.
 ---
 
-## Guard
+## Project
 
-Read `.breeze.json`. If missing, tell the user to run `/breeze:setup-project`.
-Extract `projectUuid`. Verify the project exists via `Call_Get_Project_Details_`.
+This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
 
 ## Invocation
 
@@ -91,7 +90,7 @@ Run these in sequence. Their output becomes the analysis report written back in 
 
 For each area of concern in the requirement, run `Code_Graph_Search` with a targeted query (e.g., "invoice creation endpoint", "GST report generation", "user authentication"). Returned results include file paths, function signatures, line numbers, and the `calls` field — walk the call graph to find indirect impact. Cross-reference the returned `codeOntologyId` values against existing Architecture Graph nodes (each Service / UX / ApiGw node may already have a `code_ontology_id` pointing to its code cluster).
 
-For critical files, drill in with `Get_Code_File_Details` to enumerate classes, methods, and decorators (useful for discovering API routes via Pyramid `@view_defaults`, Flask routes, Spring `@RequestMapping`, etc.).
+For critical files, drill in with `Get_Code_Nodes_By_Label(label="File", filters={"path": <path>, "repositoryName": <repo>} OR {"id": <fileId>}, children=true)` to enumerate classes, methods, and decorators (useful for discovering API routes via Pyramid `@view_defaults`, Flask routes, Spring `@RequestMapping`, etc.).
 
 **Output:** list of affected files + affected architecture nodes + estimated blast radius (count of files + count of components).
 
