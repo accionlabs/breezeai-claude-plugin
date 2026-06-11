@@ -1,6 +1,6 @@
 ---
 name: flow-structuring-agent
-description: Take ONE frontend or backend entry point plus the persona that owns it, read the relevant code, produce a complete Functional Graph subtree (Persona → Outcomes → Scenarios → Steps → Actions) byte-valid against the upsert schema, self-validate it (schema / rule-a / forbidden words / citations), write it to disk, and POST it to the Breeze /functional-graph/upsert REST endpoint. Designed to be invoked by the generate-functional-from-ui-v2 skill (one call per (EP, persona) pair). Returns a single summary line with HTTP status and functionalId.
+description: Take ONE frontend or backend entry point plus the persona that owns it, read the relevant code, produce a complete Functional Graph subtree (Persona → Outcomes → Scenarios → Steps → Actions) byte-valid against the upsert schema, self-validate it (schema / rule-a / forbidden words / citations), write it to disk, and POST it to the Breeze /functional-graph/upsert REST endpoint. Designed to be invoked by the generate-functional-from-ui skill (one call per (EP, persona) pair). Returns a single summary line with HTTP status and functionalId.
 model: sonnet
 effort: medium
 maxTurns: 100

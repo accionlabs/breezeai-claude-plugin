@@ -91,13 +91,12 @@ for non-MCP consumers:
 - the `breeze-code-ontology-generator` CLI run by `/breeze:onboard-repository`
   in **automatic upload** mode,
 - the REST `/functional-graph/upsert` path used by
-  `/breeze:generate-functional-from-ui-v2` (its flow-structuring sub-agent POSTs
+  `/breeze:generate-functional-from-ui` (its flow-structuring sub-agent POSTs
   with an `api-key:` header),
 - the retired `/breeze:deprecated-cluster-pipeline` (resume of historical runs).
 
-(Other functional-graph writers — `generate-functional-from-ui` v1,
-`generate-functional-from-backend`, `update-functional-graph` — write via MCP
-tools and need no key.)
+(Other functional-graph writers — `generate-functional-from-backend` and
+`update-functional-graph` — write via MCP tools and need no key.)
 
 These skills prompt for the key on-demand and point the user at
 `<uiBaseUrl>/mcp/generate/key`. MCP-only and manual-upload workflows never need
