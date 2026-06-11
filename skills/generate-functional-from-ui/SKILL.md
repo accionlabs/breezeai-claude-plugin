@@ -34,7 +34,7 @@ structurally in `action.apis[]`.
 | Code_Graph_Search | **Hard floor: ≥1 mandatory hygiene sweep per run; no budget cap thereafter** |
 | Step / Action quantity | **Guidance, not caps** — enumeration overrides |
 | Output validation | **Self-validation inside the sub-agent** (Phase 6: schema / rule-a / chain / forbidden / citations) with in-place repair — parent runs NO validators |
-| Upsert | **Sub-agent POSTs directly** to `/functional-graph/upsert` with `api-key:` header — no parent-side curl |
+| Upsert | **Sub-agent POSTs directly** to `/functional-graph/v2/upsert` (queue-backed embedding, no inline CPU spike) with `api-key:` header — no parent-side curl |
 | Citations | `<repo_name>/<relative path>` enforced |
 
 ## Resources
@@ -42,7 +42,7 @@ structurally in `action.apis[]`.
 - **Installed agent** — `agents/flow-structuring-agent.md` (plugin root). Invokable as `subagent_type: "breeze:flow-structuring-agent"`. The agent's full methodology — phases, rules, schema, self-check, self-validate, write-to-disk, upsert — lives in its system prompt.
 - `references/flow-structuring-agent.prompt.md` — short **per-call input renderer** with `{{...}}` placeholders. The parent substitutes and passes the rendered text as the `prompt` argument.
 - `references/rules.md` — functional graph semantics (also embedded in the agent's system prompt)
-- `schemas/upsert.schema.json` — JSON-schema for the `/functional-graph/upsert` REST payload (mirrored from the n8n flow). Reference only; the agent self-validates against the rules in its system prompt.
+- `schemas/upsert.schema.json` — JSON-schema for the `/functional-graph/v2/upsert` REST payload (v2 accepts the same body as v1). Reference only; the agent self-validates against the rules in its system prompt.
 - `validators/validate.py` — Standalone debugging helper (subcommands `schema | rule-a | forbidden | citations | coverage`). **Not invoked by the skill — the agent self-validates in Phase 6.** Useful only for manual inspection of `ui_ep{NN}_{persona}_*.json` files.
 - `validators/requirements.txt` — Python dependency: `jsonschema`
 
@@ -70,7 +70,7 @@ structurally in `action.apis[]`.
    - `apiBase` — Breeze backend host (e.g. `https://isometric-backend.accionbreeze.com`)
    - `uiBaseUrl` — Breeze UI host (e.g. `https://app.accionbreeze.com`)
 
-   See `/breeze:setup-project` → "URL resolution" for the canonical rule. Throughout this skill, `<apiBase>` and `<uiBaseUrl>` are placeholders the parent substitutes at runtime — never hardcode literal hosts.
+   See `CLAUDE.md` → "Service URLs" for the canonical rule. Throughout this skill, `<apiBase>` and `<uiBaseUrl>` are placeholders the parent substitutes at runtime — never hardcode literal hosts.
 
 3. **Resolve `apiKey`** (required — the sub-agent POSTs the upsert directly):
    - Check `.breeze.json` for `apiKey`. If present → cache and continue.
@@ -448,7 +448,7 @@ Recommend the user resume with:
 
 `entrypoints.failed[]` holds per-(EP, persona) failures with reasons mapped to the agent's summary-line prefixes (`FAIL_VALIDATE`, `FAIL_WRITE`, `FAIL_UPSERT`). For each:
 
-- **`FAIL_UPSERT` only** — the payload is sound but the POST failed. Re-curl the same OUTPUT_PATH directly via `<API_BASE>/functional-graph/upsert` with `api-key:` header. No re-spawn needed.
+- **`FAIL_UPSERT` only** — the payload is sound but the POST failed. Re-curl the same OUTPUT_PATH directly via `<API_BASE>/functional-graph/v2/upsert?llmPlatform=<LLM_PLATFORM>` with `api-key:` header. No re-spawn needed.
 - **`FAIL_VALIDATE` / `FAIL_WRITE`** — re-spawn the sub-agent with the same input block; the agent will regenerate from scratch. If the same failure repeats, inspect the OUTPUT_PATH on disk to understand the defect class, then patch the agent prompt.
 - **Recovery loop**: clear matching entries from `failed[]`, re-add `(epId, persona)` to `remaining[]` (or pass explicitly via continue prompt), resume the skill.
 

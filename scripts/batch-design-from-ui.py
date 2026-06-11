@@ -253,7 +253,7 @@ def main():
 
     # Verify .breeze.json exists
     if not BREEZE_CONFIG.exists():
-        log("ERROR: .breeze.json not found. Run /breeze:setup-project first.")
+        log("ERROR: .breeze.json not found. Run /breeze:project setup first.")
         sys.exit(1)
 
     # Fetch unprocessed scenarios
