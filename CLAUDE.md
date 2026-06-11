@@ -62,7 +62,6 @@ Begin the response with one line so the user can verify scope at a glance:
 - `/breeze:project setup` — initial link (or full bootstrap).
 - `/breeze:project use <name|uuid>` — switch the persistent default.
 - `/breeze:project create <name>` — create a new project and link it.
-- `/breeze:setup-project` — deprecated alias for `/breeze:project setup`.
 
 A successful `--project` override, bare UUID, or natural-language hint applies to
 that invocation only; it does not change `.breeze.json`. For cross-project
@@ -90,7 +89,7 @@ for non-MCP consumers:
 
 - the `breeze-code-ontology-generator` CLI run by `/breeze:onboard-repository`
   in **automatic upload** mode,
-- the REST `/functional-graph/upsert` path used by
+- the REST `/functional-graph/v2/upsert` path used by
   `/breeze:generate-functional-from-ui` (its flow-structuring sub-agent POSTs
   with an `api-key:` header),
 - the retired `/breeze:deprecated-cluster-pipeline` (resume of historical runs).
@@ -122,7 +121,6 @@ These skills are exempt from the resolution flow above — run them as requested
 | Skill / mode | Why exempt |
 |---|---|
 | `/breeze:project setup` | Creates `.breeze.json`. |
-| `/breeze:setup-project` | Deprecated alias for `/breeze:project setup`. Same exemption. |
 | `/breeze:project auth` | OAuth handshake only. |
 | `/breeze:project list` | Lists accessible projects. |
 | `/breeze:project create <name>` | Creates a new project and links it. |

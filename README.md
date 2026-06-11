@@ -48,8 +48,6 @@ You can confirm everything loaded by running:
 /breeze:project setup
 ```
 
-(`/breeze:setup-project` remains as a backward-compatible alias for the same flow.)
-
 This walks you through:
 - Authenticating the Breeze MCP (browser-based Keycloak sign-in; no API key to paste)
 - Linking to an existing Breeze project or creating a new one
@@ -94,8 +92,7 @@ Then **restart Claude Code** again so the updated skills/hooks/MCP definitions a
 
 | Skill | Command | Description |
 |-------|---------|-------------|
-| **Project** | `/breeze:project [show \| list \| use <name> \| create <name> \| auth \| status \| setup]` | Canonical home for all project management. Sub-modes: `show` (active project), `list` (all accessible), `use <name\|uuid>` (switch and persist), `create <name> [--desc "..."]` (create and link), `auth` (re-authenticate MCP), `status` (full metadata report), `setup` (full bootstrap = auth + link/create + ontology check). |
-| **Setup Project** | `/breeze:setup-project` | Backward-compatible alias for `/breeze:project setup`. Identical behavior. Prefer `/breeze:project setup` for new docs. No API key collected here (MCP uses Keycloak OAuth). Does **not** upload repos or documents. |
+| **Project** | `/breeze:project [show \| list \| use <name> \| create <name> \| auth \| status \| setup]` | Canonical home for all project management. Sub-modes: `show` (active project), `list` (all accessible), `use <name\|uuid>` (switch and persist), `create <name> [--desc "..."]` (create and link), `auth` (re-authenticate MCP), `status` (full metadata report), `setup` (full bootstrap = auth + link/create + ontology check). No API key collected here (MCP uses Keycloak OAuth); does **not** upload repos or documents. |
 | **Onboard Repository** | `/breeze:onboard-repository [repo-path]` | Get a source repository into the Breeze code graph. Wraps `breeze-code-ontology-generator` with `--capture-statements`, verifies Node.js is **exactly v22.x** (Node 24+ fails silently due to a tree-sitter ESM/TLA issue), and resolves the target repo from an argument or the current directory. Supports two modes: automatic (CLI streams to backend with an API key) or manual (CLI writes ndjson locally and you upload via the Breeze UI). API key is optional. Run once per repo (frontend + each backend). |
 
 ### Search & analysis
@@ -226,4 +223,4 @@ claude --plugin-dir ../breeze-claude-plugin
 - All Breeze service URLs live in `breeze.config.json` at the plugin root (`uiBaseUrl`, `apiBase`). To repoint every skill at a different Breeze deployment, edit that single file — or override `uiBaseUrl` / `apiBase` per-project in `.breeze.json`.
 - The plugin ships a **`CLAUDE.md`** at the root. Claude Code auto-loads it and it centralizes the project-resolution flow, the exempt-skills list, the auth-on-401 rule, and the `.breeze.json` mutation policy. Individual `skills/*/SKILL.md` files defer to it rather than duplicating the rule.
 - The **Design** skills require a Figma MCP server to be configured separately.
-- All skills except `/breeze:project` (in `setup` / `auth` / `list` / `create` modes), the `/breeze:setup-project` alias, and `/breeze:visual-to-text` (reads a design + writes local stories, no MCP calls) require a resolvable project (see **Project resolution** above).
+- All skills except `/breeze:project` (in `setup` / `auth` / `list` / `create` modes) and `/breeze:visual-to-text` (reads a design + writes local stories, no MCP calls) require a resolvable project (see **Project resolution** above).

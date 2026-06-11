@@ -86,13 +86,13 @@ inventory in context; it reads a single summary line back from each sub-agent.
 ## Bootstrap (run ONCE at skill start)
 
 1. Read `.breeze.json` from the plugin working directory.
-2. If missing or incomplete → tell the user to run `/breeze:setup-project`.
+2. If missing or incomplete → tell the user to run `/breeze:project setup`.
 3. Extract `projectUuid`. Cache it.
 4. **Resolve URLs** from `breeze.config.json` (plugin root), overridable per-project via `.breeze.json`:
    - `apiBase` — Breeze backend host (e.g. `https://isometric-backend.accionbreeze.com`)
    - `uiBaseUrl` — Breeze UI host (e.g. `https://ai.accionbreeze.com`)
 
-   See `/breeze:setup-project` → "URL resolution" for the canonical rule. Throughout this skill, `<apiBase>` and `<uiBaseUrl>` are placeholders the parent substitutes at runtime — never hardcode literal hosts.
+   See `CLAUDE.md` → "Service URLs" for the canonical rule. Throughout this skill, `<apiBase>` and `<uiBaseUrl>` are placeholders the parent substitutes at runtime — never hardcode literal hosts.
 
 5. **Resolve `apiKey`** (required — the sub-agent POSTs the upsert directly):
    - Check `.breeze.json` for `apiKey`. If present → cache and continue.

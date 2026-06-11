@@ -9,7 +9,7 @@ description: >
 
 ## Guard
 
-Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:setup-project`.
+Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:project setup`.
 Extract `projectUuid`.
 
 ---

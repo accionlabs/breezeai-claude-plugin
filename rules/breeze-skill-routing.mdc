@@ -9,7 +9,7 @@ When the user asks about Breeze capabilities or wants to perform a Breeze task, 
 
 | User wants to... | Skill |
 |---|---|
-| First-time setup, init, bootstrap | `/breeze:project setup` (alias: `/breeze:setup-project`) |
+| First-time setup, init, bootstrap | `/breeze:project setup` |
 | Show / list / switch / create project, re-auth | `/breeze:project [show \| list \| use <name> \| create <name> \| auth \| status]` |
 | Upload/onboard a source repo | `/breeze:onboard-repository` |
 | Search features, code, "how does X work" | `/breeze:search` |

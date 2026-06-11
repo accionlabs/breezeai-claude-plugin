@@ -55,7 +55,7 @@ This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE
 
 URLs (`apiBase`, `uiBaseUrl`) come from `breeze.config.json` at the
 plugin root, overridable per-project via `.breeze.json`. See
-`/breeze:setup-project` → "URL resolution" for the full rule.
+`CLAUDE.md` → "Service URLs" for the full rule.
 Throughout this skill, `<apiBase>` and `<uiBaseUrl>` are placeholders
 the LLM substitutes at runtime — don't hardcode the literal hosts.
 
@@ -282,7 +282,7 @@ error verbatim — don't paraphrase. Common failure modes:
 | Silent exit with no output beyond `npm warn …` lines | Node 24 or newer — tree-sitter native bindings can't be loaded via `require()` because the bindings are ESM with top-level await | Switch to Node 22.x (Step 2). Don't trust a "completed with exit 0" if no `./breezeai/` directory was created | both |
 | `Error [ERR_REQUIRE_ASYNC_MODULE]: ... tree-sitter-c-sharp/bindings/node/index.js` | Same root cause — bindings use top-level await; surfaces visibly on some Node versions | Switch to Node 22.x | both |
 | `401 Unauthorized` | Wrong / expired API key | Delete the `apiKey` field from `.breeze.json` and re-run this skill — Step 1 will prompt again (or pick Mode B) | A |
-| `404 Project not found` | Wrong projectUuid in `.breeze.json` | Re-run `/breeze:setup-project` and re-link | A |
+| `404 Project not found` | Wrong projectUuid in `.breeze.json` | Re-run `/breeze:project setup` and re-link | A |
 | `ECONNREFUSED` / DNS error on baseurl | Wrong `apiBase` | Check the value in `.breeze.json` | A |
 | Hangs at "Uploading…" for many minutes | Large repo, slow link | Wait — uploads are streamed; cancel only if 30+ min with no progress | A |
 | Parser errors during walk | Unsupported language / encoding | Surface verbatim; the ndjson written so far still uploads in Mode B | both |
@@ -377,7 +377,7 @@ If the user has a multi-repo system, suggest the recommended order:
 
 ## See also
 
-- `/breeze:setup-project` — must be run first to create `.breeze.json`
+- `/breeze:project setup` — must be run first to create `.breeze.json`
   and link a `projectUuid`. The API key is **not** collected there
   any more; this skill prompts for it in Step 1 when needed.
 - `/breeze:generate-functional-from-ui` — next step after onboarding

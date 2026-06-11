@@ -23,12 +23,12 @@ applies before executing ANY project-bound Breeze skill or breeze-mcp tool:
 OAuth — Claude Code handles sign-in automatically and does not read `apiKey` from
 `.breeze.json`. On a 401, point the user at `/breeze:project auth`. The stored
 `apiKey` is used ONLY by non-MCP consumers (the ontology-generator CLI in
-automatic mode and the REST `/functional-graph/upsert` path); those skills prompt
+automatic mode and the REST `/functional-graph/v2/upsert` path); those skills prompt
 for it on-demand.
 
 **Exception:** Skip project resolution for the exempt modes —
-`/breeze:project setup | auth | list | create` and the `/breeze:setup-project`
-alias (they create `.breeze.json` or only handle auth/listing).
+`/breeze:project setup | auth | list | create` (they create `.breeze.json` or
+only handle auth/listing).
 
 **Security:** Never print API keys or AWS credentials in output. Store
 credentials only in `.breeze.json` (gitignored).

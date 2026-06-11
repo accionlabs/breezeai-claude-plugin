@@ -6,8 +6,7 @@ description: >
   am I on", "list projects", "switch project", "set project", "create
   project", mid-session project changes, MCP re-authentication, and
   first-time workspace bootstrap. This is the canonical home for all
-  project-management operations. The legacy `/breeze:setup-project`
-  is a backward-compatible alias for `/breeze:project setup`.
+  project-management operations.
 ---
 
 ## Guard
@@ -235,9 +234,8 @@ default.
 ## Mode: setup
 
 Full workspace bootstrap. Performs auth → link/create → ontology check → status
-in one flow. This is the canonical home for what was previously
-`/breeze:setup-project` (which is now a backward-compatible alias for this
-mode). It links the project and reports readiness — it does **not** upload repos
+in one flow. This is the canonical home for first-time workspace bootstrap. It
+links the project and reports readiness — it does **not** upload repos
 or documents (use `/breeze:onboard-repository` for code, and
 `/breeze:analyze-functional` / `/breeze:visual-to-text` for documents and
 designs).
@@ -351,5 +349,3 @@ designs).
 - **When in doubt** between `setup` and `use`: use `setup` for first-time link
   or when you suspect auth might be broken; use `use` for a fast mid-session
   switch on an already-authenticated session.
-- **Backward compatibility:** `/breeze:setup-project` continues to work as a
-  thin alias for `/breeze:project setup`. Behavior is identical.

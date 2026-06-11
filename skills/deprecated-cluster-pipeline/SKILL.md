@@ -96,7 +96,7 @@ The pipeline uses multiple passes:
 ## Guard
 
 Read `.breeze.json`. It must contain `projectUuid` — if it doesn't,
-tell the user to run `/breeze:setup-project` first.
+tell the user to run `/breeze:project setup` first.
 
 ### Ensure the API key is available
 
@@ -435,7 +435,7 @@ then supplement with local file reading for UI template details that the code gr
 
 ## Guard
 
-Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:setup-project`.
+Read `.breeze.json`. If missing or incomplete, tell the user to run `/breeze:project setup`.
 Extract `projectUuid`. Call `Call_Get_Project_Details_` with `uuid=<projectUuid>` once
 and cache the returned project `name` — required by the bulk upsert in Phase 7.
 
