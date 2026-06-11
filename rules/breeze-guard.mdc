@@ -1,19 +1,34 @@
 ---
-description: Pre-execution guard for all Breeze skills. Validates .breeze.json credentials before any Breeze MCP tool or skill is used.
+description: Pre-execution guard for all Breeze skills. Resolves the active project before any Breeze MCP tool or skill is used, following the central CLAUDE.md project-resolution flow.
 alwaysApply: true
 ---
 
 # Breeze Pre-Execution Guard
 
-Before executing ANY Breeze skill or using any breeze-mcp tool:
+Project resolution and auth are defined centrally in `CLAUDE.md` at the plugin
+root. Skills defer to it rather than re-deriving the guard. The summary below
+applies before executing ANY project-bound Breeze skill or breeze-mcp tool:
 
-1. Read `.breeze.json` from the project root.
-2. If `.breeze.json` is missing, tell the user: "Run `/breeze:setup-project` first to set up your Breeze workspace." and STOP.
-3. Verify `.breeze.json` contains `apiKey`. If missing: "`.breeze.json` is missing `apiKey`. Run `/breeze:setup-project` to complete setup." and STOP.
-4. Verify `.breeze.json` contains `projectUuid`. If missing: "`.breeze.json` is missing `projectUuid`. Run `/breeze:setup-project` to link a project." and STOP.
+1. **Resolve the project** per CLAUDE.md's flow:
+   - **Step 1 — from the prompt:** a `--project <name|uuid>` flag, a bare UUID,
+     or a natural-language project hint. A match applies to that invocation only
+     and does NOT mutate `.breeze.json`.
+   - **Step 2 — `.breeze.json` fallback:** use `projectUuid` if present.
+   - **If neither resolves:** call `Call_List_Project_`, show the accessible
+     projects, and ask the user to pick one (or run `/breeze:project setup`).
+     Do NOT hard-error — many prompts simply omit a project hint.
+2. **Announce** the active project: begin the response with `Project: <name> (<uuid>)`.
 
-**Exception:** Skip this guard for `/breeze:setup-project` itself (it creates `.breeze.json`).
+**No `apiKey` requirement for MCP.** MCP tool calls authenticate via Keycloak
+OAuth — Claude Code handles sign-in automatically and does not read `apiKey` from
+`.breeze.json`. On a 401, point the user at `/breeze:project auth`. The stored
+`apiKey` is used ONLY by non-MCP consumers (the ontology-generator CLI in
+automatic mode and the REST `/functional-graph/upsert` path); those skills prompt
+for it on-demand.
 
-**Authentication:** MCP tool calls authenticate via Keycloak OAuth — Claude Code handles sign-in automatically and does not read `apiKey` from `.breeze.json`. The stored `apiKey` is used by non-MCP consumers (the ontology-generator CLI and the REST upsert path).
+**Exception:** Skip project resolution for the exempt modes —
+`/breeze:project setup | auth | list | create` and the `/breeze:setup-project`
+alias (they create `.breeze.json` or only handle auth/listing).
 
-**Security:** Never print API keys or AWS credentials in output. Store credentials only in `.breeze.json`.
+**Security:** Never print API keys or AWS credentials in output. Store
+credentials only in `.breeze.json` (gitignored).

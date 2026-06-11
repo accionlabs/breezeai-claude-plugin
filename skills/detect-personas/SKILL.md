@@ -8,11 +8,13 @@ description: >
   "find user types", "analyze personas from UI", "persona detector".
 ---
 
+## Project
+
+This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
+
 ## Guard
 
-1. Read `.breeze.json` in the current working directory. If missing or incomplete, tell the user to run `/breeze:setup-project`.
-2. Extract `projectUuid`.
-3. **Validate this is a frontend UI repo.** Check for ANY of these markers:
+1. **Validate this is a frontend UI repo.** Check for ANY of these markers:
    - `package.json` exists AND contains one or more of: `react`, `vue`, `angular`, `svelte`, `next`, `nuxt`, `gatsby`, `remix`, `solid`, `lit`, `ember`, `backbone`
    - Directories like `src/pages/`, `src/views/`, `src/screens/`, `src/routes/`, `src/app/`, `app/`, `pages/`
    - Route definition files (e.g., `routes.ts`, `router.ts`, `routes.tsx`, `router.tsx`, `app-routing.module.ts`)

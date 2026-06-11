@@ -6,10 +6,10 @@ description: >
   Use when: "analyze this requirement", "is this covered", "impact
   of this change", "break down this user story".
 ---
-## Guard
 
-Read `.breeze.json`. If missing, tell user to run `/breeze:setup-project`.
-Extract `projectUuid`.
+## Project
+
+This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
 
 # requirement-analysis:
 
@@ -33,7 +33,7 @@ If the input is text-based, accept it in any of the following formats:
 - Use `Documents` MCP to find related source material in the project
 
 **C. Source code** (file paths, code snippets, class/method references)
-- Use `Code_Graph_Search` and `Get_Code_File_Details` to understand the code
+- Use `Code_Graph_Search` and `Get_Code_Nodes_By_Label` (label `File`, filtered by `path` + `repositoryName` or `id`, `children=true`) to understand the code
 - Translate code to functional language — extract WHAT the code does, not HOW
 - Map: classes → service boundaries, methods → processing phases,
   conditionals → business rules, queries → data operations

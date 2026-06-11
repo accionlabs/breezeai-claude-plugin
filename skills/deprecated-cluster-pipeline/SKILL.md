@@ -618,7 +618,7 @@ UI-specific details the code graph cannot capture.
 - Search for service hooks used by the page: `Code_Graph_Search` with `"use<HookName> service hook"`
 - Extract from code graph results: imports, function signatures, `calls` field (call chains),
   class structures, injected services, route decorators
-- Use `Get_Code_File_Details` with the File node ID for full hierarchy (classes → methods → statements)
+- Use `Get_Code_Nodes_By_Label(label="File", filters={"id": <fileId>} OR {"path": <path>, "repositoryName": <repo>}, children=true)` for full hierarchy (classes → methods → statements)
 - For child/sub-components referenced in the page, search code graph for those too
 
 ### Step 2: Read local files for UI template details
@@ -644,7 +644,7 @@ UI-specific details the code graph cannot capture.
 1. From Phase 2 Step 3, take each identified API endpoint
 2. Search the **backend** code graph with descriptive queries:
    `"<controllerName> <httpMethod> <endpointDescription> handler"` (not just URL paths)
-3. Use `Get_Code_File_Details` on backend controller/service files to get:
+3. Use `Get_Code_Nodes_By_Label(label="File", filters={"path": <path>, "repositoryName": <repo>}, children=true)` on backend controller/service files to get:
    - Route decorators (e.g., `@Post('/login', ...)`) confirming the endpoint
    - Method call chains (what the handler calls: services, repositories, helpers)
    - Database queries (`query_statement` type in statements)

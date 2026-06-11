@@ -47,17 +47,11 @@ PDFs, markdown, and other text inputs as part of the analysis flow)
 and `/breeze:visual-to-text` (which converts UI design visuals into
 structured user stories that feed into the same flow).
 
-## Guard
+## Project
 
-Read `.breeze.json` from the **plugin working directory**. Required
-field:
+This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
 
-- `projectUuid`
-
-If `projectUuid` is missing, tell the user to run `/breeze:setup-project`
-first and stop. `apiKey` is **not** required here — it's collected
-on-demand in Step 1 below, because the ontology-generator CLI is one
-of the few consumers that actually needs it.
+> **API key:** this skill additionally needs a Breeze `apiKey` only if you choose **automatic upload** mode (the CLI streams to the backend). Manual mode needs no key. Collect it on-demand as described below.
 
 URLs (`apiBase`, `uiBaseUrl`) come from `breeze.config.json` at the
 plugin root, overridable per-project via `.breeze.json`. See

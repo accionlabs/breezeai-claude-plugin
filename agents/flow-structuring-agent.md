@@ -1,9 +1,9 @@
 ---
 name: flow-structuring-agent
-description: Take ONE frontend or backend entry point plus the persona that owns it, read the relevant code, produce a complete Functional Graph subtree (Persona → Outcomes → Scenarios → Steps → Actions) byte-valid against the upsert schema, self-validate it (schema / rule-a / forbidden words / citations), write it to disk, and POST it to the Breeze /functional-graph/upsert REST endpoint. Designed to be invoked by the generate-functional-from-ui-v2 skill (one call per (EP, persona) pair). Returns a single summary line with HTTP status and functionalId.
+description: Take ONE frontend or backend entry point plus the persona that owns it, read the relevant code, produce a complete Functional Graph subtree (Persona → Outcomes → Scenarios → Steps → Actions) byte-valid against the upsert schema, self-validate it (schema / rule-a / forbidden words / citations), write it to disk, and POST it to the Breeze /functional-graph/upsert REST endpoint. Designed to be invoked by the generate-functional-from-ui skill (one call per (EP, persona) pair). Returns a single summary line with HTTP status and functionalId.
 model: sonnet
 effort: medium
-maxTurns: 50
+maxTurns: 100
 tools:
   - Read
   - Glob
@@ -98,9 +98,10 @@ If `EXISTING_NEIGHBORHOOD.outcomes` is empty, the graph has nothing similar yet 
    - **Read it** if it is referenced inside a JSX `<form>` block.
    - **Skip** pure visual primitives (`Skeleton`, `LoadSkeleton`, `Spinner`, `NoData`, `Empty`, `Avatar` with no onClick, `Badge`, `Tooltip`, `Separator`, `Card` shell with no state).
 3. For every `setPanelType("X")` / disclosure-hook trigger you find, locate and `Read` the renderer.
-4. Stop reading when: every form's fields are known, every API URL is resolved, every modal/drawer/panel's contents are known, every validation rule is sourced.
-5. Record every file you read in `audit.filesRead`.
-6. Record every file you considered and skipped in `audit.skippedComponents[]` with a one-line reason.
+4. **Popup-trigger traversal (mandatory).** For every onClick handler, menu-item handler, or render-time conditional that opens a Popup / Modal / Dialog / Drawer / Sheet / Popover (signals: `setOpen`, `setIsOpen`, `setAnchorEl`, `openDialog`, `useDisclosure`, `<X open={…} onClose={…}>`, conditional render of `<*Dialog*>` / `<*Modal*>` / `<*Popup*>` / `<*Popover*>` / `<*Drawer*>`), you MUST locate the popup's source component file and `Read` it before completing Phase 1. Do not assume "the popup just shows the same fields described at the trigger" — popups frequently contain entire sub-filter trees, include/exclude radio groups, multi-step sub-forms, or region/role-gated sections that are invisible from the trigger row alone. **If the popup component is referenced indirectly (imported by a child of SEED_FILE, not SEED_FILE itself), use `Grep` on the trigger's label / handler name / suspected component name (`*Popup`, `*Dialog`, `*Modal` under `src/components/`) to locate it.** Record every popup component file in `audit.filesRead` and enumerate its interactive elements as Actions per Phase 2 Pattern A. If a popup's contents cannot be located in code after a reasonable search, add an `audit.warnings[]` entry of type `popup_source_unresolved` naming the trigger and the searches attempted — do NOT fabricate or omit silently.
+5. Stop reading when: every form's fields are known, every API URL is resolved, every modal/drawer/panel/popup's contents are known, every validation rule is sourced.
+6. Record every file you read in `audit.filesRead`.
+7. Record every file you considered and skipped in `audit.skippedComponents[]` with a one-line reason.
 
 ### Phase 2 — Field Enumeration (mandatory)
 
@@ -221,10 +222,14 @@ A high-level business capability a persona needs to accomplish. NOT a technical 
 - Prefer broader Outcomes; capture variation as Scenarios.
 - Create a new Outcome only if no existing one can logically contain the intent.
 - Quality checks: understandable by a non-technical stakeholder, stable across implementation changes, broad enough to absorb future Scenarios.
-- If more than 3-4 new Outcomes appear necessary for one EP, you are over-segmenting — re-evaluate.
+- If more than 3-4 new Outcomes appear necessary for one EP, you are over-segmenting — re-evaluate. Common anti-patterns to AVOID:
+  - **Per-widget outcomes.** A dashboard page with 4 summary cards (e.g. Latest Updates / Pipeline / Key Accounts / Updates feed) is ONE outcome — e.g. `Monitor Recent Activity` — with each card surfacing as a Scenario or Step. Do NOT emit `Track Pipeline Rollups`, `Track Key Account Rollups`, `Track Updates Feed` as separate Outcomes.
+  - **Implementation concerns elevated to outcomes.** `Initialise Session State`, `Load Page Data`, `Fetch Master Data`, `Hydrate Stores`, `Acknowledge Popups` are NOT user-facing outcomes. They are setup steps inside a Scenario (or out of user scope entirely). Outcomes describe what a user accomplishes, not what the page boots up.
+  - **Tab variants of the same intent.** A search page with Projects-tab and Companies-tab is ONE outcome (`Search Projects and Companies`) with two Scenarios. Do NOT split them into `Search Projects` and `Search Companies` as separate Outcomes.
+  - **One outcome per popup/dialog.** Opening a saved-search dialog or a filter popup is NOT its own outcome; it's a Step or Scenario inside the parent's outcome.
 
-**Good:** `Manage Code Ontologies`, `Monitor Compliance Status`
-**Bad:** `Handle API Requests`, `Render Components`, `Open Dashboard`
+**Good:** `Manage Code Ontologies`, `Monitor Compliance Status`, `Discover Projects and Companies via Dashboard Search`
+**Bad:** `Handle API Requests`, `Render Components`, `Open Dashboard`, `Track Pipeline Watchlists`, `Initialise Dashboard Session State`
 
 ### Scenario
 

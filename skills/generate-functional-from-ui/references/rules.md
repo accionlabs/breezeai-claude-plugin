@@ -89,7 +89,7 @@ by persona type:
 | `Glob` / `Read` / `Grep` on the UI folder | **Primary** — pages, widgets, services, queries, stores | Filesystem has literal JSX, decorator strings, store fields, hook names |
 | `Code_Graph_Search` on the UI repo | **Optional accelerator** — locate entry-point pages or trace cross-file flows | Faster than blind globbing, but always confirm by `Read`ing the actual file |
 | `Functional_Graph_Search` | **Dedup check only** — never as a source of code knowledge | See Step 1 |
-| `Get_Code_File_Details` | **Avoid** for frontend reading | Use raw `Read` on JSX/TSX files |
+| `Get_Code_Nodes_By_Label` | **Avoid** for frontend reading | Use raw `Read` on JSX/TSX files |
 
 ---
 

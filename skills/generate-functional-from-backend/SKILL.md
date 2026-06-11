@@ -15,6 +15,10 @@ description: >
 argument-hint: "[repo-path]"
 ---
 
+## Project
+
+This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
+
 ## What this skill does
 
 Transforms a backend repo into the **System / External System** half of the
@@ -22,7 +26,7 @@ functional graph (Persona > Outcome > Scenario > Step > Action), with API calls
 captured structurally in `action.apis[]`.
 
 ```
-generate-functional-from-ui-v2   -> User-persona scenarios
+generate-functional-from-ui   -> User-persona scenarios
 generate-functional-from-backend -> System-persona scenarios   (this skill)
 ```
 
@@ -125,7 +129,7 @@ inventory in context; it reads a single summary line back from each sub-agent.
 3. Check if cwd looks like a backend repo.
 4. Ask the user — single prompt: "Which backend repo do you want me to read? Provide an absolute path."
 5. Persist the chosen path to `.breeze.json` under `targetRepos.backend`.
-6. If the path looks like a frontend repo, stop and suggest `/breeze:generate-functional-from-ui-v2`.
+6. If the path looks like a frontend repo, stop and suggest `/breeze:generate-functional-from-ui`.
 
 > **Rules:** see [rules.md](references/rules.md) → "Backend repo detection"
 
@@ -171,7 +175,7 @@ The agent writes `entrypoints.json` and returns ONE line:
 ```
 OK · framework: <name> · rest: <N> · graphql: <N> · queue: <N> · orphans: <N> · total: <N> · graphqlNeedsConfirm: <true|false> · path: <OUTPUT_PATH>
 ```
-Failure prefixes: `FAIL_WRITE`, `FAIL_DISCOVERY` (no recognizable backend surface — stop and report; suggest `/breeze:generate-functional-from-ui-v2` if it's actually a frontend repo).
+Failure prefixes: `FAIL_WRITE`, `FAIL_DISCOVERY` (no recognizable backend surface — stop and report; suggest `/breeze:generate-functional-from-ui` if it's actually a frontend repo).
 
 ### Step 0.3 — GraphQL confirmation gate ⛔ (parent-side; only if `graphqlNeedsConfirm: true`)
 
@@ -366,10 +370,10 @@ When context budget hits ~75%, flush the current checkpoint and stop. Resume wit
 
 ## When NOT to use
 
-- **Frontend-only repos** — use `/breeze:generate-functional-from-ui-v2`
+- **Frontend-only repos** — use `/breeze:generate-functional-from-ui`
 
 ## See also
 
-- `/breeze:generate-functional-from-ui-v2` — the frontend half (User-persona pass)
+- `/breeze:generate-functional-from-ui` — the frontend half (User-persona pass)
 - `/breeze:validate-functional-graph` — quality checks after generation
 - `/breeze:generate-spec` — export the graph as a spec doc

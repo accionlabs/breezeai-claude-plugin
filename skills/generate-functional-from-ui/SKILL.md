@@ -1,91 +1,124 @@
 ---
 name: generate-functional-from-ui
 description: >
-  Generate User-persona functional graph from a frontend UI repo.
-  Produces human-persona scenarios + actions with API endpoints in
-  apis[]. Use when: generate functional from UI, ui to functional,
-  frontend functional pass.
+  Generate User-persona functional graph from a frontend UI repo with
+  rooted per-(EP, persona) sub-agent depth pass, mandatory field
+  enumeration, persona-conditional visibility audit, Code_Graph_Search
+  escalation (no budget cap), and Python-helper validators
+  (schema / rule-a / forbidden / citations / coverage). Produces
+  upsert-ready payloads with apis[] capture. One sub-agent run per
+  (EP, persona) pair.
 argument-hint: "[repo-path]"
 ---
 
+## Project
+
+This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
+
+> **API key:** this skill additionally needs a Breeze `apiKey` for its non-MCP REST upsert path. Collect it on-demand as described below — MCP calls themselves do not use it.
+
 ## What this skill does
 
-Transforms a frontend UI repo into the **User-persona** half of the
-functional graph (Persona > Outcome > Scenario > Step > Action),
-with API calls captured structurally in `action.apis[]`.
+Turn a frontend UI repo into the human-persona half of the functional graph
+(Persona → Outcome → Scenario → Step → Action) with API calls captured
+structurally in `action.apis[]`.
 
-```
-generate-functional-from-ui      -> User-persona scenarios   (this skill)
-generate-functional-from-backend -> System-persona scenarios
-```
+**How this skill works (per-(EP, persona) sub-agent depth pass):**
 
-The two passes are fully independent — they share the functional
-graph as the only common surface (idempotent merge by outcome name).
+| Concern | Approach |
+|---|---|
+| Per-EP depth | **Installed agent `breeze:flow-structuring-agent`** invoked per (EP, persona); tool-scoped, model-pinned (sonnet), system prompt cached across calls |
+| Persona-conditional visibility | **Mandatory Phase 2.5** — RBAC / role / permission / feature-flag / tier gate hunt inside the sub-agent, with explicit field-level scope |
+| Multi-persona EPs | **One sub-agent run per persona** that can reach the EP |
+| Field enumeration | **Mandatory Phase 2 inside sub-agent** with `{label, type, required, default, validation, options, visibleTo}` per field |
+| Code_Graph_Search | **Hard floor: ≥1 mandatory hygiene sweep per run; no budget cap thereafter** |
+| Step / Action quantity | **Guidance, not caps** — enumeration overrides |
+| Output validation | **Self-validation inside the sub-agent** (Phase 6: schema / rule-a / chain / forbidden / citations) with in-place repair — parent runs NO validators |
+| Upsert | **Sub-agent POSTs directly** to `/functional-graph/upsert` with `api-key:` header — no parent-side curl |
+| Citations | `<repo_name>/<relative path>` enforced |
 
 ## Resources
 
-- For all rules (functional graph definitions, UI-pass-specific rules, validation, pitfalls), read [references/rules.md](references/rules.md)
+- **Installed agent** — `agents/flow-structuring-agent.md` (plugin root). Invokable as `subagent_type: "breeze:flow-structuring-agent"`. The agent's full methodology — phases, rules, schema, self-check, self-validate, write-to-disk, upsert — lives in its system prompt.
+- `references/flow-structuring-agent.prompt.md` — short **per-call input renderer** with `{{...}}` placeholders. The parent substitutes and passes the rendered text as the `prompt` argument.
+- `references/rules.md` — functional graph semantics (also embedded in the agent's system prompt)
+- `schemas/upsert.schema.json` — JSON-schema for the `/functional-graph/upsert` REST payload (mirrored from the n8n flow). Reference only; the agent self-validates against the rules in its system prompt.
+- `validators/validate.py` — Standalone debugging helper (subcommands `schema | rule-a | forbidden | citations | coverage`). **Not invoked by the skill — the agent self-validates in Phase 6.** Useful only for manual inspection of `ui_ep{NN}_{persona}_*.json` files.
+- `validators/requirements.txt` — Python dependency: `jsonschema`
 
 ## Inputs
 
-- **UI repo path** — if provided as argument (`$ARGUMENTS`), use it
-  directly; otherwise resolved in Phase -1
-- **`.breeze.json`** — for `projectUuid`
-- **Existing functional graph** — queried for dedup, not assumed empty
-- **Optional: `entrypoints.json`** if resuming from a prior session
-  (looked up inside the UI repo directory)
+- **UI repo path** — argument (`$ARGUMENTS`) or resolved in Phase -1
+- **`.breeze.json`** — for `projectUuid` and `targetRepos.frontend`
+- **Existing functional graph** — queried per (EP, persona) for dedup
+- **Optional: `entrypoints.json`** if resuming from a prior session (looked up inside the UI repo directory)
 
 ## Outputs
 
-- **Functional graph** updated with User-persona scenarios + actions
-- **`entrypoints.json`** — inventory + running checkpoint (written
-  inside the user-provided UI repo directory, e.g.
-  `<uiRepo>/entrypoints.json`)
+- **Functional graph** updated with per-persona payloads (idempotent merge by name)
+- **`entrypoints.json`** — full inventory + per-(EP, persona) checkpoint
+- **Per-(EP, persona) payload files**: `<uiRepo>/ui_ep{NN}_{persona}_{slug}.json` (audit + replay)
 
 ---
 
 # PHASES
 
----
+## Bootstrap (run ONCE at skill start)
 
-## Guard
+1. Resolve `projectUuid` per the **## Project** section above (defers to `CLAUDE.md`). Cache it.
+2. **Resolve URLs** from `breeze.config.json` (plugin root), overridable per-project via `.breeze.json`:
+   - `apiBase` — Breeze backend host (e.g. `https://isometric-backend.accionbreeze.com`)
+   - `uiBaseUrl` — Breeze UI host (e.g. `https://app.accionbreeze.com`)
 
-1. Read `.breeze.json` from the plugin working directory
-2. If missing or incomplete, tell the user to run `/breeze:setup-project`
-3. Extract `projectUuid`
-4. Call `Call_Get_Project_Details_` with `uuid=<projectUuid>` once, cache the returned project `name` — required by the bulk upsert in Step 7
-5. Confirm the project has at least one code ontology indexed
+   See `/breeze:setup-project` → "URL resolution" for the canonical rule. Throughout this skill, `<apiBase>` and `<uiBaseUrl>` are placeholders the parent substitutes at runtime — never hardcode literal hosts.
+
+3. **Resolve `apiKey`** (required — the sub-agent POSTs the upsert directly):
+   - Check `.breeze.json` for `apiKey`. If present → cache and continue.
+   - If missing, prompt the user with this exact wording (mirrors `/breeze:onboard-repository` → Step 1 convention):
+
+     > This skill upserts via REST directly (avoids MCP argument-size limits on large payloads). It needs a Breeze API key.
+     >
+     > Generate one at: `<uiBaseUrl>/mcp/generate/key`
+     > Then paste it back here. I'll save it to `.breeze.json` for future runs.
+     > (Make sure `.breeze.json` is in your `.gitignore`.)
+
+   - Save the pasted key to `.breeze.json` under `apiKey`. Do NOT echo the key back; respond only with "API key saved." Continue.
+
+   **Security:** Never print the key in output, logs, or commits. `.breeze.json` must be in `.gitignore`. The parent passes the key into the sub-agent's input block — both the parent and the agent must avoid echoing it.
+
+4. Call `Call_Get_Project_Details_` with `uuid=<projectUuid>` once; cache the returned `name` — passed to the sub-agent as `PROJECT_NAME` and used in its upsert body.
+5. **Resolve the frontend repo's `codeOntologyId`** (required for sub-agent's `Code_Graph_Search` scoping):
+   - Check `.breeze.json` → `targetRepos.frontendCodeOntologyId`. If present and `targetRepos.frontendRepoName` is also present → cache both and continue.
+   - Otherwise call `Call_List_Repositories_(projectUuid=<projectUuid>)`. The response has `data: [{ _id, name, fileCount, ... }]`.
+   - Confirm at least one indexed repo exists with `fileCount > 0` and `status: "active"`. If none → stop and tell the user to run `/breeze:onboard-repository` first.
+   - **Match the indexed repo to the on-disk frontend repo.** Strategy:
+     1. Compare normalized basenames: lowercase + strip `.`/`-`/`_` from both `targetRepos.frontend`'s basename and each indexed `name`. Pick the first match.
+     2. If no normalized match, and only ONE indexed repo exists, use it (sole-repo fast path).
+     3. If multiple repos exist with no clear match, ask the user once: "Which indexed repo corresponds to `<basename>`?" with the indexed repo names as options.
+   - Save `targetRepos.frontendCodeOntologyId = <_id>` and `targetRepos.frontendRepoName = <name>` to `.breeze.json` for future runs.
+   - Cache both for the per-EP loop. The sub-agent receives them as `CODE_ONTOLOGY_ID` and `INDEXED_REPO_NAME`.
 
 ---
 
 ## Phase -1 — Resolve the target UI repo
 
-1. Check if user passed a path via `$ARGUMENTS` — validate it exists
-   and looks like a frontend repo
+Resolve in this order:
+1. Check `$ARGUMENTS`
 2. Check `.breeze.json` field `targetRepos.frontend`
 3. Check if cwd looks like a frontend repo
-4. Ask the user — single prompt: "Which UI repo do you want me to
-   read? Provide an absolute path."
-5. Persist the chosen path to `.breeze.json`:
-   ```json
-   { "targetRepos": { "frontend": "/abs/path/to/ui-repo" } }
-   ```
-6. If path has no frontend router file, stop and suggest
-   `/breeze:generate-functional-from-backend`
-
-> **Rules:** see [rules.md](references/rules.md) → "Frontend repo detection"
+4. Ask the user — single prompt for absolute path
+5. Persist to `.breeze.json` under `targetRepos.frontend`
+6. If path has no frontend router file, stop and suggest `/breeze:generate-functional-from-backend`
 
 ---
 
 ## Phase 0 — Discover entry points
 
 If `entrypoints.json` already exists in the UI repo directory:
-1. Read it and display a resume summary: completed EPs, remaining
-   EPs, next EP to process
-2. If user specified a specific EP (e.g., "start with EP 4"), jump
-   to that EP
+1. Read it and display a resume summary: completed EPs, remaining EPs, next EP to process
+2. If the user specified a specific EP (e.g., "start with EP 4"), jump to that EP
 3. Otherwise, pick the next EP from `remaining[]`
-4. Skip all sub-steps below and go directly to the per-EP loop
+4. Skip all sub-steps below and go directly to the per-(EP, persona) loop
 
 Do not overwrite an existing `entrypoints.json`.
 
@@ -111,26 +144,19 @@ Do not overwrite an existing `entrypoints.json`.
 1. Call `Get_all_personas(projectUuid)`
 2. **If personas exist (≥1):**
    - Present them to the user
-   - Ask: _"These personas are already in the graph. Want to use
-     them, or should I re-detect from code using `/breeze:detect-personas`?"_
+   - Ask: _"These personas are already in the graph. Want to use them, or should I re-detect from code using `/breeze:detect-personas`?"_
    - If user accepts → use existing personas, skip to step 6
    - If user wants recheck → proceed to step 3
 3. **If no personas exist, or user requested recheck:**
    - Run `/breeze:detect-personas` against the target UI repo
-   - `/breeze:detect-personas` will output an analysis-only persona
-     matrix (it does NOT write to the graph)
+   - `/breeze:detect-personas` will output an analysis-only persona matrix (it does NOT write to the graph)
    - Use its output as the candidate list
 4. Present the detected personas to the user with source locations
 5. Wait for user confirmation
 6. Record confirmed set in `entrypoints.json` under `personas[]`
-7. Personas are created in the graph as part of the first EP
-   upsert payload (the upsert endpoint creates personas by name
-   if they don't exist yet — idempotent merge). The
-   `entrypoints.json` carries persona data across sessions.
+7. Personas are created in the graph as part of the first EP upsert payload (the upsert endpoint creates personas by name if they don't exist yet — idempotent merge). The `entrypoints.json` carries persona data across sessions.
 
-> **Rules:** see [rules.md](references/rules.md) → "Persona rules (UI pass
-> specific)". This is a **closed set** — do not proceed until user
-> confirms.
+> **Rules:** see [rules.md](references/rules.md) → "Persona rules (UI pass specific)". This is a **closed set** — do not proceed until the user confirms.
 
 ---
 
@@ -143,24 +169,23 @@ Do not overwrite an existing `entrypoints.json`.
 
 ---
 
-### Sub-step 0.4 — Extract route details
+### Sub-step 0.4 — Extract route details (+ per-EP `personas[]`)
 
-For each route capture: `path`, `component`, `title`, `params`,
-`queryParams`, `auth` guards, `variants`.
+For each route capture: `path`, `component`, `title`, `params`, `queryParams`, `auth` guards, `variants`.
+
+**Every entry point also gains a `personas[]` field** listing which detected personas can reach this EP based on auth guards, route variants, RBAC, layouts, subscription gating, or feature flags. Populate it from the persona discovery in sub-step 0.2. If you cannot determine which personas reach an EP, default to the full confirmed persona set — the per-(EP, persona) loop uses `audit.skippedForVisibility[]` to record what each persona can/cannot see.
 
 ---
 
 ### Sub-step 0.5 — Categorize
 
-Group routes by domain category (e.g. Search, Pipeline,
-Notifications, Insights, Settings, Auth).
+Group routes by domain category (e.g. Search, Pipeline, Notifications, Insights, Settings, Auth).
 
 ---
 
 ### Sub-step 0.6 — Discover orphaned views
 
-1. Compare every file under `src/pages/**` and `src/views/**` against
-   routes from 0.3
+1. Compare every file under `src/pages/**` and `src/views/**` against routes from 0.3
 2. For unmatched files, check imports and API calls
 3. Classify each orphan as sub-component, dead code, or truly unused
 
@@ -170,9 +195,7 @@ Notifications, Insights, Settings, Auth).
 
 ### Sub-step 0.7 — Discover non-routed feature surfaces ⛔ HARD GATE
 
-1. Enumerate panel/drawer/modal type constants — grep for `TPanel`,
-   `PanelType`, `DrawerType`, `ModalType`, setter calls, disclosure
-   hooks, feature folders, `*-modal.tsx` / `*-drawer.tsx` etc.
+1. Enumerate panel/drawer/modal type constants — grep for `TPanel`, `PanelType`, `DrawerType`, `ModalType`, setter calls, disclosure hooks, feature folders, `*-modal.tsx` / `*-drawer.tsx` etc.
 2. Locate every renderer for each unique panel type string
 3. Locate every trigger (`setPanelType("X")` call sites)
 4. Read each renderer and classify as viewer or feature-rich
@@ -186,8 +209,7 @@ Notifications, Insights, Settings, Auth).
 
 ### Sub-step 0.8 — Cross-reference backend API routes (optional)
 
-1. If backend repo is indexed in code graph, `Code_Graph_Search` for
-   backend routes
+1. If backend repo is indexed in code graph, `Code_Graph_Search` for backend routes
 2. Flag backend endpoints with no frontend caller
 3. Do NOT modify the graph — just record for review
 
@@ -195,7 +217,7 @@ Notifications, Insights, Settings, Auth).
 
 ### Sub-step 0.9 — Write `entrypoints.json`
 
-1. Write the full inventory to disk with this schema:
+1. Write the full inventory to disk with this schema (note the per-EP `personas[]` field):
 
 ```json
 {
@@ -222,6 +244,7 @@ Notifications, Insights, Settings, Auth).
       "params": [],
       "queryParams": [],
       "variants": [],
+      "personas": ["Subscriber", "Admin"],
       "type": "route",
       "category": "Search",
       "status": "pending"
@@ -233,6 +256,7 @@ Notifications, Insights, Settings, Auth).
       "component": "src/features/pipeline/widgets/add-to-pipeline-form.tsx",
       "pageDir": "src/features/pipeline",
       "auth": true,
+      "personas": ["Subscriber"],
       "type": "panel",
       "trigger": "useAddToPipelineStore.openForm()",
       "triggeredFrom": ["project-detail-header", "search-results-bulk-actions"],
@@ -254,272 +278,182 @@ Notifications, Insights, Settings, Auth).
 
 ---
 
-# PER-EP LOOP (repeat for each entry point)
+# PER-EP LOOP (per (EP, persona) sub-agent)
 
----
+For each entry point `ep` in `remaining[]`, **and for each `persona` in `ep.personas[]`**:
 
-## Step 1 — Dedup check
+## Step 1 — Dedup pre-query
 
-1. `Functional_Graph_Search` for the EP's likely outcome name + 2
-   likely scenario names
-2. Apply dedup decision matrix to decide: reuse, differentiate, or
-   proceed fresh
+```
+Functional_Graph_Search(
+  uuid  = projectUuid,
+  query = f"{persona} {ep.title} {likely outcome name}",
+  limit = 10
+)
+```
 
-> **Rules:** see [rules.md](references/rules.md) → "Dedup decision matrix"
-
----
-
-## Step 2 — Read the page deeply
-
-1. Glob the page directory and `Read` the meaningful files:
-   - `index.{tsx,jsx}` entry component
-   - All `widgets/*`, `components/*`
-   - `queries.{ts,tsx}`, `store.{ts,tsx}`
-   - Any `Form*`, `Popup*`, `Dialog*`, `Modal*`, `Sidebar*`,
-     `Navigation*`
-   - `hooks/*` if present
-2. Skip leaf primitives (`Skeleton`, `LoadSkeleton`, `NoData`, `Empty`)
-3. Follow every panel/drawer/modal trigger out of the page to its
-   renderer
-4. For every imported component matching the drill-down pattern, read
-   the file
-
-> **Rules:** see [rules.md](references/rules.md) → "Follow-the-trigger rule"
-> and "Component-import drill-down rule". Target: name 10-20 distinct
-> user flows after this step, not 2-3.
-
----
-
-## Step 3 — JSX interactive-element inventory
-
-1. Grep the page directory for interactive widget tags and form hooks:
-   ```
-   <Button       <IconButton    <Tab          <Tabs
-   <Checkbox     <Switch        <Toggle       <Stepper
-   <Select       <MenuItem      <Radio        <Autocomplete
-   <Dialog       <Modal         <Popover      <Drawer
-   <TextField    <Input         <DatePicker
-   useState      useForm        zodResolver
-   ```
-2. Build a list: `{ widgetType, label, file, line }` for each unique
-   interactive element
-3. Strip leaf-primitive widgets and form scaffolding noise
-4. This list is the **completeness checklist** for Step 6.5
-
----
-
-## Step 4 — API inventory
-
-1. Grep the page directory for:
-   ```
-   fetchGet|fetchPost|fetchPut|fetchDelete|fetchPatch
-   useQuery|useMutation|useInfiniteQuery
-   apiFetch|axios\.|api\.
-   dispatch\(.*Api
-   ```
-2. For each hit, follow to the service/query file and `Read` it
-3. Extract: literal URL string (resolve template literals), HTTP
-   method, request shape, source location
-4. If a Redux thunk wraps the call, trace one hop: thunk -> service ->
-   URL
-
-> **Rules:** see [rules.md](references/rules.md) → "`apis[]` type reference"
-
----
-
-## Step 5 — Field enumeration for Review actions
-
-1. For rendered data blocks (project header, overview, contact card,
-   table row), enumerate fields by reading JSX render or response DTO
-2. For enum dropdowns populated from master data, follow the hook to
-   its query and find the value list
-3. Put long field lists in the **Scenario description** (not action
-   description)
-
----
-
-## Step 6 — Build payload
-
-1. Map EP to an outcome (one outcome per EP cluster or shared with
-   closely-related EPs)
-2. Build persona -> outcome -> scenario -> step -> action tree
-3. Populate `apis[]` on every action that triggers an API call
-
-**`data` payload** (top-level `personas` array, passed as the `data`
-argument to `bulk_update_functional_nodes` in Step 7):
-
+Group results into `EXISTING_NEIGHBORHOOD`:
 ```json
 {
-  "personas": [
-    {
-      "persona": "User",
-      "description": "...optional...",
-      "citations": [
-        { "type": "code", "name": "<file>", "reference": "<file path>" }
-      ],
-      "outcomes": [
-        {
-          "outcome": "Manage X",
-          "description": "...",
-          "citations": [
-            { "type": "code", "name": "<file>", "reference": "<file path>" }
-          ],
-          "scenarios": [
-            {
-              "scenario": "Submit project search with filters",
-              "description": "User applies the project side-filter and submits a search.",
-              "steps": [
-                {
-                  "step": "Provide search criteria via project side filter",
-                  "actions": [
-                    {
-                      "action": "Submit project search",
-                      "description": null,
-                      "apis": [
-                        {
-                          "type": "REST",
-                          "method": "POST",
-                          "url": "/v2/search/projects2?filter={encoded}",
-                          "request": "ES query body",
-                          "response": "{data:[ProjectRow], totalData}"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    }
+  "outcomes": [
+    { "name": "<outcome>", "id": "...", "score": 0.78,
+      "scenarios": [{ "name": "<scenario>", "id": "...", "score": 0.83 }] }
   ]
 }
 ```
 
-The project `uuid`, `name`, `skip_step_and_action`, `embedding`, and
-`llm_platform` are passed as sibling MCP arguments — they do NOT go
-inside `data`.
+If empty, pass `{"outcomes": []}` — sub-agent will proceed fresh.
 
-> **Rules:** see [rules.md](references/rules.md) → "Persona rules", "Outcome
-> rules", "Action rules", "Quantity targets", "Disambiguation rule",
-> and `../shared/functional-graph-rules.md` for canonical rules.
+## Step 2 — Pre-compute OUTPUT_PATH and render the sub-agent prompt
 
----
+**Pre-compute the output path** before spawning. The sub-agent writes its `{payload, audit}` JSON here; the parent reads from here for validators and upsert. This is how the parent avoids holding the full payload in its context:
 
-## Step 6.5 — Pre-upsert JSX coverage validator
+```
+OUTPUT_PATH = f"{uiRepo}/ui_ep{ep.id:02d}_{persona}_{slug}.json"
+```
 
-1. Take the Step 3 JSX widget inventory
-2. For each widget, match to at least one action by label match,
-   file+line citation, or `viewOnlyChrome[]` exclusion
-3. Calculate coverage percentage
-4. If >=90% -> proceed. If <90% -> fix payload or re-read missed files
+where `slug` is a kebab-cased form of `ep.title` (e.g. `code-ontology-list`).
 
-> **Rules:** see [rules.md](references/rules.md) → "JSX coverage validator rules"
+Then load `references/flow-structuring-agent.prompt.md` and substitute the `{{...}}` placeholders:
 
----
+| Placeholder | Value |
+|---|---|
+| `{{persona}}` | the persona for this run |
+| `{{route}}` | `ep.route` |
+| `{{kind}}` | `ep.type` (`route` / `panel` / `route-variant` / `backend-endpoint`) |
+| `{{title}}` | `ep.title` |
+| `{{seed_file_absolute_path}}` | absolute path to `ep.component` |
+| `{{repo_name}}` | basename of the UI repo path |
+| `{{repo_root_absolute_path}}` | absolute path to the UI repo |
+| `{{project_uuid}}` | `projectUuid` from `.breeze.json` |
+| `{{project_name}}` | project name cached in Bootstrap step 4 |
+| `{{llm_platform}}` | `"AWSBEDROCK"` (passed to upsert URL) |
+| `{{output_path}}` | the pre-computed `OUTPUT_PATH` above |
+| `{{api_base}}` | `apiBase` from Bootstrap step 2 |
+| `{{api_key}}` | `apiKey` from `.breeze.json` (NEVER echo, NEVER log) |
+| `{{code_ontology_id}}` | `frontendCodeOntologyId` resolved in Bootstrap step 5 |
+| `{{indexed_repo_name}}` | `frontendRepoName` resolved in Bootstrap step 5 (server-side name, may differ from on-disk basename) |
+| `{{existing_neighborhood_json}}` | `json.dumps(EXISTING_NEIGHBORHOOD)` |
 
-## Step 7 — Upsert ONE EP at a time
+## Step 3 — Spawn sub-agent
 
-1. Write the Step 6 payload to `<uiRepo>/ui_ep{NN}_{name}.json` for
-   audit/resume purposes
-2. Call the `bulk_update_functional_nodes` MCP tool:
-   ```
-   bulk_update_functional_nodes(
-     uuid: <projectUuid>,
-     name: <project name from Call_Get_Project_Details_>,
-     data: <payload from Step 6 — top-level personas array>,
-     skip_step_and_action: false,
-     embedding: true,
-     llm_platform: "AWSBEDROCK"
-   )
-   ```
-3. If Rule A or Rule B fails, refuse to call the tool — fix and
-   re-validate
+```
+Agent(
+  subagent_type = "breeze:flow-structuring-agent",
+  description   = f"Flow-structure EP {ep.id} ({persona}): {ep.title}",
+  prompt        = <rendered per-call inputs from Step 2>
+)
+```
 
-> **Rules:** see [rules.md](references/rules.md) → "Pre-upsert validation
-> rules" and "Write protocol"
+The agent's full methodology (phases, rules, schema, self-check) lives
+in `agents/flow-structuring-agent.md` — installed by the breezeai-plugins
+plugin. The `prompt` argument here is **only** the short variable input
+block from Step 2; the agent's system prompt does the rest.
 
----
+Tool scoping is enforced by the agent definition's `tools:` frontmatter
+(Read, Glob, Grep, Bash, `mcp__plugin_breeze_breeze-mcp__Code_Graph_Search`).
+Model is `sonnet`; `maxTurns: 30`. Anthropic prompt caching reuses the
+fixed system prompt across calls, so subsequent (EP, persona) runs pay
+only for the small variable input block.
 
-## Step 8 — Verify
+**Sub-agent returns ONLY a short summary line.** It self-validates (Phase 6), writes to OUTPUT_PATH (Phase 7), POSTs the upsert (Phase 8), and reports the HTTP status + functionalId. Parse the summary line shape:
 
-1. `Functional_Graph_Search` for a unique phrase from each new
-   scenario's description
-2. Confirm: scenario appears, score > 0.4, `scenarioId` returned
+```
+# Success:
+OK · outcomes: <N> · scenarios: <N> · steps: <N> · actions: <N> · apis: <N> · cgs: <N> · http: 200 · functionalId: <id> · path: <OUTPUT_PATH>
 
----
+# Phase 6 (self-validate) failure — agent could not repair after 2 passes:
+FAIL_VALIDATE · errors: <count> · last_check: <schema|rule-a|chain|forbidden|citations> · path: <OUTPUT_PATH>
 
-## Step 9 — Update checkpoint
+# Phase 7 (write) failure:
+FAIL_WRITE · could not write to <OUTPUT_PATH> · <reason>
 
-1. Mark EP's `status` from `in_progress` -> `done`
-2. Pop the EP id from `remaining[]`
-3. Append a `completed[]` record:
+# Phase 8 (upsert) failure:
+FAIL_UPSERT · http: <status> · path: <OUTPUT_PATH> · note: <response excerpt>
+```
 
+Parse the summary to confirm `path` matches the OUTPUT_PATH you passed in. Branch on the prefix:
+
+| Prefix | Action |
+|---|---|
+| `OK · ` | Continue to Step 4 (verify) and Step 5 (checkpoint) |
+| `FAIL_VALIDATE` | Record in `entrypoints.failed[]` with `reason: "self-validation"`. Inspect the OUTPUT_PATH file on disk if you need details. Continue to next persona/EP. |
+| `FAIL_WRITE` | Record in `entrypoints.failed[]` with `reason: "write"`. Continue. |
+| `FAIL_UPSERT` | Record in `entrypoints.failed[]` with `reason: "upsert"` and the HTTP status. The OUTPUT_PATH file IS the replay artifact — re-upserting later is a single curl. Continue. |
+
+**The parent never runs validators and never POSTs. The agent owns both — that is this skill's contract.**
+
+## Step 4 — Verify (post-upsert sanity check)
+
+For 2-3 unique scenario descriptions from the upserted payload, call:
+```
+Functional_Graph_Search(uuid=projectUuid, query=<first 80 chars of description>, limit=3)
+```
+Confirm `score > 0.4` and the `scenarioId` resolves. Record verification
+scores in the checkpoint.
+
+## Step 5 — Update checkpoint
+
+Append to `entrypoints.completed[]`:
 ```json
 {
-  "epId": 12,
-  "title": "Project Detail Page",
-  "outcomeName": "Manage Project Detail",
-  "outcomeUuid": "73f29538-...",
-  "scenariosCreated": 14,
-  "actionsCreated": 41,
-  "apiCallsLogged": 9,
-  "jsxAuditWidgets": 27,
-  "verificationScores": { "core project data": 0.71 },
-  "payload": "<uiRepo>/ui_ep12_project_detail.json",
-  "completedAt": "<ISO>"
+  "epId":            12,
+  "persona":         "Admin",
+  "title":           "Project Settings",
+  "outcomeName":     "Configure Project Settings",
+  "scenariosCreated":  4,
+  "actionsCreated":    18,
+  "apiCallsLogged":    5,
+  "fieldsEnumerated":  11,
+  "codeGraphSearchCount":            3,
+  "actionsSkippedForOtherPersonas":  2,
+  "coverageRatio":   0.92,
+  "skippedForVisibility": [...],
+  "warnings":        [...],
+  "payloadPath":     "<uiRepo>/ui_ep12_Admin_project-settings.json",
+  "completedAt":     "<ISO>"
 }
 ```
 
-4. Edit (do not rewrite) `entrypoints.json` — only `status`,
-   `completed[]`, `remaining[]` mutate
+**Only pop `ep.id` from `remaining[]` after all personas for this EP
+have been processed** (successfully completed or marked failed).
 
 ---
 
 # REFERENCE
 
-## Cost per EP
+## Per-(EP, persona) cost
 
-~**10-14 tool calls per EP**. For 50 EPs: 500-700 calls. Plan for
-multiple sessions.
+- Small EP (≤200 lines): ~30k tokens, ~60s wall-clock
+- Medium EP (~500 lines): ~70k tokens, ~120s
+- Large EP (>1500 lines): ~150k+ tokens, ~180s+
+
+For an EP with 3 personas, multiply by 3. Plan multi-session for >20 EPs.
+
+## Parallelism
+
+The Agent tool supports concurrent sub-agents in one message. Recommended:
+- Up to 3 sub-agents in flight at once
+- Group by EP — finish all personas of EP N before starting EP N+1 (so the EP's `remaining[]` entry is cleared atomically)
 
 ## Multi-session resume
 
-When context budget hits ~75%, or after completing 3-5 EPs: flush
-current EP's checkpoint, stop, and report progress.
-
-**Recommend the user to start a fresh session** with a ready-to-paste
-command like:
-
+When context budget hits ~75%, flush the current EP's checkpoint and stop.
+Recommend the user resume with:
 ```
-/breeze:generate-functional-from-ui continue from entrypoints.json in repo <uiRepo path>
+/breeze:generate-functional-from-ui continue from entrypoints.json in repo <uiRepo>
 ```
 
-If complex EPs are next (e.g., project detail pages with many
-sub-components), recommend starting those in a fresh session for
-maximum quality:
+## Failure recovery
 
-_"EP N (Page Name) is a complex page with many sub-components.
-I recommend processing it in a fresh session for best quality.
-To resume, paste:"_
+`entrypoints.failed[]` holds per-(EP, persona) failures with reasons mapped to the agent's summary-line prefixes (`FAIL_VALIDATE`, `FAIL_WRITE`, `FAIL_UPSERT`). For each:
 
-```
-/breeze:generate-functional-from-ui continue from entrypoints.json in repo <path>, start with EP N
-```
-
-**Batching guidance to share with user:**
-- Complex EPs (project detail, company detail): 1 per session
-- Medium EPs (pipeline, search, key accounts): 2-3 per session
-- Simple EPs (change password, settings, fair usage): 4-5 per session
-
-## When NOT to use
-
-- **Backend-only repos** — use `/breeze:generate-functional-from-backend`
+- **`FAIL_UPSERT` only** — the payload is sound but the POST failed. Re-curl the same OUTPUT_PATH directly via `<API_BASE>/functional-graph/upsert` with `api-key:` header. No re-spawn needed.
+- **`FAIL_VALIDATE` / `FAIL_WRITE`** — re-spawn the sub-agent with the same input block; the agent will regenerate from scratch. If the same failure repeats, inspect the OUTPUT_PATH on disk to understand the defect class, then patch the agent prompt.
+- **Recovery loop**: clear matching entries from `failed[]`, re-add `(epId, persona)` to `remaining[]` (or pass explicitly via continue prompt), resume the skill.
 
 ## See also
 
-- `/breeze:generate-functional-from-backend` — the backend half
-- `/breeze:validate-functional-graph` — quality checks after generation
-- `/breeze:generate-spec` — export the graph as a spec doc
-- `/breeze:deprecated-cluster-pipeline` — retired v1 pipeline; do **not** use for new work, kept only for resuming historical runs
+- `/breeze:generate-functional-from-backend` — System / External System persona pass
+- `/breeze:validate-functional-graph` — post-generation quality checks
+- `/breeze:generate-spec` — export the graph as a spec document
