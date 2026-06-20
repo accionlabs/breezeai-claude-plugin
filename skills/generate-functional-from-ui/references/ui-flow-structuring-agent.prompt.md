@@ -2,10 +2,10 @@
 
 The skill renders this file (substitutes the `{{...}}` placeholders) and
 passes the result as the `prompt` argument when invoking
-`subagent_type: "breeze:flow-structuring-agent"`.
+`subagent_type: "breeze:ui-flow-structuring-agent"`.
 
 The agent's full methodology — phases, rules, schema, self-check — lives
-in `agents/flow-structuring-agent.md` (installed when the plugin is
+in `agents/ui-flow-structuring-agent.md` (installed when the plugin is
 installed). This template only carries the per-call variable inputs.
 
 ---

@@ -27,7 +27,7 @@ structurally in `action.apis[]`.
 
 | Concern | Approach |
 |---|---|
-| Per-EP depth | **Installed agent `breeze:flow-structuring-agent`** invoked per (EP, persona); tool-scoped, model-pinned (sonnet), system prompt cached across calls |
+| Per-EP depth | **Installed agent `breeze:ui-flow-structuring-agent`** invoked per (EP, persona); tool-scoped, model-pinned (sonnet), system prompt cached across calls |
 | Persona-conditional visibility | **Mandatory Phase 2.5** — RBAC / role / permission / feature-flag / tier gate hunt inside the sub-agent, with explicit field-level scope |
 | Multi-persona EPs | **One sub-agent run per persona** that can reach the EP |
 | Field enumeration | **Mandatory Phase 2 inside sub-agent** with `{label, type, required, default, validation, options, visibleTo}` per field |
@@ -39,11 +39,11 @@ structurally in `action.apis[]`.
 
 ## Resources
 
-- **Installed agent** — `agents/flow-structuring-agent.md` (plugin root). Invokable as `subagent_type: "breeze:flow-structuring-agent"`. The agent's full methodology — phases, rules, schema, self-check, self-validate, write-to-disk, upsert — lives in its system prompt.
-- `references/flow-structuring-agent.prompt.md` — short **per-call input renderer** with `{{...}}` placeholders. The parent substitutes and passes the rendered text as the `prompt` argument.
+- **Installed agent** — `agents/ui-flow-structuring-agent.md` (plugin root). Invokable as `subagent_type: "breeze:ui-flow-structuring-agent"`. The agent's full methodology — phases, rules, schema, self-check, self-validate, write-to-disk, upsert — lives in its system prompt.
+- `references/ui-flow-structuring-agent.prompt.md` — short **per-call input renderer** with `{{...}}` placeholders. The parent substitutes and passes the rendered text as the `prompt` argument.
 - `references/rules.md` — functional graph semantics (also embedded in the agent's system prompt)
 - `schemas/upsert.schema.json` — JSON-schema for the `/functional-graph/v2/upsert` REST payload (v2 accepts the same body as v1). Reference only; the agent self-validates against the rules in its system prompt.
-- `validators/validate.py` — Standalone debugging helper (subcommands `schema | rule-a | forbidden | citations | coverage`). **Not invoked by the skill — the agent self-validates in Phase 6.** Useful only for manual inspection of `ui_ep{NN}_{persona}_*.json` files.
+- `validators/validate.py` — Standalone debugging helper (subcommands `schema | rule-a | forbidden | citations | coverage | api-urls`). **Not invoked by the skill — the agent self-validates in Phase 6.** Useful only for manual inspection of `ui_ep{NN}_{persona}_*.json` files.
 - `validators/requirements.txt` — Python dependency: `jsonschema`
 
 ## Inputs
@@ -314,13 +314,13 @@ OUTPUT_PATH = f"{uiRepo}/ui_ep{ep.id:02d}_{persona}_{slug}.json"
 
 where `slug` is a kebab-cased form of `ep.title` (e.g. `code-ontology-list`).
 
-Then load `references/flow-structuring-agent.prompt.md` and substitute the `{{...}}` placeholders:
+Then load `references/ui-flow-structuring-agent.prompt.md` and substitute the `{{...}}` placeholders:
 
 | Placeholder | Value |
 |---|---|
 | `{{persona}}` | the persona for this run |
 | `{{route}}` | `ep.route` |
-| `{{kind}}` | `ep.type` (`route` / `panel` / `route-variant` / `backend-endpoint`) |
+| `{{kind}}` | `ep.type` (`route` / `panel` / `route-variant`) |
 | `{{title}}` | `ep.title` |
 | `{{seed_file_absolute_path}}` | absolute path to `ep.component` |
 | `{{repo_name}}` | basename of the UI repo path |
@@ -339,14 +339,14 @@ Then load `references/flow-structuring-agent.prompt.md` and substitute the `{{..
 
 ```
 Agent(
-  subagent_type = "breeze:flow-structuring-agent",
+  subagent_type = "breeze:ui-flow-structuring-agent",
   description   = f"Flow-structure EP {ep.id} ({persona}): {ep.title}",
   prompt        = <rendered per-call inputs from Step 2>
 )
 ```
 
 The agent's full methodology (phases, rules, schema, self-check) lives
-in `agents/flow-structuring-agent.md` — installed by the breezeai-plugins
+in `agents/ui-flow-structuring-agent.md` — installed by the breezeai-plugins
 plugin. The `prompt` argument here is **only** the short variable input
 block from Step 2; the agent's system prompt does the rest.
 

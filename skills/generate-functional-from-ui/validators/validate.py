@@ -312,6 +312,72 @@ def cmd_coverage(seed_file):
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: api-urls (warning-only — flags endpoints not found in repo source)
+# ---------------------------------------------------------------------------
+
+def _url_needle(url):
+    """Reduce an apis[i].url to the last 2-3 static path segments for a literal grep.
+
+    Drops scheme/host, query string, '(annotation)', and {param}/:param segments.
+    Returns None if no usable static segment remains.
+    """
+    u = (url or "").strip()
+    u = re.split(r"\s*\(", u)[0]          # drop "(add-to-pipeline)" style annotations
+    u = re.split(r"[?#]", u)[0]           # drop query/hash
+    segs = [s for s in u.split("/") if s and "{" not in s and not s.startswith(":")]
+    if not segs:
+        return None
+    return "/".join(segs[-3:])
+
+
+def cmd_api_urls(repo_root):
+    payload = load_input()
+
+    if not os.path.isdir(repo_root):
+        emit({"ok": True, "errors": [],
+              "warnings": [{"message": f"repo root not found: {repo_root} - api-url check skipped"}],
+              "stats": {}})
+        sys.exit(0)
+
+    exts = (".js", ".jsx", ".ts", ".tsx", ".vue")
+    parts = []
+    for root, dirs, files in os.walk(repo_root):
+        dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "dist", "build")]
+        for fn in files:
+            if fn.endswith(exts):
+                try:
+                    with open(os.path.join(root, fn), encoding="utf-8", errors="ignore") as f:
+                        parts.append(f.read())
+                except Exception:
+                    pass
+    blob = "\n".join(parts)
+
+    warnings = []
+    checked = 0
+    for _persona, _outcome, _scenario, _step, action in walk_actions(payload):
+        name = action.get("action") or action.get("name") or ""
+        for api in (action.get("apis") or []):
+            url = (api.get("url") or "").strip()
+            if not url:
+                continue
+            checked += 1
+            needle = _url_needle(url)
+            if needle and needle not in blob:
+                warnings.append({
+                    "type":    "api_url_unverified",
+                    "message": f"api url not found as a literal in repo source: {url}",
+                    "action":  name,
+                    "needle":  needle,
+                })
+
+    # Warning-only (like coverage): never blocks the upsert, but surfaces likely
+    # inferred/hallucinated endpoints for the agent to re-resolve in Phase 6.
+    emit({"ok": True, "errors": [], "warnings": warnings,
+          "stats": {"apis_checked": checked, "unverified": len(warnings)}})
+    sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
 # Entry
 # ---------------------------------------------------------------------------
 
@@ -329,6 +395,9 @@ def main():
     p_cov = sub.add_parser("coverage", help="JSX widget coverage (warning only)")
     p_cov.add_argument("--seed-file", required=True)
 
+    p_api = sub.add_parser("api-urls", help="flag apis[].url not found as a literal in repo source (warning only)")
+    p_api.add_argument("--repo-root", required=True)
+
     args = parser.parse_args()
 
     if args.cmd == "schema":
@@ -341,6 +410,8 @@ def main():
         cmd_citations(args.repo_name)
     elif args.cmd == "coverage":
         cmd_coverage(args.seed_file)
+    elif args.cmd == "api-urls":
+        cmd_api_urls(args.repo_root)
     else:
         parser.print_help()
         sys.exit(2)
