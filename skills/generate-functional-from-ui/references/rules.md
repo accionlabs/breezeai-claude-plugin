@@ -127,7 +127,7 @@ If no frontend router file found, stop and suggest
 
 ### `apis[]` type reference
 
-The `type` field supports: **REST / GraphQL / gRPC / WebSocket / Event**
+The `type` field is **free text** (the backend stores it as a plain string — no enum is enforced). Recommended values: **REST / GraphQL / gRPC / WebSocket / Event / SOAP** — use `SOAP` for ASP.NET Web Forms / WCF / ASMX web-service calls.
 
 | UI pattern | `type` | When |
 |---|---|---|
@@ -136,6 +136,7 @@ The `type` field supports: **REST / GraphQL / gRPC / WebSocket / Event**
 | Socket.IO / plain ws | `"WebSocket"` | Real-time connections |
 | Server-Sent Events | `"Event"` | SSE streams |
 | gRPC-Web | `"gRPC"` | gRPC from browser |
+| SOAP web service (WCF / ASMX) | `"SOAP"` | ASP.NET Web Forms façade / service-proxy call |
 
 ---
 
@@ -253,8 +254,8 @@ curl upsert endpoint** — one POST per EP. Never batch multiple EPs.
 - `personas[]` must be an array even with one persona
 - Only human personas from the confirmed set — never `System`
 - Each level matched by **name** at upsert time — idempotent
-- `actions[].apis[]` supports **REST / GraphQL / gRPC / WebSocket /
-  Event**
+- `actions[].apis[]` `type` is free text (recommended: **REST /
+  GraphQL / gRPC / WebSocket / Event / SOAP**)
 - `citations[]` supported at persona and outcome level
 
 ---

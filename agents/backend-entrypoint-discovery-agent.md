@@ -61,12 +61,20 @@ Tag each EP with its persona from the EP type — never read auth code to derive
 ## Phases
 
 ### Phase 1 — Detect framework
-Read `package.json` / `pom.xml` / `build.gradle` / `pyproject.toml` / `requirements.txt` / `go.mod` / `composer.json`. Confirm or override `FRAMEWORK_HINT`. Record the framework and the controller/resolver glob pattern.
+Read `package.json` / `pom.xml` / `build.gradle` / `pyproject.toml` / `requirements.txt` / `go.mod` / `composer.json` / `*.csproj` / `*.sln` / `web.config` / `packages.config`. Confirm or override `FRAMEWORK_HINT`. Record the framework and the controller/resolver glob pattern. **.NET** surfaces as ASP.NET **Web API** (`ApiController` / `Microsoft.AspNet.WebApi`), **WCF** (`System.ServiceModel`), or **ASMX** (`System.Web.Services`) — see Phase 2b for their entry points.
 
 > See the skill's `references/rules.md` → "Framework detection table" for signals. (Embedded knowledge below; you do not have that file — use the signals you know.)
 
 ### Phase 2 — Discover REST routes
 Glob the controller/router files for the framework, `Read` them, and extract per route: `httpMethod`, resolved `absoluteUrl` (combine `@Controller('prefix')` + method decorator; resolve route-prefix template literals by reading the config file — never leave `${...}`), `controllerClass`/`handlerFunction`, `methodName`, `file`, `line`, `parameters`, `requestType`, `responseType`, `authGuards` (recorded, NOT used for persona), `category` (domain grouping), `subType` (`webhook` when applicable), and mechanical `persona`.
+
+### Phase 2b — Discover .NET web-service operations (ASMX / WCF / Web API)
+Only when the stack is .NET. Each **operation** is an entry point:
+- **ASMX** — methods marked `[WebMethod]` in `*.asmx.cs`. `operation` = method name; `absoluteUrl` = `<Service>.asmx/<Operation>`; `type: "SOAP"`.
+- **WCF** — `[OperationContract]` methods on `[ServiceContract]` interfaces. `operation` = method; resolve the endpoint address from `<system.serviceModel><services><service><endpoint>` in `web.config`/`app.config`; `absoluteUrl` = `<IContract>/<Operation>` (or the configured address + operation); `type: "SOAP"`. If the operation carries `[WebGet]`/`[WebInvoke]` (WebHttp binding) it is REST-shaped → `type: "REST"` with the `UriTemplate` as the URL.
+- **ASP.NET Web API** — `[ApiController]` / `ControllerBase` actions with `[Route]` / `[HttpGet]` / `[HttpPost]` etc. → `type: "REST"` (same capture as Phase 2).
+
+Per operation capture: `serviceContract`/`controllerClass`, `methodName`, `file`, `line`, `parameters`, `requestType` (input message/DTO), `responseType` (return DTO), `category`, and mechanical `persona`. Append each to `entryPoints[]` with the `type` above and `status: "pending"`. The per-EP `backend-flow-structuring-agent` processes a `SOAP` entry point exactly like a REST route (request → handler → side effects) and emits its `apis[]` node with `type: "SOAP"` and the operation as the `url` — the join anchor the UI / ASPX side matches against.
 
 ### Phase 3 — Discover GraphQL operations (flag for confirmation)
 If no GraphQL surface, record `graphqlGranularity: null` and skip. Otherwise enumerate SDL + resolver files; pick a default granularity (`per-operation` unless the schema clearly favors `per-resolver-class` or `per-type-field`); enumerate every operation with `operation`, `kind` (Query/Mutation/Subscription), `resolverClass`, `methodName`, `file`, `line`, `args`, `returnType`, `category`. Add each to `entryPoints[]` with `type: "GraphQL"`, `persona: "System"`, and `status: "needs_confirmation"`. Set top-level `graphqlNeedsConfirmation: true`. **Do not wait for input** — the parent runs the confirmation gate.

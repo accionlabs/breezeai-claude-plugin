@@ -142,6 +142,7 @@ The backend pass uses **only** two personas — assignment is mechanical:
 | GraphQL subscription | `"GraphQL"` | `"subscription"` | `Subscription.projectUpdated` |
 | gRPC method | `"gRPC"` | method name | service + method |
 | WebSocket handler | `"WebSocket"` | event name | namespace/room |
+| SOAP / WCF / ASMX operation | `"SOAP"` | operation name | service endpoint + SOAPAction |
 | Queue publish/consume | `"Event"` | `"publish"` / `"consume"` | `sqs://${ENV_VAR}` / `kafka://${TOPIC}` |
 | Cron handler | `"Event"` | `"trigger"` | `cron:0 0 * * *` |
 
@@ -283,8 +284,8 @@ EPs.
 - Each level matched by **name** at upsert time — idempotent
 - Cross-pass merging: use the same outcome name as a prior UI pass —
   upsert merges automatically
-- `actions[].apis[]` supports **REST / GraphQL / gRPC / WebSocket /
-  Event**
+- `actions[].apis[]` `type` is free text (recommended: **REST /
+  GraphQL / gRPC / WebSocket / Event / SOAP**)
 - `citations[]` supported at persona and outcome level
 
 ---

@@ -132,6 +132,12 @@ If `EXISTING_NEIGHBORHOOD.outcomes` is empty, the graph has nothing similar yet 
 6. Record every file you read in `audit.filesRead`.
 7. Record every file you considered and skipped in `audit.skippedComponents[]` with a one-line reason.
 
+**.NET / C# idioms (when the repo is .NET — ASMX / WCF / Web API).** The paradigm is identical (handler → injected services → side effects); read it with these mappings:
+- **Handler** — the `[WebMethod]` method (`.asmx.cs`), the `[OperationContract]` implementation on the service class (`.svc.cs`, or a class implementing the `[ServiceContract]` interface), or the `[ApiController]` action. The class is often **partial** — also read the matching `.designer.cs`.
+- **Operation identity** — for SOAP the `absoluteUrl` is `<Service>.asmx/<Operation>` (ASMX) or `<IContract>/<Operation>` (WCF; resolve the endpoint address from `<system.serviceModel>` in `web.config`/`app.config`). Set `apis[i].type = "SOAP"` (use `REST` only for `[WebGet]`/`[WebInvoke]`/Web API actions).
+- **Dependency injection** — constructor injection (as in Node), but also **property injection** and container registration (`Startup.cs` / `Global.asax` / Autofac/Unity/Ninject/Castle modules, or `web.config`). If a dependency is resolved via a container or a static `ServiceLocator`/`DependencyResolver`, `Grep`/`Code_Graph_Search` the registration to find the concrete implementation, then read it.
+- **Data access (side effects)** — Entity Framework `DbContext` (LINQ + `SaveChanges()` → entity/table), ADO.NET (`SqlCommand` / stored-procedure name → table/proc), Dapper, or a repository class. Record the EF entity/table or the SQL command / stored-proc name as the DB identifier in Phase 3, exactly as you would a TypeORM repository + table.
+
 ### Phase 2 — Field & enum enumeration (mandatory)
 
 Backend handlers carry structured contracts. Enumerate them — never collapse a field list into a single combined action or a vague "validates input" description. Two patterns, both mandatory wherever they appear.
@@ -470,7 +476,7 @@ Do NOT put citations on steps or individual actions — keep payload size sane. 
 - Every `scenarios[i]` MUST have a non-empty `description`.
 - Every System action MUST have a non-empty `description` (null only for trivial glue like "Log completion").
 - Every `actions[i].apis[i]` MUST have all five fields: `type`, `method`, `url`, `request`, `response`.
-- `apis[i].type` MUST be one of: `REST`, `GraphQL`, `gRPC`, `WebSocket`, `Event`.
+- `apis[i].type` is **free text** (the backend does not enforce an enum) — prefer a recommended protocol: `REST`, `GraphQL`, `gRPC`, `WebSocket`, `Event`, `SOAP` (use `SOAP` for WCF / ASMX service operations). New protocol values are allowed; never block on an unknown one.
 - `citations[i].reference` MUST start with `<REPO.name>/` and MUST be a backend path.
 - Every action whose first word is a SIDE-EFFECT VERB MUST satisfy Rule A (apis[] OR DB/ES/S3 identifier in description).
 - When one network/queue event is split across multiple actions (e.g. `Persist …`, `Publish …`), every action in that chain that shares the event must carry the same `apis[]` entry.
@@ -540,7 +546,7 @@ When the deterministic pass ran, set `audit.validatorsRun = true`. The `$REPO_NA
 
 | # | Check | What you scan | How to repair |
 |---|---|---|---|
-| 1 | **Schema shape** | `payload.personas[]` length 1; persona name matches PERSONA and ∈ {System, External System}; every scenario has non-empty description; every System action has non-empty description; every apis[i] has all 5 fields; apis[i].type ∈ {REST, GraphQL, gRPC, WebSocket, Event} | Fix the offending node in-place. Most common: missing `description` on a synthesized scenario/System action, or apis[i] missing `request`/`response`. |
+| 1 | **Schema shape** | `payload.personas[]` length 1; persona name matches PERSONA and ∈ {System, External System}; every scenario has non-empty description; every System action has non-empty description; every apis[i] has all 5 fields; apis[i].type is a non-empty protocol string (recommended REST/GraphQL/gRPC/WebSocket/Event/SOAP — free text, unknown values allowed) | Fix the offending node in-place. Most common: missing `description` on a synthesized scenario/System action, or apis[i] missing `request`/`response`. |
 | 2 | **Rule A (side-effect-verb)** | For every action whose first word is a SIDE-EFFECT VERB, check `apis.length >= 1` OR a repo+table / ES index / S3 bucket named in `description` | (a) network/queue call → attach apis[]; (b) pure DB/ES/S3 → name the identifier in description; (c) no side effect → rename to a non-side-effect verb. NEVER leave a bare side-effect verb with no apis and no identifier. |
 | 3 | **Network/queue-chain coherence** | When `Persist …` + `Publish …` (or `Authenticate …` + `Submit …`) appear under one step sharing one event | Copy the shared apis[] entry onto every chained action. |
 | 4 | **Persona constraint** | `personas[0].persona` ∈ {System, External System}; no human-role string; no action describes UI gestures | If a human role slipped in, the EP was mis-assigned — re-derive from the EP-type table and rewrite. Strip any UI-trigger language from System descriptions. |
