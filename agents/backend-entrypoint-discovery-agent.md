@@ -76,6 +76,18 @@ Only when the stack is .NET. Each **operation** is an entry point:
 
 Per operation capture: `serviceContract`/`controllerClass`, `methodName`, `file`, `line`, `parameters`, `requestType` (input message/DTO), `responseType` (return DTO), `category`, and mechanical `persona`. Append each to `entryPoints[]` with the `type` above and `status: "pending"`. The per-EP `backend-flow-structuring-agent` processes a `SOAP` entry point exactly like a REST route (request → handler → side effects) and emits its `apis[]` node with `type: "SOAP"` and the operation as the `url` — the join anchor the UI / ASPX side matches against.
 
+### Phase 2c — Internal service / façade entry points (monolith mode — flag for confirmation)
+Some apps (classic ASP.NET Web Forms monoliths, layered back-office apps) expose **no network boundary** for their core flows — the presentation tier calls a **façade / service layer in-process** (`*Facade` / `*Service` / `*Manager` classes, often behind `I*` interfaces, with constructor-injected repositories). The UI pass captures the user flow but joins to the backend on the **façade/service method name**, not a URL — so those methods must exist as System entry points for the join to land.
+
+**Detect monolith mode** when: there are few/no REST/SOAP/GraphQL/queue entry points relative to codebase size, AND there is a clear façade/service layer (classes named `*Facade`/`*Service`/`*Manager` or implementing `I*Facade`/`I*Service`, with repository `constructorParams`).
+
+In monolith mode, enumerate the **public methods of the façade/service layer** as internal entry points:
+- `operation` = `<Class>.<Method>` (e.g. `StudentFacade.CreateBUCCStudentEnrollment`) — the **join key** the UI/ASPX action records.
+- capture `serviceClass`, `methodName`, `file`, `line`, `parameters`, `requestType`, `responseType`, `category`, mechanical `persona: "System"`.
+- Append to `entryPoints[]` with `type: "Internal"`, `subType: "service-operation"`, `status: "needs_confirmation"` (a monolith can have thousands of methods — the parent confirms scope: e.g. only the façade layer, or only methods reachable from UI actions). Set top-level `internalEntryPointsNeedConfirmation: true`.
+
+The per-EP `backend-flow-structuring-agent` processes an `Internal` entry point like any handler (method body → injected repositories → DB/side effects) and emits the side effect (stored proc / table), joined to the UI action on `<Class>.<Method>`.
+
 ### Phase 3 — Discover GraphQL operations (flag for confirmation)
 If no GraphQL surface, record `graphqlGranularity: null` and skip. Otherwise enumerate SDL + resolver files; pick a default granularity (`per-operation` unless the schema clearly favors `per-resolver-class` or `per-type-field`); enumerate every operation with `operation`, `kind` (Query/Mutation/Subscription), `resolverClass`, `methodName`, `file`, `line`, `args`, `returnType`, `category`. Add each to `entryPoints[]` with `type: "GraphQL"`, `persona: "System"`, and `status: "needs_confirmation"`. Set top-level `graphqlNeedsConfirmation: true`. **Do not wait for input** — the parent runs the confirmation gate.
 

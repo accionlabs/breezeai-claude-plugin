@@ -174,10 +174,11 @@ Do not overwrite an existing `entrypoints.json`.
 3. `Read` the router file locally
 4. `Read` the sidebar/navbar component for non-routed features
 
-**If `stack = webforms`:** entry points are `.aspx` pages (each is a reachable URL), plus reusable `.ascx` user controls and `.master` layouts.
-1. `Glob '**/*.aspx'` to enumerate pages — each is one EP (`kind: page`, `route` = the page's URL path, `seed_file` = the `.aspx` markup; its `.aspx.cs` code-behind is read by the agent).
-2. `Read` `web.config` (`<authorization>` + `<location path="…">`) and any `.sitemap` (`roles="…"`) to determine per-page persona reachability for sub-step 0.4.
-3. Treat a shared `.ascx` / `.master` as its own EP (`kind: control` / `master`) only if it carries an independent input/flow; otherwise the per-EP agent reads it while processing the host page.
+**If `stack = webforms`:** entry points are `.aspx` pages **and `.ascx` user controls** — in many Web Forms / CMS apps the real features live in `.ascx` controls mounted into a generic page host, so controls are **first-class EPs**, not just panels.
+1. `Glob '**/*.aspx'` **AND** `Glob '**/*.ascx'`. Each `.aspx` page (`kind: page`) and each feature-bearing `.ascx` control (`kind: control`) is an EP — `route` = the page URL (or the control's mount route if dynamically loaded), `seed_file` = the `.aspx`/`.ascx` markup; the matching `.aspx.cs`/`.ascx.cs` code-behind is read by the agent.
+2. **Detect a generic page host.** If a few `.aspx` pages (e.g. `Page.aspx`, `Default.aspx`) `LoadControl(...)` / mount `.ascx` controls by config or route, treat those `.aspx` shells as containers and **promote the `.ascx` controls to the primary EPs** (that is where the fields and flows are). A handful of utility `.aspx` (reports, downloads, health checks) stay as their own page EPs.
+3. `Read` `web.config` (`<authorization>` + `<location path="…">`) and any `.sitemap` (`roles="…"`) to determine per-EP persona reachability for sub-step 0.4.
+4. Treat `.master` layouts as shared chrome the agent reads while processing the host EP — not usually a standalone EP.
 
 ---
 
