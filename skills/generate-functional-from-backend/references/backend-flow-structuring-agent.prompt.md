@@ -40,6 +40,7 @@ API_BASE:              {{api_base}}
 API_KEY:               {{api_key}}
 CODE_ONTOLOGY_ID:      {{code_ontology_id}}
 INDEXED_REPO_NAME:     {{indexed_repo_name}}
+SHARED_FUNCTIONAL_PATH: {{shared_functional_path}}
 VALIDATORS_PATH:       {{validators_path}}
 
 EXISTING_NEIGHBORHOOD:

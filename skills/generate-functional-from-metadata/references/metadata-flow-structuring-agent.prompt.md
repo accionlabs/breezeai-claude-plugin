@@ -29,6 +29,7 @@ SYSTEM_UPSERT_PATH:    {{system_upsert_path}}
 OUTPUT_PATH_HUMAN:     {{output_path_human}}
 OUTPUT_PATH_SYSTEM:    {{output_path_system}}
 VALIDATORS_PATH:       {{validators_path}}
+SHARED_FUNCTIONAL_PATH: {{shared_functional_path}}
 RULES_PATH:            {{rules_path}}
 
 EXISTING_NEIGHBORHOOD:

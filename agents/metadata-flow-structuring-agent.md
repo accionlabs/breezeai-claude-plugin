@@ -22,7 +22,12 @@ You take ONE P3 application and produce the **two linked halves** of its functio
 
 Both subtrees share ONE **Outcome name** so they merge into a single outcome (the human "what" + the System "how"). This is the P3 advantage — the app id deterministically links the two halves.
 
-The full mapping is provided at `RULES_PATH` in your inputs. **`Read` that file first.** It defines record types, the MAPLQ verb → action mapping, apis[] typing (`Event` internal / `REST` for `$.ajax`), persona rules, and the 100% field-capture gate.
+> **AUTHORITATIVE RULES — `Read` these FIRST, before drafting any node** (single source of truth, ADR 0001). Both live under `SHARED_FUNCTIONAL_PATH` (your INPUTS), exactly as the UI and backend passes use them — because this agent emits BOTH halves you read the core **and both** overlays:
+> - `SHARED_FUNCTIONAL_PATH/core.md` — node model (Outcome → Scenario → Step → Action → `apis[]`), reuse/dedup, `rule-a`, the **inbound-surface action** rule, citations (placement + the persona/outcome hard ban), **descriptions required on every scenario AND action**, write protocol.
+> - `SHARED_FUNCTIONAL_PATH/human-overlay.md` — the **human** subtree (from `ShowScreen` steps): forbidden UI words, action language, per-field atomicity, description required.
+> - `SHARED_FUNCTIONAL_PATH/system-overlay.md` — the **System** subtree (from `DoFilter`/`WriteData` steps): mechanical persona, description required, apis-OR-identifier `rule-a`, the served-vs-required interface model.
+>
+> `RULES_PATH` (this skill's `references/rules.md`) is the **metadata MAPL overlay** on top of the SSOT — it defines record types, the MAPLQ verb → action mapping, `apis[]` typing (`Event` internal / `REST` for `$.ajax`), persona rules, and the 100% field-capture gate. `Read` it after the SSOT. The shared `validate.py` enforces the hard gates regardless; if `SHARED_FUNCTIONAL_PATH` is unset/unreadable, fall back to `RULES_PATH`/training and let `validate.py` catch violations.
 
 You own quality, persistence, and delivery end-to-end: read → enumerate → build → self-validate → write to disk → POST both upserts → return ONE summary line. The parent never holds a payload.
 
@@ -33,7 +38,7 @@ You own quality, persistence, and delivery end-to-end: read → enumerate → bu
 `APP_ID`, `REPO_NAME`, `REPO_PATH`, `FLAVOR`, `PERSONA_HUMAN` (or `null`), `PERSONA_SYSTEM`,
 `MAPL_PATH`, `STEPS` (the parsed MAPLQ list), `AJAX_ENDPOINTS`, the Breeze coordinates
 (`PROJECT_UUID`, `PROJECT_NAME`, `LLM_PLATFORM`, `API_BASE`, `API_KEY`,
-`HUMAN_UPSERT_PATH`, `SYSTEM_UPSERT_PATH`), `OUTPUT_PATH_HUMAN`, `OUTPUT_PATH_SYSTEM`,
+`HUMAN_UPSERT_PATH`, `SYSTEM_UPSERT_PATH`), `OUTPUT_PATH_HUMAN`, `OUTPUT_PATH_SYSTEM`, `SHARED_FUNCTIONAL_PATH`, `RULES_PATH`,
 `VALIDATORS_PATH`, and `EXISTING_NEIGHBORHOOD` (dedup reuse hints).
 
 If `PERSONA_HUMAN` is `null`, build ONLY the System subtree (skip the human half + its upsert).
@@ -70,7 +75,7 @@ Deduplicate by semantic field (same label across MFID/MFLT = one field). Record 
 - persona = `PERSONA_HUMAN`
 - one Scenario per distinct user flow (usually one). description = a real start→end flow.
 - Steps from the `ShowScreen` sequence (Enter inputs → Review results → Confirm/Submit).
-- Actions: platform-agnostic intent verbs only (Enter, Select, Provide, Choose, Confirm, Review, Specify, Indicate, Request, Acknowledge). The **forbidden UI-word list** and the human action-language rules are the canonical ones in `../../shared/functional/human-overlay.md` (reached via the banner in RULES_PATH; enforced by `validate.py forbidden`) — do not maintain a separate copy. description usually null.
+- Actions: platform-agnostic intent verbs only (Enter, Select, Provide, Choose, Confirm, Review, Specify, Indicate, Request, Acknowledge). The **forbidden UI-word list** and the human action-language rules are the canonical ones in `SHARED_FUNCTIONAL_PATH/human-overlay.md` (enforced by `validate.py forbidden`) — do not maintain a separate copy. **`description` is REQUIRED on every action** (HARD GATE — `validate.py descriptions`): state field metadata / a constraint / what the action accomplishes; never code-level prose. Scenarios likewise require a non-empty description.
 - **Atomicity (do NOT club fields):** create ONE action per editable field — `Enter <field>` (text/number/date) or `Select <field>` (dropdown/radio/checkbox); each references exactly that one field. Read-only display / grid columns, labels and headers go inside a `Review …` action's description (they are NOT separate actions). A mutually-exclusive button pair (back/continue, submit/cancel) is ONE `Indicate whether to …` action, never two.
 - **API ownership:** input/selection actions have EMPTY `apis[]` — entering a field makes no call. The validate/submit call (Flavor B `$.ajax`; the System half holds the `DoFilter`/`WriteData`) belongs on a dedicated `Validate …` / `Submit …` action ordered AFTER the entry actions, which OWNS the `apis[]`.
 - apis[]: empty for Flavor A; for Flavor B add `REST` entries ONLY on the Validate/Submit action for the `$.ajax` endpoints the screen calls — never on the field-entry actions.
@@ -81,7 +86,7 @@ Deduplicate by semantic field (same label across MFID/MFLT = one field). Record 
 - Steps from the `DoFilter`/`WriteData` sequence (Resolve role → Load reference data → Query → Generate output).
 - Every action has a REQUIRED description (filter id, join tables, conditions/thresholds like `C05=101`, `C06 >= $hireDate`, field names) AND an `apis[]` entry: `type:"Event"`, `method` = `DoFilter`/`WriteData`/address, `url` = filter id / handler name, plus `request`/`response` field shapes. Cover every declared filter field here.
 
-**Citations — COMPLETE traceability (mandatory), cited LOW (core.md §7).** Citations are allowed at **scenario / step / action** levels — cite as low as the evidence is specific, and **NEVER at outcome / persona** (those are shared and merged by name across many apps → citing them pollutes; `validate.py citations` warns on it). Every source file you read MUST appear at least once across the scenario/step/action `citations[]` (the gate is a union across levels) — one citation per distinct file:
+**Citations — COMPLETE traceability (mandatory), cited LOW (core.md §7.1).** Citations live ONLY at **scenario / step / action** (cite at the action by default). **Never author a `citations[]` on outcome / persona — omit the key entirely** (those are shared and merged by name across many apps → citing them pollutes the shared node; `validate.py citations` **HARD-fails, exit 2**). Every source file you read MUST appear at least once across the scenario/step/action `citations[]` (the gate is a union across levels) — one citation per distinct file:
 - the `MAPL(<appId>).json` — usually on the **scenario** (it spans the whole flow)
 - every `MSCR`/`MFID` you read (human half) — on the **step/action** for the screen/field it defines
 - every `MFLT`/`CRUD` you read (system half) — on the **action** for the `DoFilter`/`WriteData` it backs
@@ -101,17 +106,19 @@ Run the skill's validators from `VALIDATORS_PATH` (Python, payload on STDIN). Fo
 
 ```bash
 python3 "$VALIDATORS_PATH/validate.py" schema        < "$HALF_FILE"
+python3 "$VALIDATORS_PATH/validate.py" path-linked   < "$HALF_FILE"   # verb+route/URI action ⇒ apis[] required
+python3 "$VALIDATORS_PATH/validate.py" descriptions  < "$HALF_FILE"   # every scenario AND action has a non-empty description
 python3 "$VALIDATORS_PATH/validate.py" citations --repo-name "$REPO_NAME" < "$HALF_FILE"
 python3 "$VALIDATORS_PATH/validate.py" field-coverage < "$HALF_FILE"   # ratio must be 1.0
 python3 "$VALIDATORS_PATH/validate.py" citation-completeness < "$HALF_FILE"   # every file read must be cited
 ```
-Human half additionally: `forbidden` (hard) AND `atomicity` (ADVISORY — warnings only, never blocks). System half additionally: `rule-a` and `persona`.
+Human half additionally: `rule-a --kind human` (hard), `forbidden` (hard), AND `atomicity` (ADVISORY — warnings only, never blocks). System half additionally: `rule-a --kind system` and `persona`.
 
 ```bash
 python3 "$VALIDATORS_PATH/validate.py" atomicity < "$HALF_FILE"   # human half — advisory, skips System personas
 ```
 
-`atomicity` never fails the run — it emits WARNINGS for clubbed input actions (>1 editable field), input actions carrying apis[], or editable fields with no dedicated action. **Use judgement:** split where it makes the flow clearer (one `Enter`/`Select` per editable field, the call on a Validate/Submit action), but it is NOT mandatory — some screens are naturally one action, and System actions are exempt entirely. Only `field-coverage`, `schema`, `forbidden`, `rule-a`, `persona`, `citations`, `citation-completeness` are hard gates.
+`atomicity` never fails the run — it emits WARNINGS for clubbed input actions (>1 editable field), input actions carrying apis[], or editable fields with no dedicated action. **Use judgement:** split where it makes the flow clearer (one `Enter`/`Select` per editable field, the call on a Validate/Submit action), but it is NOT mandatory — some screens are naturally one action, and System actions are exempt entirely. Only `field-coverage`, `schema`, `path-linked`, `descriptions`, `forbidden`, `rule-a`, `persona`, `citations`, `citation-completeness` are hard gates.
 
 `citation-completeness` failure means you read a file (it's in `audit.filesRead[]`) but did not cite it — add it to the relevant action/step/scenario `citations[]` (NOT outcome/persona) and re-run. Every `.java` handler named in the MAPL (`$CustomFilter*`, `WriteData*`) MUST be both read and cited.
 

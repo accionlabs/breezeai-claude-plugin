@@ -8,7 +8,8 @@ Word lists come from verbs.json (the single source of truth) — never inline th
 Persona-conditional checks take --kind {human, system}; persona-agnostic ones don't.
 
 Hard gates exit 2 when ok is False:   schema, rule-a, forbidden, persona,
-                                       citations, field-coverage, citation-completeness
+                                       citations, field-coverage, citation-completeness,
+                                       path-linked, descriptions
 Advisory checks always exit 0:         coverage, atomicity, api-urls
 
 Usage:
@@ -23,6 +24,8 @@ Usage:
   cat payload.json | validate.py coverage --kind human --seed-file jsx.txt
   cat payload.json | validate.py atomicity
   cat payload.json | validate.py api-urls --repo-root <path>
+  cat payload.json | validate.py path-linked                       # verb+route/URI in action name ⇒ apis[] required
+  cat payload.json | validate.py descriptions                      # every scenario AND action must have a non-empty description
 """
 import sys, os, json, re, argparse
 
@@ -38,6 +41,19 @@ SYSTEM_PERSONAS      = set(VERBS["system_personas"])
 FORBIDDEN_PERSONAS   = set(VERBS["forbidden_persona_names"])
 IDENTIFIER_PATTERNS  = VERBS["identifier_patterns"]
 WIDGET_PATTERNS      = VERBS["widget_patterns"]
+
+# A route / broker-URI / cron token spelled out in an action name or description.
+# Deliberately conservative — matches HTTP "METHOD /path", a scheme://… URI
+# (http/sqs/kafka/rabbit/…), a cron:<expr>, or a method-less API route
+# (/api, /v1, /internal, /admin, /webhooks, /graphql). It does NOT match bare
+# filesystem paths (/tmp, /var, ./x) so local file effects are not false-flagged.
+ROUTE_URI_RE = re.compile(
+    r"(?:\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+/\S+)"
+    r"|(?:\b(?:https?|sqs|sns|kafka|rabbit|amqp|servicebus|pubsub|grpc|wss?|s3)://\S+)"
+    r"|(?:\bcron:\S+)"
+    r"|(?:(?:^|\s)/(?:api|internal|admin|webhooks?|graphql|v\d+)\b[\w\-./{}:]*)",
+    re.I,
+)
 
 
 # ---------------------------------------------------------------- input
@@ -165,9 +181,10 @@ def cmd_citations(full, args):
     payload = get_payload(full)
     prefix = args.repo_name.rstrip("/") + "/"
     errs, warns = [], []
-    # Citations belong on the SPECIFIC nodes (action / step / scenario). Outcome and
-    # Persona are shared+merged by name across many EPs, so citing them pollutes —
-    # discouraged (advisory warning), not an error. (core.md §7.)
+    # Citations belong ONLY on the SPECIFIC nodes (scenario / step / action). Outcome and
+    # Persona are shared + merged by name across many EPs, so a citation there pollutes the
+    # shared node — it is FORBIDDEN, not merely discouraged. Do not author a citations[] on
+    # persona/outcome at all (omit the key). This is a HARD gate. (core.md §7.1.)
     HIGH_LEVEL = {"persona", "outcome"}
     def check(node, level):
         for c in node.get("citations", []) or []:
@@ -175,8 +192,8 @@ def cmd_citations(full, args):
             if not ref.startswith(prefix):
                 errs.append({"level": level, "reference": ref, "expected_prefix": prefix})
             if level in HIGH_LEVEL:
-                warns.append({"level": level, "reference": ref,
-                              "note": "citation on a shared node — prefer action/step/scenario (core.md §7)"})
+                errs.append({"level": level, "reference": ref,
+                             "fix": "citations are forbidden on persona/outcome (shared nodes) — remove this citation; cite the scenario/step/action it describes instead (core.md §7.1)"})
     for p in personas(payload):
         check(p, "persona")
         for o in p.get("outcomes", []):
@@ -318,11 +335,74 @@ def cmd_api_urls(full, args):
     finish(True, warnings=warns, hard=False)
 
 
+def _route_token(text):
+    m = ROUTE_URI_RE.search(text or "")
+    return m.group(0).strip() if m else None
+
+def _route_needle(tok):
+    """Reduce a matched route/URI token to a comparable needle for the apis[].url check."""
+    t = re.sub(r"^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+", "", tok, flags=re.I).strip()
+    t = re.split(r"[?#]", t)[0]
+    if "://" in t:
+        return t.lower().rstrip("/")          # brokers/URLs: compare whole URI
+    segs = [s for s in t.split("/") if s and not s.startswith("{") and not s.startswith(":")]
+    return ("/".join(segs[-2:])).lower() if segs else None
+
+def cmd_path_linked(full, args):
+    """HARD gate: an action whose first word is a network/side-effect verb AND that
+    spells out a route / broker-URI / cron token MUST carry a non-empty apis[].
+    (Soft warning if the named route isn't found in any apis[].url.) Persona-agnostic:
+    catches `Receive POST /api/x` / `Publish sqs://q` left with apis=[] — the
+    join-key drift that breaks human→system and system→system tracing."""
+    payload = get_payload(full)
+    verbs = NETWORK_VERBS | SIDE_EFFECT_VERBS
+    errs, warns = [], []
+    for pname, a in iter_actions(payload):
+        name = a.get("action") or ""
+        if first_word(name) not in verbs:
+            continue
+        tok = _route_token(name) or _route_token(a.get("description") or "")
+        if not tok:
+            continue
+        apis = a.get("apis") or []
+        if not apis:
+            errs.append({"action": name, "path": tok,
+                         "fix": "action names a route/URI but apis[] is empty — attach it as an apis[] entry {type, method, url}"})
+            continue
+        needle = _route_needle(tok)
+        urls = " ".join(str(x.get("url", "")) for x in apis).lower()
+        if needle and needle not in urls:
+            warns.append({"action": name, "path": tok,
+                          "note": "named route/URI not present in any apis[].url — verify the action links to the right interface"})
+    finish(not errs, errs, warns)
+
+def cmd_descriptions(full, args):
+    """HARD gate: every SCENARIO and every ACTION must carry a non-empty `description`.
+    (Scenario description is also schema-required; this additionally enforces it on every
+    action — both halves. A null/blank/whitespace description fails.)"""
+    payload = get_payload(full)
+    def blank(d): return not (isinstance(d, str) and d.strip())
+    errs = []
+    for p in personas(payload):
+        for o in p.get("outcomes", []):
+            for s in o.get("scenarios", []):
+                if blank(s.get("description")):
+                    errs.append({"level": "scenario", "name": s.get("scenario"),
+                                 "fix": "add a non-empty description (what the scenario accomplishes)"})
+                for st in s.get("steps", []):
+                    for a in st.get("actions", []):
+                        if blank(a.get("description")):
+                            errs.append({"level": "action", "name": a.get("action"),
+                                         "fix": "add a non-empty description (field metadata / constraint / input→output of the operation)"})
+    finish(not errs, errs)
+
+
 COMMANDS = {
     "schema": cmd_schema, "rule-a": cmd_rule_a, "forbidden": cmd_forbidden,
     "persona": cmd_persona, "citations": cmd_citations,
     "field-coverage": cmd_field_coverage, "citation-completeness": cmd_citation_completeness,
     "atomicity": cmd_atomicity, "coverage": cmd_coverage, "api-urls": cmd_api_urls,
+    "path-linked": cmd_path_linked, "descriptions": cmd_descriptions,
 }
 
 def main():

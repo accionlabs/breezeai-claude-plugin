@@ -25,6 +25,7 @@ These definitions are **canonical and non-negotiable**. In particular:
 - **A Step is a SEQUENTIAL STAGE, not a configuration variation.** Steps are ORDERED; they represent the phases a flow passes through. (This explicitly overrides the retired `visual-to-text` definition of Step-as-variation; capture variation as sibling **Scenarios**, never as Steps.)
 - **A Scenario is a FLOW, not a variation layer.** Distinct interaction paths are distinct Scenarios.
 - The only relationship below Action is **Action → `apis[]`**. There is **no** `Action TRIGGERED_BY Component` edge in the functional graph (that is a design-graph concern; do not leak it here).
+- **Every Scenario AND every Action MUST carry a non-empty `description`** (HARD GATE — `validate.py descriptions`, both halves). A Scenario describes the flow; an Action describes what it accomplishes (field metadata / constraint / branch for human actions; the internal input→output / formula / table-or-SP for system actions). `null`/blank is never acceptable on a scenario or action. (Steps need no description.)
 
 ### Quantity guidance
 - A Scenario typically has **3–8 Steps** (max 10).
@@ -117,17 +118,24 @@ If `rule-a` fails: open the source file and add the `apis[]`/identifier, **or** 
 
 ---
 
-## 7. Citations (HARD GATE on prefix; placement per §7.1)
+## 7. Citations (HARD GATE on prefix AND placement)
 
 A citation is `{ "type": "code", "name": <label>, "reference": <path> }` where `reference` **must** match `^[A-Za-z0-9_.\-]+/` — i.e. start with `<repo-name>/`. The `citations` validator enforces the prefix.
 
-### 7.1 Placement (C3) — cite LOW, on the specific node; never on shared nodes
-The schema and the backend permit `citations[]` at **all five levels** (persona, outcome, scenario, **step, action**). The placement rule is **cite as low as the evidence is specific** — the lower the node, the tighter the source↔node link:
+### 7.1 Placement (C3) — citations live ONLY on scenario / step / action
+This is a fixed contract, **not** a judgement call — decide once, at authoring time. There are exactly **three** node levels that may carry a `citations[]`, and **two** that must never carry one:
 
-- **Preferred: cite at the ACTION and STEP level.** An Action's source (the handler/field/widget it came from) is precise — cite the file there. A Step may cite the file(s) that define that stage. This is the tightest, most useful traceability and is where citations now belong by default.
-- **Scenario level is fine** for files that span the whole flow (e.g. the `MAPL`/route/page that defines the scenario end-to-end), or as the app-specific audit anchor.
-- **Do NOT cite at OUTCOME or PERSONA level.** These are **shared and merged by name across many EPs**, so citing source files on them accumulates hundreds of unrelated refs on one node = pollution. Outcome/Persona are too high-level to carry file evidence. The `citations` validator emits an **advisory warning** for any citation found at outcome/persona level — move it down to the action/step/scenario it actually describes.
-- The `citation-completeness` gate treats citations at **all levels as a union**, so citing a file at the action (or step, or scenario) it came from fully satisfies completeness — you never need to also cite it on a shared node.
+| Node | `citations[]`? |
+|---|---|
+| **Action** | ✅ **author here by default** — the handler / field / widget the action came from (tightest, most useful link) |
+| **Step** | ✅ allowed — the file(s) that define that stage |
+| **Scenario** | ✅ allowed — a file that spans the whole flow (the route / page / `MAPL`), or the app-specific audit anchor |
+| **Outcome** | ⛔ **forbidden — do NOT emit a `citations[]` key at all** |
+| **Persona** | ⛔ **forbidden — do NOT emit a `citations[]` key at all** |
+
+**Why Outcome/Persona are forbidden:** they are **shared and merged by name across many EPs**, so a file ref placed there accumulates on the shared node — hundreds of unrelated refs pile onto one Persona/Outcome = pollution. They are too high-level to carry file evidence. **Never author a `citations[]` on a persona or outcome node — omit the key entirely.** The `citations` validator **hard-fails (exit 2)** on any citation at outcome/persona level — cite the scenario/step/action it actually describes instead.
+
+The `citation-completeness` gate treats citations at the three allowed levels as a **union**, so citing a file at the action (or step, or scenario) it came from fully satisfies completeness — there is never a reason to put a citation on a shared node.
 
 ### 7.2 Completeness (HARD GATE)
 Every file the adapter `Read` (tracked in `audit.filesRead[]`) must appear — by **basename** — among the cited references. If you read a `.java` handler / service / `MFLT` / config to write a description, **cite it**. The `citation-completeness` check fails on any read-but-uncited file.

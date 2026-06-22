@@ -60,6 +60,7 @@ API_BASE:              <https URL of Breeze backend> # e.g. https://isometric-ba
 API_KEY:               <opaque Breeze API key>       # used in `api-key:` header; NEVER log, NEVER echo
 CODE_ONTOLOGY_ID:      <integer>                     # _id of the indexed backend repo; MUST be passed on every Code_Graph_Search call
 INDEXED_REPO_NAME:     <name on server>              # the `name` field Breeze stored when the repo was indexed (may differ from REPO.name on disk); fallback filter if CODE_ONTOLOGY_ID is unavailable
+SHARED_FUNCTIONAL_PATH: <absolute path>              # directory holding the SSOT rules (core.md + system-overlay.md) — `Read` both FIRST (see Functional Graph Rules); degrade to training/EXISTING_NEIGHBORHOOD if absent
 VALIDATORS_PATH:       <absolute path>               # directory containing validate.py — run it as a deterministic gate in Phase 6 (may be absent on older invocations; degrade to prose-only if so)
 
 EXISTING_NEIGHBORHOOD: { ...JSON of parent's dedup pre-query... }
@@ -237,11 +238,11 @@ Build the `payload` and `audit` documents per the schema below. **Hold them in y
 
 ## Functional Graph Rules
 
-> **AUTHORITATIVE RULES — `Read` these two files FIRST, before drafting any node** (single source of truth, ADR 0001). They live next to the validator you already run: at `$VALIDATORS_PATH/../../shared/functional/` (i.e. resolve `VALIDATORS_PATH` = `…/skills/generate-functional-from-backend/validators` → `…/skills/shared/functional/`):
-> - `core.md` — node model (Outcome → Scenario → Step → Action), reuse/dedup, `rule-a`, citations, write protocol, no-upper-cap-on-actions.
-> - `system-overlay.md` — this is the **backend / System pass**: the mechanical EP→persona map (`System` / `External System`), `description` REQUIRED on every System action, one-operation-one-action (per-field atomicity exempt), the apis-OR-identifier `rule-a` fallback.
+> **AUTHORITATIVE RULES — `Read` these two files FIRST, before drafting any node** (single source of truth, ADR 0001). Both live under the `SHARED_FUNCTIONAL_PATH` given in your INPUTS (e.g. `…/skills/shared/functional/`):
+> - `SHARED_FUNCTIONAL_PATH/core.md` — node model (Outcome → Scenario → Step → Action), reuse/dedup, `rule-a`, citations, write protocol, no-upper-cap-on-actions.
+> - `SHARED_FUNCTIONAL_PATH/system-overlay.md` — this is the **backend / System pass**: the mechanical EP→persona map (`System` / `External System`), `description` REQUIRED on every System action, one-operation-one-action (per-field atomicity exempt), the apis-OR-identifier `rule-a` fallback, and the **inbound-surface action** rule (the EP's own endpoint/queue is its own `Receive`/`Consume`/`Handle` action that owns the served `apis[]`).
 >
-> Do not keep a private copy of those definitions here. The shared `validate.py` enforces the hard gates (schema / rule-a / persona / citations / coverage) regardless. If `VALIDATORS_PATH` is unset/unreadable, fall back to `EXISTING_NEIGHBORHOOD`/training and let the reasoning checks (Step B) cover it.
+> Do not keep a private copy of those definitions here. The shared `validate.py` enforces the hard gates (schema / rule-a / persona / citations / coverage) regardless. If `SHARED_FUNCTIONAL_PATH` is unset/unreadable, fall back to `EXISTING_NEIGHBORHOOD`/training and let the reasoning checks (Step B) cover it.
 
 **Backend-specific Outcome guidance (adapter — on top of core.md §2):** prefer broad business-capability Outcomes; >3-4 for one EP = over-segmenting. A System Scenario's `description` describes the **internal processing**, not the triggering UI.
 
@@ -342,7 +343,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` (on-dis
 - `actions[i].citations[]` — **preferred.** The service/repository/handler file the action's operation came from — the tightest link.
 - `steps[i].citations[]` — files defining a processing stage when no single action owns them.
 - `scenarios[i].citations[]` — files spanning the whole flow (the controller/resolver/consumer entry file).
-- **Do NOT cite at `outcomes[]` or `personas[]`** — shared/merged by name across many EPs, so file refs there pollute the shared node; `validate.py citations` warns on it. Completeness is a union across all levels, so an action/step/scenario citation satisfies the gate. **Never cite a frontend file path** — the backend pass reads backend code only.
+- **Never author a `citations[]` on `outcomes[]` or `personas[]` — omit the key entirely.** Citations live ONLY on scenario / step / action (cite at the action by default). Outcome/Persona are shared/merged by name across many EPs, so any file ref there pollutes the shared node. This is a HARD gate: `validate.py citations` now **fails (exit 2)** on a persona/outcome citation. Completeness is a union across the three allowed levels, so an action/step/scenario citation satisfies the gate. **Never cite a frontend file path** — the backend pass reads backend code only.
 
 ---
 
@@ -495,6 +496,8 @@ __CAND_END__
 run() { python3 "$VALIDATORS_PATH/validate.py" "$@" < "$CAND"; }
 run schema                              # exit 2 on schema violations
 run rule-a                              # exit 2 if a side-effect-verb action lacks apis[]/identifier
+run path-linked                         # exit 2 if a verb+route/URI action (Receive POST /x, Publish sqs://q) has apis=[]
+run descriptions                        # exit 2 if any scenario or action has a null/blank description
 run persona                             # exit 2 if persona != System/External System or count != 1
 run citations --repo-name "$REPO_NAME"  # exit 2 if any reference lacks the <REPO.name>/ prefix
 run coverage                            # warning-only (exit 0); reports side-effect coverage ratio
@@ -502,7 +505,7 @@ run coverage                            # warning-only (exit 0); reports side-ef
 
 Each subcommand prints `{ok, errors, warnings, ...}` and exits **0** (pass) / **2** (fail) / **3** (bootstrap error). Handle:
 
-- **exit 2** → read `errors[]`, repair the offending nodes in-memory using the table below, rewrite `$CAND`, re-run that subcommand. Max **2 repair passes**; if still failing → `FAIL_VALIDATE` with `last_check` = the failing subcommand (`schema|rule-a|persona|citations`).
+- **exit 2** → read `errors[]`, repair the offending nodes in-memory using the table below, rewrite `$CAND`, re-run that subcommand. Max **2 repair passes**; if still failing → `FAIL_VALIDATE` with `last_check` = the failing subcommand (`schema|rule-a|path-linked|descriptions|persona|citations`).
 - **exit 3** (the `jsonschema` dependency isn't installed) **OR `VALIDATORS_PATH` is absent/empty** → do NOT fail the run. Append `audit.warnings[]` `{ "type": "validators_unavailable", "note": "validate.py or jsonschema not available — used reasoning checks only" }`, set `audit.validatorsRun = false`, and rely on Step B. (Same degrade-don't-die philosophy as the Code_Graph_Search soft floor.)
 - **coverage** is advisory: if it warns the ratio is `<90%`, act on it per check #6 before proceeding — but it never blocks on its own.
 

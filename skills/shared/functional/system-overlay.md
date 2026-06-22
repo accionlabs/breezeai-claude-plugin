@@ -80,3 +80,38 @@ Where the adapter supplies `audit.sideEffects[]`, ≥90% should be matched to an
 ## 5. `apis[]` typing (system surfaces)
 
 See `core.md §4` for the full join-model table. System-relevant rows: backend REST routes → `REST`; GraphQL ops → `GraphQL`; queue/event consumers → `Event` (`sqs://`/`kafka://`/`rabbit://`); cron → `Event` (`cron:<expr>`); SOAP/WCF/ASMX → `SOAP`; P3 internal Vert.x bus / `DoFilter` / `WriteData` → `Event`. **Resolve all template literals to literal queue/topic/route values before recording.**
+
+---
+
+## 6. Inbound surface = its own action (served vs required interface)
+
+This is the System-half mirror of `human-overlay.md §5` ("the backend call is its own action that owns the `apis[]`"). On the human side the persona **calls out**, so the call action owns the *outbound* `apis[]`. On the system side the persona **is the thing being called**, so the served endpoint/queue/schedule must be captured as its own **inbound** action.
+
+**Rule.** The entry point's own surface — the endpoint it receives on — is modeled as a **dedicated action, the first action of the entry scenario**, and **that action owns the served `apis[]`**:
+
+| EP kind | Inbound action (verb) | `apis[]` on that action |
+|---|---|---|
+| REST route | `Receive <METHOD> <url>` | `{type:REST, method, url, request: inbound DTO/query, response: returned DTO}` |
+| GraphQL op | `Handle <Query\|Mutation>.<op>` | `{type:GraphQL, method, url}` |
+| Queue consumer | `Consume <queue>` | `{type:Event, method:consume, url: sqs://… / kafka://… / rabbit://…}` |
+| Cron / scheduled | `Handle scheduled <job>` | `{type:Event, method:trigger, url: cron:<expr>}` |
+| Webhook / partner callback (**External System**) | `Receive <METHOD> <url>` | `{type:REST\|SOAP, …}` |
+
+**Direction is read from the verb** (the schema has no `direction` field; `type`/`method` are free text):
+
+- **Inbound / served interface** → `Receive` / `Consume` / `Handle`. There is **exactly one** per entry scenario, and its `apis[].url` equals the EP route. It appears **once** — never copy the served url onto internal actions.
+- **Outbound / required interface** → `Call` / `Invoke` / `Publish` / `Send` (the handler calling *another* service, queue, or partner API). **Each such action carries its own `apis[]`** for the interface it exercises, with the URL resolved to a literal.
+- Pure internal effects (DB / ES / S3 / SP) follow the §4 `rule-a` fallback: `apis[]` empty, the repository/table/index/stored-proc named in the action name or `description`.
+
+**Polymorphic handlers** (a handler that dispatches on a discriminator — `switch(message.type)`, `if (eventType === …)`): each per-branch scenario repeats the `Receive`/`Consume` action with the **same** served `apis[].url` and the discriminator noted in `request` (e.g. `request: "body.type == 'CLOSE'"`), so every branch stays independently traceable to the surface.
+
+**Why this matters (downstream meaning).** `apis[].url` is the join key across passes and layers, and **the join is persona-agnostic — it keys on the URL, not the persona.** A caller records an *outbound* call to a URL; the owner of that URL records an *inbound* `Receive`/`Consume` of the **same** URL; they reconcile on that string. This holds for **all four interaction quadrants**:
+
+| Caller → Callee | Caller side | Callee side |
+|---|---|---|
+| **Human → System** | UI `Submit → POST /x` (outbound `apis[]`) | backend `Receive POST /x` (inbound `apis[]`) |
+| **System → System** (internal, both ours) | service A `Call POST /b/x` (outbound `apis[]`) | service B `Receive POST /b/x` (inbound `apis[]`) |
+| **System → External System** (we call a 3rd party) | our `Call`/`Invoke` with the external URL | — (not in our codebase) |
+| **External System → System** (webhook/callback in) | — (not in our codebase) | our `Receive` under `External System` persona |
+
+So **System → System is captured by the same mechanism as Human → System** — no new persona is needed; both endpoints stay `System` and link by `apis[].url`. `External System` is reserved for the *boundary* (a 3rd party we do not own), i.e. only the two dangling quadrants. A dangling outbound `Call` (no matching `Receive`) = a *required* external dependency; a dangling `Receive` under `External System` (no caller) = a surface we *provide* to the outside — both are intended signals (the mirror of `backendEndpointsWithNoFrontendCaller`). If the served surface is buried in prose instead of a structured `apis[]` node, every one of these joins silently breaks.

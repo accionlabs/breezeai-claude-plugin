@@ -159,7 +159,9 @@ Render `references/metadata-flow-structuring-agent.prompt.md`, substituting the 
 `mapl_path`, `steps_json`, `ajax_endpoints_json`), the Breeze coordinates (`project_uuid`,
 `project_name`, `llm_platform="AWSBEDROCK"`, `api_base`, `api_key`, `human_upsert_path`,
 `system_upsert_path`), the two output paths, `validators_path` (this skill's `validators/` absolute
-dir), `rules_path` (this skill's `references/rules.md` absolute path), and `existing_neighborhood_json`.
+dir), `shared_functional_path` (the shared SSOT dir `<pluginRoot>/skills/shared/functional` — the agent
+reads `core.md` + `human-overlay.md` + `system-overlay.md` from here, same as the UI/backend passes),
+`rules_path` (this skill's `references/rules.md` absolute path = the metadata MAPL overlay), and `existing_neighborhood_json`.
 
 ## Step 3 — Spawn the batch (concurrently)
 

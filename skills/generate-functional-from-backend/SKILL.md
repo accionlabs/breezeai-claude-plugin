@@ -259,6 +259,7 @@ Load `references/backend-flow-structuring-agent.prompt.md` and substitute the `{
 | `{{api_key}}` | `apiKey` from `.breeze.json` (NEVER echo, NEVER log) |
 | `{{code_ontology_id}}` | `backendCodeOntologyId` resolved in Bootstrap step 7 |
 | `{{indexed_repo_name}}` | `backendRepoName` resolved in Bootstrap step 7 |
+| `{{shared_functional_path}}` | absolute path to the **shared functional SSOT** dir — `<pluginRoot>/skills/shared/functional` (sibling of this skill, i.e. `<this skill dir>/../shared/functional`). The agent reads `core.md` + `system-overlay.md` from here for the canonical rules (ADR 0001). Mirrors the UI pass's `{{shared_functional_path}}`. |
 | `{{validators_path}}` | absolute path to **this skill's `validators/` directory** (e.g. `<pluginRoot>/skills/generate-functional-from-backend/validators`). The agent runs `validate.py` from here in Phase 6. |
 | `{{existing_neighborhood_json}}` | `json.dumps(EXISTING_NEIGHBORHOOD)` |
 

@@ -34,7 +34,7 @@ Human actions describe what the user **PROVIDES, DECIDES, or OBSERVES** — they
 
 - **FORBIDDEN words** (`verbs.json → forbidden_ui_words`): click, tap, swipe, hover, scroll, drag, drop, toggle, button, dropdown, modal, dialog, popup, panel, checkbox, radio, slider, tooltip, menu, sidebar, navbar, tab, icon. The `forbidden` check (word-boundary match) fails on any of these in a human action name.
 - **USE instead** — intent verbs (`verbs.json → human_intent_verbs`): Provide, Choose, Confirm, Review, Dismiss, Open, Close, Submit, Cancel, Specify, Indicate, Acknowledge, Request, Enter, Select, Filter.
-- **`description = null` by default.** Set it only for a real user-facing constraint (e.g. `Minimum 20 characters`, `Blocked until all files uploaded`). **Never** put code-level prose in a human action description (no `onStageClick`, no component names).
+- **`description` is REQUIRED on every action (HARD GATE — `validate.py descriptions`).** State what the action accomplishes in user terms: for a field action, the field metadata (`label: …; type: …; required: …`, per Pattern A §3); for a constraint, the rule (`Minimum 20 characters`, `Blocked until all files uploaded`); for a branch, the choice. **Never** put code-level prose in a human action description (no `onStageClick`, no component names, no table/SP/SQL — that's the system half). Scenarios are likewise required to carry a non-empty description.
 
 ---
 

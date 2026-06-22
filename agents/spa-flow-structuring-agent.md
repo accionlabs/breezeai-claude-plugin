@@ -324,7 +324,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` prefix,
 - `actions[i].citations[]` — **preferred.** The file the action came from (the form/component/service for that field or call). This is the tightest link.
 - `steps[i].citations[]` — files that define that stage when no single action owns them.
 - `scenarios[i].citations[]` — files that span the whole flow (the page/route component).
-- **Do NOT cite at `outcomes[]` or `personas[]`** — they are shared and merged by name across many EPs, so file refs there pollute the shared node. `validate.py citations` warns on it. (Completeness is a union across all levels, so citing at the action/step/scenario fully satisfies the gate — you never need persona/outcome citations.)
+- **Never author a `citations[]` on `outcomes[]` or `personas[]` — omit the key entirely.** Citations live ONLY on scenario / step / action (cite at the action by default). Outcome/Persona are shared and merged by name across many EPs, so any file ref there pollutes the shared node. This is a HARD gate: `validate.py citations` now **fails (exit 2)** on a persona/outcome citation. Completeness is a union across the three allowed levels, so an action/step/scenario citation fully satisfies the gate — there is never a reason to cite a shared node.
 
 ---
 
@@ -447,7 +447,7 @@ Confirm in your own reasoning (do not include the check in output):
 13. ✅ `audit.warnings[]` documents every gap / skip / judgment call (including ambiguous visibility gates)?
 14. ✅ `audit.codeGraphSearches.length >= 1` — at least one mandatory hygiene sweep happened?
 15. ✅ `audit.skippedForVisibility` exists (even as `[]`) and `audit.stats` is populated with all required keys, using `0` rather than omitting?
-16. ✅ Phase 6 ran: schema + rule-a + chain + forbidden + citations + Pattern A collapse + dispatcher split all pass against the in-memory payload?
+16. ✅ Phase 6 ran: schema + rule-a + path-linked + chain + forbidden + citations + field-coverage + Pattern A collapse + dispatcher split all pass against the in-memory payload?
 17. ✅ No `Specify …` step ends with a generic single action like `Provide the form / payload / fields / details / data` — every such step has one action per actual field?
 18. ✅ For every dispatcher form discovered (a single component branching on `type` / `label` / `kind` / `mode`), one scenario per discriminator branch was emitted with that branch's fields enumerated separately?
 
@@ -457,7 +457,35 @@ If any check fails, fix the output before emitting. The parent does NOT re-valid
 
 ## Phase 6 — Self-validate + repair (mandatory, no parent backstop)
 
-Before writing anything to disk, run the checks below against your in-memory `{payload, audit}`. **You own these — the parent does not run validators.** Repair in-place and re-run until all pass, or until you've made 2 repair passes and still have errors (then emit `FAIL_VALIDATE`).
+Before writing anything to disk, validate your in-memory `{payload, audit}` in two layers. **You own both — the parent does not run validators.** Repair in-place and re-run until all pass, or until you've made 2 repair passes and still have errors (then emit `FAIL_VALIDATE`).
+
+### Step A — Deterministic validators (`validate.py`)
+
+`validate.py` lives in `SHARED_FUNCTIONAL_PATH` (your INPUTS). Materialize your candidate to a temp file and run each subcommand — these are the **authoritative hard gates**; run them every time `SHARED_FUNCTIONAL_PATH` is available:
+
+```bash
+CAND="$(mktemp)"
+cat > "$CAND" << '__CAND_END__'
+{ ...your in-memory {payload, audit}... }
+__CAND_END__
+
+run() { python3 "$SHARED_FUNCTIONAL_PATH/validate.py" "$@" < "$CAND"; }
+run schema                              # exit 2 on schema violations
+run rule-a --kind human                 # exit 2 if a network-verb action lacks apis[] (no identifier fallback on the human half)
+run path-linked                         # exit 2 if a verb+route/URI action (e.g. Submit POST /api/x) has apis=[]
+run descriptions                        # exit 2 if any scenario or action has a null/blank description
+run forbidden                           # exit 2 if an action name contains a forbidden UI word
+run citations --repo-name "$REPO_NAME"  # exit 2 if any reference lacks the <REPO.name>/ prefix
+run field-coverage                      # exit 2 if a declared field is uncovered
+```
+
+Each subcommand prints `{ok, errors, warnings}` and exits **0** (pass) / **2** (fail) / **3** (bootstrap error). Handle:
+- **exit 2** → read `errors[]`, repair the offending nodes in-memory using the Step B table, rewrite `$CAND`, re-run that subcommand. Max **2 repair passes**; if still failing → `FAIL_VALIDATE` with `last_check` = the failing subcommand (`schema|rule-a|path-linked|descriptions|forbidden|citations|field-coverage`).
+- **exit 3** (the `jsonschema` dependency isn't installed) **OR `SHARED_FUNCTIONAL_PATH` is absent/unreadable** → do NOT fail the run. Append `audit.warnings[]` `{ "type": "validators_unavailable", "note": "validate.py or jsonschema not available — used reasoning checks only" }`, set `audit.validatorsRun = false`, and rely on Step B.
+
+### Step B — reasoning checks (what no script catches)
+
+These cover what `validate.py` cannot judge (network-chain coherence, dispatcher splits, field-enumeration collapses, URL reality). Scan them every run; the table is also your repair guide for whatever Step A flags.
 
 | # | Check | What you scan | How to repair |
 |---|---|---|---|
@@ -558,7 +586,7 @@ OK · outcomes: <N> · scenarios: <N> · steps: <N> · actions: <N> · apis: <N>
 
 **On Phase 6 validation failure (repair gave up after 2 passes):**
 ```
-FAIL_VALIDATE · errors: <count> · last_check: <schema|rule-a|chain|forbidden|citations> · path: <OUTPUT_PATH>
+FAIL_VALIDATE · errors: <count> · last_check: <schema|rule-a|path-linked|chain|forbidden|citations|field-coverage> · path: <OUTPUT_PATH>
 ```
 
 **On Phase 7 write failure:**
