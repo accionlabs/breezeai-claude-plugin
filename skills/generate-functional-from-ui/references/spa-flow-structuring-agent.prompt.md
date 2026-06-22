@@ -2,10 +2,10 @@
 
 The skill renders this file (substitutes the `{{...}}` placeholders) and
 passes the result as the `prompt` argument when invoking
-`subagent_type: "breeze:flow-structuring-agent"`.
+`subagent_type: "breeze:spa-flow-structuring-agent"`.
 
 The agent's full methodology — phases, rules, schema, self-check — lives
-in `agents/flow-structuring-agent.md` (installed when the plugin is
+in `agents/spa-flow-structuring-agent.md` (installed when the plugin is
 installed). This template only carries the per-call variable inputs.
 
 ---
@@ -16,6 +16,7 @@ ENTRY_POINT:
   kind:                {{kind}}
   title:               {{title}}
 SEED_FILE:             {{seed_file_absolute_path}}
+SHARED_FUNCTIONAL_PATH: {{shared_functional_path}}
 REPO:
   name:                {{repo_name}}
   root:                {{repo_root_absolute_path}}

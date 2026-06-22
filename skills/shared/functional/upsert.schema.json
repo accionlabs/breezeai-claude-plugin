@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://breeze.ai/schemas/backend-upsert.schema.json",
-  "title": "Functional Graph Upsert Payload (backend pass)",
+  "$id": "https://breeze.ai/schemas/functional/upsert.schema.json",
+  "title": "Functional Graph Upsert Payload (v2) — unified",
+  "description": "ONE schema for every generator (ui / backend / p3 / aspx). Persona is a free string (C1: the backend enforces no enum — PersonaDto.persona is @IsString @IsNotEmpty; persona-KIND is gated by validate.py persona --kind, not by the schema). apis[].type is a free string (C5: free text server-side; recommended set REST / GraphQL / gRPC / WebSocket / Event / SOAP). The single persona per payload (minItems/maxItems 1) preserves the one-EP-one-upsert write protocol.",
   "type": "object",
   "required": ["personas"],
   "additionalProperties": false,
@@ -15,7 +16,7 @@
         "required": ["persona", "outcomes"],
         "additionalProperties": false,
         "properties": {
-          "persona":     { "enum": ["System", "External System"] },
+          "persona":     { "type": "string", "minLength": 1 },
           "description": { "type": ["string", "null"] },
           "citations":   { "type": "array", "items": { "$ref": "#/$defs/citation" } },
           "outcomes": {
@@ -49,6 +50,7 @@
                           "additionalProperties": false,
                           "properties": {
                             "step": { "type": "string", "minLength": 1 },
+                            "citations": { "type": "array", "items": { "$ref": "#/$defs/citation" } },
                             "actions": {
                               "type": "array",
                               "minItems": 1,
@@ -59,6 +61,7 @@
                                 "properties": {
                                   "action":      { "type": "string", "minLength": 1 },
                                   "description": { "type": ["string", "null"] },
+                                  "citations":   { "type": "array", "items": { "$ref": "#/$defs/citation" } },
                                   "apis": {
                                     "type": "array",
                                     "items": {
@@ -66,7 +69,7 @@
                                       "required": ["type", "method", "url", "request", "response"],
                                       "additionalProperties": false,
                                       "properties": {
-                                        "type":     { "enum": ["REST", "GraphQL", "gRPC", "WebSocket", "Event"] },
+                                        "type":     { "type": "string", "minLength": 1, "description": "Free text. Recommended: REST | GraphQL | gRPC | WebSocket | Event | SOAP." },
                                         "method":   { "type": "string" },
                                         "url":      { "type": "string" },
                                         "request":  { "type": "string" },

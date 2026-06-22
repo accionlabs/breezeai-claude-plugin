@@ -132,6 +132,12 @@ If `EXISTING_NEIGHBORHOOD.outcomes` is empty, the graph has nothing similar yet 
 6. Record every file you read in `audit.filesRead`.
 7. Record every file you considered and skipped in `audit.skippedComponents[]` with a one-line reason.
 
+**.NET / C# idioms (when the repo is .NET — ASMX / WCF / Web API).** The paradigm is identical (handler → injected services → side effects); read it with these mappings:
+- **Handler** — the `[WebMethod]` method (`.asmx.cs`), the `[OperationContract]` implementation on the service class (`.svc.cs`, or a class implementing the `[ServiceContract]` interface), or the `[ApiController]` action. The class is often **partial** — also read the matching `.designer.cs`.
+- **Operation identity** — for SOAP the `absoluteUrl` is `<Service>.asmx/<Operation>` (ASMX) or `<IContract>/<Operation>` (WCF; resolve the endpoint address from `<system.serviceModel>` in `web.config`/`app.config`). Set `apis[i].type = "SOAP"` (use `REST` only for `[WebGet]`/`[WebInvoke]`/Web API actions).
+- **Dependency injection** — constructor injection (as in Node), but also **property injection** and container registration (`Startup.cs` / `Global.asax` / Autofac/Unity/Ninject/Castle modules, or `web.config`). If a dependency is resolved via a container or a static `ServiceLocator`/`DependencyResolver`, `Grep`/`Code_Graph_Search` the registration to find the concrete implementation, then read it.
+- **Data access (side effects)** — Entity Framework `DbContext` (LINQ + `SaveChanges()` → entity/table), ADO.NET (`SqlCommand` / stored-procedure name → table/proc), Dapper, or a repository class. Record the EF entity/table or the SQL command / stored-proc name as the DB identifier in Phase 3, exactly as you would a TypeORM repository + table.
+
 ### Phase 2 — Field & enum enumeration (mandatory)
 
 Backend handlers carry structured contracts. Enumerate them — never collapse a field list into a single combined action or a vague "validates input" description. Two patterns, both mandatory wherever they appear.
@@ -231,49 +237,18 @@ Build the `payload` and `audit` documents per the schema below. **Hold them in y
 
 ## Functional Graph Rules
 
-### Outcome
+> **AUTHORITATIVE RULES — `Read` these two files FIRST, before drafting any node** (single source of truth, ADR 0001). They live next to the validator you already run: at `$VALIDATORS_PATH/../../shared/functional/` (i.e. resolve `VALIDATORS_PATH` = `…/skills/generate-functional-from-backend/validators` → `…/skills/shared/functional/`):
+> - `core.md` — node model (Outcome → Scenario → Step → Action), reuse/dedup, `rule-a`, citations, write protocol, no-upper-cap-on-actions.
+> - `system-overlay.md` — this is the **backend / System pass**: the mechanical EP→persona map (`System` / `External System`), `description` REQUIRED on every System action, one-operation-one-action (per-field atomicity exempt), the apis-OR-identifier `rule-a` fallback.
+>
+> Do not keep a private copy of those definitions here. The shared `validate.py` enforces the hard gates (schema / rule-a / persona / citations / coverage) regardless. If `VALIDATORS_PATH` is unset/unreadable, fall back to `EXISTING_NEIGHBORHOOD`/training and let the reasoning checks (Step B) cover it.
 
-A high-level business capability a persona needs to accomplish. NOT a technical function, endpoint, or implementation detail.
-
-- Evaluate `EXISTING_NEIGHBORHOOD` first; reuse if a match exists.
-- Prefer broader Outcomes; capture variation as Scenarios.
-- Create a new Outcome only if no existing one can logically contain the intent.
-- Quality checks: understandable by a non-technical stakeholder, stable across implementation changes, broad enough to absorb future Scenarios.
-- If more than 3-4 new Outcomes appear necessary for one EP, you are over-segmenting — re-evaluate.
+**Backend-specific Outcome guidance (adapter — on top of core.md §2):** prefer broad business-capability Outcomes; >3-4 for one EP = over-segmenting. A System Scenario's `description` describes the **internal processing**, not the triggering UI.
 
 **Good:** `Manage Fund Allocations`, `Monitor Compliance Status`, `Track Construction Project Pipeline`
 **Bad:** `Handle API Requests`, `Process Database Queries`, `Handle ProjectsController`
 
-### Scenario
-
-A specific system flow under an Outcome. Testable — you can write acceptance criteria. Clear start and end.
-
-- Reuse existing Scenario if the flow is semantically similar.
-- Create new only for genuinely distinct processing paths.
-- If two Scenarios share >70% of their steps, consider merging.
-- Each Scenario MUST include a brief `description` covering end-to-end internal behavior plus constraints/limits. For System personas the description describes the **internal processing**, not the triggering UI.
-
-### Step
-
-Sequential stages within a Scenario.
-
-- Typically 3-8 Steps (use more when the flow genuinely has more sequential phases). Short verb phrase. No description needed. Ordered.
-- If you find >15 Steps in one Scenario, ask whether some are actually separate Scenarios.
-
-### Action
-
-Atomic internal operations.
-
-**SYSTEM persona actions:**
-- Single atomic internal operations.
-- `description` REQUIRED on every System action — formula, threshold, field names, condition, error message, data format, repository+table, or input/output contract.
-- `null` only for trivial glue (e.g. "Log completion").
-
-**EXTERNAL SYSTEM persona actions:**
-- Single atomic API / integration operations.
-- `description` = endpoint, payload shape, or auth mechanism when known.
-
-**Quantity:** Typically 1-5 actions per Step. Enumeration overrides this — if a validation step covers 18 DTO fields, enumerate them rather than splitting into artificial Steps.
+**Enumeration (backend, on top of system-overlay):** a validation Step covering 18 DTO fields enumerates them (in actions or the action description) rather than splitting into artificial Steps; field-coverage is what matters, not a per-Step action cap.
 
 ### ENUMERATION rule (critical)
 
@@ -363,12 +338,11 @@ Every citation looks like:
 
 To build `reference`: take the absolute file path, strip the `REPO.root` (on-disk) prefix, then prepend `REPO.name + "/"` — where `REPO.name` is the **indexed repo name**, NOT the on-disk folder basename. Using the indexed name is what lets the citation resolve back to the file node the code graph stored.
 
-**Where citations go:**
-- `personas[0].citations[]` — every file you read (mandatory)
-- `outcomes[i].citations[]` — files that informed the outcome boundary (the controller/resolver/consumer + its main service)
-- `scenarios[i].citations[]` — files specific to that scenario (services, repositories, DTOs)
-
-Do NOT put citations on steps or individual actions — keep payload size sane. **Never cite a frontend file path** — the backend pass reads backend code only.
+**Where citations go (cite LOW — core.md §7):**
+- `actions[i].citations[]` — **preferred.** The service/repository/handler file the action's operation came from — the tightest link.
+- `steps[i].citations[]` — files defining a processing stage when no single action owns them.
+- `scenarios[i].citations[]` — files spanning the whole flow (the controller/resolver/consumer entry file).
+- **Do NOT cite at `outcomes[]` or `personas[]`** — shared/merged by name across many EPs, so file refs there pollute the shared node; `validate.py citations` warns on it. Completeness is a union across all levels, so an action/step/scenario citation satisfies the gate. **Never cite a frontend file path** — the backend pass reads backend code only.
 
 ---
 
@@ -470,7 +444,7 @@ Do NOT put citations on steps or individual actions — keep payload size sane. 
 - Every `scenarios[i]` MUST have a non-empty `description`.
 - Every System action MUST have a non-empty `description` (null only for trivial glue like "Log completion").
 - Every `actions[i].apis[i]` MUST have all five fields: `type`, `method`, `url`, `request`, `response`.
-- `apis[i].type` MUST be one of: `REST`, `GraphQL`, `gRPC`, `WebSocket`, `Event`.
+- `apis[i].type` is **free text** (the backend does not enforce an enum) — prefer a recommended protocol: `REST`, `GraphQL`, `gRPC`, `WebSocket`, `Event`, `SOAP` (use `SOAP` for WCF / ASMX service operations). New protocol values are allowed; never block on an unknown one.
 - `citations[i].reference` MUST start with `<REPO.name>/` and MUST be a backend path.
 - Every action whose first word is a SIDE-EFFECT VERB MUST satisfy Rule A (apis[] OR DB/ES/S3 identifier in description).
 - When one network/queue event is split across multiple actions (e.g. `Persist …`, `Publish …`), every action in that chain that shares the event must carry the same `apis[]` entry.
@@ -540,7 +514,7 @@ When the deterministic pass ran, set `audit.validatorsRun = true`. The `$REPO_NA
 
 | # | Check | What you scan | How to repair |
 |---|---|---|---|
-| 1 | **Schema shape** | `payload.personas[]` length 1; persona name matches PERSONA and ∈ {System, External System}; every scenario has non-empty description; every System action has non-empty description; every apis[i] has all 5 fields; apis[i].type ∈ {REST, GraphQL, gRPC, WebSocket, Event} | Fix the offending node in-place. Most common: missing `description` on a synthesized scenario/System action, or apis[i] missing `request`/`response`. |
+| 1 | **Schema shape** | `payload.personas[]` length 1; persona name matches PERSONA and ∈ {System, External System}; every scenario has non-empty description; every System action has non-empty description; every apis[i] has all 5 fields; apis[i].type is a non-empty protocol string (recommended REST/GraphQL/gRPC/WebSocket/Event/SOAP — free text, unknown values allowed) | Fix the offending node in-place. Most common: missing `description` on a synthesized scenario/System action, or apis[i] missing `request`/`response`. |
 | 2 | **Rule A (side-effect-verb)** | For every action whose first word is a SIDE-EFFECT VERB, check `apis.length >= 1` OR a repo+table / ES index / S3 bucket named in `description` | (a) network/queue call → attach apis[]; (b) pure DB/ES/S3 → name the identifier in description; (c) no side effect → rename to a non-side-effect verb. NEVER leave a bare side-effect verb with no apis and no identifier. |
 | 3 | **Network/queue-chain coherence** | When `Persist …` + `Publish …` (or `Authenticate …` + `Submit …`) appear under one step sharing one event | Copy the shared apis[] entry onto every chained action. |
 | 4 | **Persona constraint** | `personas[0].persona` ∈ {System, External System}; no human-role string; no action describes UI gestures | If a human role slipped in, the EP was mis-assigned — re-derive from the EP-type table and rewrite. Strip any UI-trigger language from System descriptions. |

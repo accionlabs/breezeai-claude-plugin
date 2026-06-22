@@ -1,0 +1,87 @@
+{
+  "_meta": {
+    "title": "Functional-ontology word lists — single source of truth",
+    "purpose": "The ONE place every verb / forbidden-word / persona / pattern list lives. The shared validate.py imports this; generator validators and validate-graph.py must import it too rather than re-listing words inline (ADR 0001, Phase 1).",
+    "consumers": [
+      "skills/shared/functional/validate.py",
+      "skills/validate-functional-graph/scripts/validate-graph.py",
+      "skills/generate-functional-from-{ui,backend,p3}/validators/validate.py (to be replaced by an import)"
+    ],
+    "provenance": "Unioned from the three generator validators + validate-graph.py. Where the same list diverged, the SUPERSET was taken and the divergence is noted in _notes so nothing is silently dropped."
+  },
+
+  "forbidden_ui_words": [
+    "click", "tap", "swipe", "hover", "scroll", "drag", "drop", "toggle",
+    "button", "dropdown", "modal", "dialog", "popup", "panel", "checkbox",
+    "radio", "slider", "tooltip", "menu", "sidebar", "navbar", "tab", "icon",
+    "postback", "gridview"
+  ],
+
+  "human_intent_verbs": [
+    "Provide", "Choose", "Confirm", "Review", "Dismiss", "Open", "Close",
+    "Submit", "Cancel", "Specify", "Indicate", "Acknowledge", "Request",
+    "Enter", "Select", "Filter", "Persist", "Validate"
+  ],
+
+  "input_verbs": [
+    "enter", "input", "provide", "specify", "select", "choose", "indicate",
+    "set", "designate", "capture", "mark", "toggle", "pick", "filter"
+  ],
+
+  "network_verbs": [
+    "submit", "generate", "upload", "download", "delete", "save", "send",
+    "fetch", "retrieve", "publish", "persist", "sync", "import", "export",
+    "share", "subscribe", "unsubscribe", "authenticate", "authorize",
+    "refresh", "poll"
+  ],
+
+  "side_effect_verbs": [
+    "receive", "publish", "consume", "send", "submit", "persist", "save",
+    "insert", "update", "delete", "index", "upload", "download", "fetch",
+    "query", "execute", "push", "pull", "forward", "notify", "invoke",
+    "call", "resolve", "retrieve", "sync", "import", "export", "write",
+    "generate"
+  ],
+
+  "system_personas": ["system", "external system"],
+
+  "forbidden_persona_names": [
+    "developer", "engineer", "programmer", "architect",
+    "api", "service", "component", "module", "worker",
+    "backend", "frontend", "database",
+    "controller", "handler", "repository",
+    "devops", "verticle", "filter", "webappengine", "engine"
+  ],
+
+  "identifier_patterns": [
+    "\\bRepository\\b", "\\btable\\b", "\\bentity\\b", "\\bindex\\b",
+    "\\bbucket\\b", "\\bcollection\\b",
+    "s3://", "sqs://", "kafka://", "rabbit://", "->", "→"
+  ],
+
+  "widget_patterns": [
+    "<Button\\b", "<IconButton\\b", "<Input\\b", "<TextField\\b", "<TextArea\\b", "<Textarea\\b",
+    "<Select\\b", "<MenuItem\\b", "<Checkbox\\b", "<Switch\\b", "<Toggle\\b", "<Radio\\b",
+    "<Autocomplete\\b", "<DatePicker\\b", "<TimePicker\\b", "<Slider\\b", "<Tabs\\b", "<Stepper\\b",
+    "<Dialog\\b", "<Drawer\\b", "<Sheet\\b", "<Popover\\b", "<DropdownMenu\\b", "<ContextMenu\\b", "<Form\\b"
+  ],
+
+  "api_types": ["REST", "GraphQL", "gRPC", "WebSocket", "Event", "SOAP"],
+
+  "overlap_keywords": [
+    "bond", "static data", "price", "fx", "p&l", "expense",
+    "pdf", "audit", "exception", "waiv", "tolerance", "upload",
+    "report", "dashboard", "validation"
+  ],
+
+  "_notes": {
+    "forbidden_ui_words": "23 canonical members (click..icon) + 2 ASP.NET-specific (postback, gridview) folded in from the aspx agent = 25. Match with WORD-BOUNDARY regex (\\bword\\b), never plain substring — substring over-matches ('tab' inside 'table'). Applies to HUMAN-persona actions only; system-persona actions are skipped (see human-overlay.md).",
+    "side_effect_verbs": "29 distinct = union of backend's 26 + P3's {execute, write, generate}. Backend's validator was MISSING execute/write/generate; this superset closes that gap. Triggers rule-a on the SYSTEM half (apis[] OR identifier-in-description required).",
+    "network_verbs": "21 members, UI-only originally. Triggers rule-a on the HUMAN half (non-empty apis[] required — no identifier fallback). 'generate' appears in BOTH network_verbs and side_effect_verbs by design.",
+    "input_verbs": "Used by the advisory atomicity check (human half) to find data-entry actions. 'filter' added so MFLT-style filter actions are recognised.",
+    "forbidden_persona_names": "15 from validate-graph.py + P3 engine/tech names {devops, verticle, filter, webappengine, engine}. A human persona name must contain NONE of these as a standalone word.",
+    "identifier_patterns": "Backend rule-a fallback: a side-effect action with empty apis[] is still OK if its description names a Repository/table/entity/index/bucket/collection or an s3://|sqs://|kafka://|rabbit:// URI or an -> / → transform arrow.",
+    "api_types": "apis[].type is FREE TEXT server-side (no enum enforced — PersonaDto uses @IsString). REST/GraphQL/gRPC/WebSocket/Event are the schema-validated set; SOAP is the recommended extension for ASP.NET/WCF/ASMX. See core.md § apis[] join models for the per-stack mapping.",
+    "overlap_keywords": "PROJECT-SPECIFIC (these are a finance project's domain terms). validate-graph.py's cross-persona-overlap check should read these from project config, not hard-code them. Kept here as the legacy default so behaviour does not change; tune per project."
+  }
+}

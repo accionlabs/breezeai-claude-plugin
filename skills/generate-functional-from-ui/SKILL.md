@@ -27,7 +27,7 @@ structurally in `action.apis[]`.
 
 | Concern | Approach |
 |---|---|
-| Per-EP depth | **Installed agent `breeze:flow-structuring-agent`** invoked per (EP, persona); tool-scoped, model-pinned (sonnet), system prompt cached across calls |
+| Per-EP depth | **Installed agent `breeze:spa-flow-structuring-agent`** invoked per (EP, persona); tool-scoped, model-pinned (sonnet), system prompt cached across calls |
 | Persona-conditional visibility | **Mandatory Phase 2.5** — RBAC / role / permission / feature-flag / tier gate hunt inside the sub-agent, with explicit field-level scope |
 | Multi-persona EPs | **One sub-agent run per persona** that can reach the EP |
 | Field enumeration | **Mandatory Phase 2 inside sub-agent** with `{label, type, required, default, validation, options, visibleTo}` per field |
@@ -39,11 +39,11 @@ structurally in `action.apis[]`.
 
 ## Resources
 
-- **Installed agent** — `agents/flow-structuring-agent.md` (plugin root). Invokable as `subagent_type: "breeze:flow-structuring-agent"`. The agent's full methodology — phases, rules, schema, self-check, self-validate, write-to-disk, upsert — lives in its system prompt.
-- `references/flow-structuring-agent.prompt.md` — short **per-call input renderer** with `{{...}}` placeholders. The parent substitutes and passes the rendered text as the `prompt` argument.
+- **Installed agent** — `agents/spa-flow-structuring-agent.md` (plugin root). Invokable as `subagent_type: "breeze:spa-flow-structuring-agent"`. The agent's full methodology — phases, rules, schema, self-check, self-validate, write-to-disk, upsert — lives in its system prompt.
+- `references/spa-flow-structuring-agent.prompt.md` — short **per-call input renderer** with `{{...}}` placeholders. The parent substitutes and passes the rendered text as the `prompt` argument.
 - `references/rules.md` — functional graph semantics (also embedded in the agent's system prompt)
-- `schemas/upsert.schema.json` — JSON-schema for the `/functional-graph/v2/upsert` REST payload (v2 accepts the same body as v1). Reference only; the agent self-validates against the rules in its system prompt.
-- `validators/validate.py` — Standalone debugging helper (subcommands `schema | rule-a | forbidden | citations | coverage`). **Not invoked by the skill — the agent self-validates in Phase 6.** Useful only for manual inspection of `ui_ep{NN}_{persona}_*.json` files.
+- Schema + word lists live in the **single source of truth** `../shared/functional/{upsert.schema.json, verbs.json}` (ADR 0001) — JSON-schema for the `/functional-graph/v2/upsert` payload; reference only, the agent self-validates.
+- `validators/validate.py` — a thin **shim** that delegates to `../shared/functional/validate.py` (the one validator engine), injecting `--kind human` (the UI pass writes only human personas). Standalone debugging helper (subcommands `schema | rule-a | forbidden | citations | coverage | api-urls`). **Not invoked by the skill — the agent self-validates in Phase 6.** Useful for manual inspection of `ui_ep{NN}_{persona}_*.json` files.
 - `validators/requirements.txt` — Python dependency: `jsonschema`
 
 ## Inputs
@@ -133,7 +133,13 @@ Do not overwrite an existing `entrypoints.json`.
    - Angular: `*-routing.module.ts` or `app.routes.ts`
    - Nuxt: `pages/` with `.vue` files
    - SvelteKit: `src/routes/`
-2. Record the detected framework and router file path
+   - **ASP.NET Web Forms** (server-rendered, not a SPA): `*.aspx` + `*.aspx.cs` pages, `*.ascx` controls, `*.master`, `Global.asax`, `web.config`, a Web Forms `*.csproj` (references `System.Web.UI`)
+2. Record the detected framework and router/entry file path.
+3. **Classify the stack** and record it in `entrypoints.json` as `stack`:
+   - `webforms` — ASP.NET Web Forms signals dominate (presence of `*.aspx` pages)
+   - `spa` — otherwise (the default: React / Vue / Angular / Next / etc.)
+
+   This `stack` value drives sub-steps 0.3–0.4 (client-route vs `.aspx`-page discovery) and Step 3 (which per-EP agent to spawn). **All existing SPA behavior is unchanged when `stack = spa`.**
 
 ---
 
@@ -160,12 +166,19 @@ Do not overwrite an existing `entrypoints.json`.
 
 ---
 
-### Sub-step 0.3 — Discover routes
+### Sub-step 0.3 — Discover routes (or `.aspx` pages)
 
+**If `stack = spa` (default):**
 1. Optionally `Code_Graph_Search` to locate the routes definition
 2. Also query for sidebar/navbar structure to surface panel triggers
 3. `Read` the router file locally
 4. `Read` the sidebar/navbar component for non-routed features
+
+**If `stack = webforms`:** entry points are `.aspx` pages **and `.ascx` user controls** — in many Web Forms / CMS apps the real features live in `.ascx` controls mounted into a generic page host, so controls are **first-class EPs**, not just panels.
+1. `Glob '**/*.aspx'` **AND** `Glob '**/*.ascx'`. Each `.aspx` page (`kind: page`) and each feature-bearing `.ascx` control (`kind: control`) is an EP — `route` = the page URL (or the control's mount route if dynamically loaded), `seed_file` = the `.aspx`/`.ascx` markup; the matching `.aspx.cs`/`.ascx.cs` code-behind is read by the agent.
+2. **Detect a generic page host.** If a few `.aspx` pages (e.g. `Page.aspx`, `Default.aspx`) `LoadControl(...)` / mount `.ascx` controls by config or route, treat those `.aspx` shells as containers and **promote the `.ascx` controls to the primary EPs** (that is where the fields and flows are). A handful of utility `.aspx` (reports, downloads, health checks) stay as their own page EPs.
+3. `Read` `web.config` (`<authorization>` + `<location path="…">`) and any `.sitemap` (`roles="…"`) to determine per-EP persona reachability for sub-step 0.4.
+4. Treat `.master` layouts as shared chrome the agent reads while processing the host EP — not usually a standalone EP.
 
 ---
 
@@ -314,15 +327,16 @@ OUTPUT_PATH = f"{uiRepo}/ui_ep{ep.id:02d}_{persona}_{slug}.json"
 
 where `slug` is a kebab-cased form of `ep.title` (e.g. `code-ontology-list`).
 
-Then load `references/flow-structuring-agent.prompt.md` and substitute the `{{...}}` placeholders:
+Then load `references/spa-flow-structuring-agent.prompt.md` and substitute the `{{...}}` placeholders:
 
 | Placeholder | Value |
 |---|---|
 | `{{persona}}` | the persona for this run |
 | `{{route}}` | `ep.route` |
-| `{{kind}}` | `ep.type` (`route` / `panel` / `route-variant` / `backend-endpoint`) |
+| `{{kind}}` | `ep.type` (`route` / `panel` / `route-variant`) |
 | `{{title}}` | `ep.title` |
 | `{{seed_file_absolute_path}}` | absolute path to `ep.component` |
+| `{{shared_functional_path}}` | absolute path to the **shared functional SSOT** dir — `<pluginRoot>/skills/shared/functional` (sibling of this skill, i.e. `<this skill dir>/../shared/functional`). The agent reads `core.md` + `human-overlay.md` from here for the canonical rules (ADR 0001). |
 | `{{repo_name}}` | basename of the UI repo path |
 | `{{repo_root_absolute_path}}` | absolute path to the UI repo |
 | `{{project_uuid}}` | `projectUuid` from `.breeze.json` |
@@ -337,18 +351,19 @@ Then load `references/flow-structuring-agent.prompt.md` and substitute the `{{..
 
 ## Step 3 — Spawn sub-agent
 
+Pick the per-EP agent by the `stack` detected in sub-step 0.1:
+- `stack = spa` → `breeze:spa-flow-structuring-agent`
+- `stack = webforms` → `breeze:aspx-flow-structuring-agent`
+
 ```
 Agent(
-  subagent_type = "breeze:flow-structuring-agent",
+  subagent_type = "breeze:spa-flow-structuring-agent",   # or "breeze:aspx-flow-structuring-agent" when stack == webforms
   description   = f"Flow-structure EP {ep.id} ({persona}): {ep.title}",
   prompt        = <rendered per-call inputs from Step 2>
 )
 ```
 
-The agent's full methodology (phases, rules, schema, self-check) lives
-in `agents/flow-structuring-agent.md` — installed by the breezeai-plugins
-plugin. The `prompt` argument here is **only** the short variable input
-block from Step 2; the agent's system prompt does the rest.
+Both agents take the **same** per-call input block (Step 2) and honour the **same** output contract (schema, self-validate, write, upsert) — they differ only in how they read the stack (SPA components + `fetch`/`axios` vs `.aspx` markup + code-behind + SOAP service-proxy). The full methodology lives in `agents/spa-flow-structuring-agent.md` / `agents/aspx-flow-structuring-agent.md` respectively — installed by the breezeai-plugins plugin. The `prompt` argument here is **only** the short variable input block from Step 2; the agent's system prompt does the rest.
 
 Tool scoping is enforced by the agent definition's `tools:` frontmatter
 (Read, Glob, Grep, Bash, `mcp__plugin_breeze_breeze-mcp__Code_Graph_Search`).

@@ -1,80 +1,15 @@
-## Backend Pass Rules Reference
+## Backend Pass Rules Reference — adapter
 
----
-
-## Functional Graph Definitions
-
-### Outcome
-
-A high-level goal or capability a persona needs to accomplish.
-Outcomes are **business capabilities**, not technical functions or
-API endpoints.
-
-- Evaluate existing Outcomes FIRST
-- Prefer broader Outcomes over narrower ones
-- Capture variation as new Scenarios, NOT new Outcomes
-- Create new Outcome ONLY if none can logically contain the intent
-
-**Good:** "Manage Fund Allocations", "Monitor Compliance Status"
-**Bad:** "Handle API Requests", "Process Database Queries", "Render Components"
-
-**Quality checks:** understandable by non-technical stakeholders,
-stable across implementation changes, broad enough to absorb future
-Scenarios. If more than 3-4 new Outcomes appear necessary,
-re-evaluate for over-segmentation.
-
-### Scenario
-
-A **specific user or system flow** under an Outcome. Testable — you
-can write acceptance criteria. Clear start and end.
-
-- Reuse existing Scenario if flow is semantically similar
-- Create new only for genuinely distinct interaction paths
-- If two Scenarios share >70% of their steps, consider merging
-- Each Scenario must include a brief description
-
-**Good:** "Filter Dashboard by Date Range", "Submit Compliance Report"
-**Bad:** "Use the System", "Do Things with Data"
-
-For System Persona scenarios, the description MUST describe the
-internal processing behavior, NOT the UI that triggers it.
-
-### Step
-
-**Sequential stages** within a Scenario — the major phases to
-complete the flow.
-
-- Each Step is a distinct stage, ORDERED in sequence
-- Step name = short verb phrase
-- Steps do NOT require descriptions (the name is sufficient)
-- A Scenario typically has 3-8 Steps (max 10)
-
-### Action
-
-**Atomic operations or user inputs** within a Step. Rules differ
-by persona type:
-
-**HUMAN PERSONA actions** (User, Admin, or any named role):
-- Describe what the user PROVIDES, DECIDES, or OBSERVES
-- MUST be platform-agnostic (web, mobile, CLI, voice)
-- FORBIDDEN words: click, tap, swipe, hover, scroll, drag, drop,
-  toggle, button, dropdown, modal, dialog, popup, panel, checkbox,
-  radio, slider, tooltip, menu, sidebar, navbar, tab, icon
-- USE instead: Provide, Choose, Confirm, Review, Dismiss, Open,
-  Close, Submit, Cancel, Specify, Indicate, Acknowledge, Request
-- description = null, unless a real user-facing constraint exists
-
-**SYSTEM PERSONA actions:**
-- Single atomic internal operations
-- description REQUIRED: formula, threshold, field names, condition,
-  error message, data format, or input/output contract
-- null only for trivial glue (e.g. "Log completion")
-
-**EXTERNAL SYSTEM PERSONA actions:**
-- Single atomic API/integration operations
-- description = endpoint, payload shape, or auth mechanism when known
-
-**Quantity:** 1-5 Actions per Step. If more than 5, split the Step.
+> **Read the single source of truth FIRST** (ADR 0001): the node model, reuse/dedup,
+> citations, `rule-a`, write protocol, and validation are in
+> [`../../shared/functional/core.md`](../../shared/functional/core.md); the System /
+> External System rules (mechanical EP→persona map, required descriptions,
+> one-operation-one-action, apis-OR-identifier `rule-a`) are in
+> [`../../shared/functional/system-overlay.md`](../../shared/functional/system-overlay.md).
+> This file no longer restates those — it carries ONLY the backend source-extraction
+> adapter below. The hard gates are enforced by the shared `validate.py` (a shim in this
+> skill's `validators/`) regardless. The backend pass writes **only** `System` /
+> `External System` personas.
 
 ---
 
@@ -142,6 +77,7 @@ The backend pass uses **only** two personas — assignment is mechanical:
 | GraphQL subscription | `"GraphQL"` | `"subscription"` | `Subscription.projectUpdated` |
 | gRPC method | `"gRPC"` | method name | service + method |
 | WebSocket handler | `"WebSocket"` | event name | namespace/room |
+| SOAP / WCF / ASMX operation | `"SOAP"` | operation name | service endpoint + SOAPAction |
 | Queue publish/consume | `"Event"` | `"publish"` / `"consume"` | `sqs://${ENV_VAR}` / `kafka://${TOPIC}` |
 | Cron handler | `"Event"` | `"trigger"` | `cron:0 0 * * *` |
 
@@ -283,8 +219,8 @@ EPs.
 - Each level matched by **name** at upsert time — idempotent
 - Cross-pass merging: use the same outcome name as a prior UI pass —
   upsert merges automatically
-- `actions[].apis[]` supports **REST / GraphQL / gRPC / WebSocket /
-  Event**
+- `actions[].apis[]` `type` is free text (recommended: **REST /
+  GraphQL / gRPC / WebSocket / Event / SOAP**)
 - `citations[]` supported at persona and outcome level
 
 ---
