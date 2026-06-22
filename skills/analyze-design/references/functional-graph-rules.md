@@ -1,5 +1,14 @@
 ## Functional Graph Rules Reference (for Analyze-Design)
 
+> **For the functional ontology, the authority is the single source of truth (ADR 0001):**
+> [`../../shared/functional/core.md`](../../shared/functional/core.md) +
+> [`human-overlay.md`](../../shared/functional/human-overlay.md) +
+> [`system-overlay.md`](../../shared/functional/system-overlay.md). The functional-node
+> definitions, persona rules, action naming, and dedup matrix below mirror those for
+> convenience while reading design — if anything disagrees, **`functional/` wins.** The
+> design-graph mapping (UserJourney / Flow / Page / Component) is this file's own concern
+> and stays here.
+
 ---
 
 ## Functional Graph Definitions

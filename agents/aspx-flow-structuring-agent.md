@@ -190,7 +190,7 @@ A Web Forms action triggers a **postback** → a **code-behind event handler** �
 **Both cases — always record the join anchor + the rules:**
 5. **Record the entry façade/service method** the action invokes (e.g. `StudentFacade.CreateBUCCStudentEnrollment`) in the action `description` — **this is the join key when there is no network boundary** (the backend pass records the same façade/service method as a System-persona *internal* entry point). For Case A the join key is the SOAP operation; for Case B it is this method name.
 6. **Rule B (mandatory):** every façade/service/repository call discovered MUST resolve to a `Read` (the proxy for Case A, the implementation chain for Case B). Follow unresolved calls before producing output.
-7. **Rule A (mandatory):** every action whose verb is one of `{Submit, Generate, Upload, Download, Delete, Save, Send, Fetch, Retrieve, Publish, Persist, Sync, Import, Export, Share, Subscribe, Unsubscribe, Authenticate, Authorize, Refresh, Poll}` MUST EITHER have a non-empty `apis[]` (a SOAP op OR a data-side-effect node) OR name the repository+table / stored proc in its `description`. Never leave a side-effect-verb action with no api and no identifier — and never invent a SOAP op for an in-process call.
+7. **Rule A (mandatory):** every action whose first word is a side-effect/network verb (the canonical set is `verbs.json → network_verbs`/`side_effect_verbs` in `SHARED_FUNCTIONAL_PATH`; `validate.py rule-a` is the gate) MUST EITHER have a non-empty `apis[]` (a SOAP op OR a data-side-effect node) OR name the repository+table / stored proc in its `description`. Never leave a side-effect-verb action with no api and no identifier — and never invent a SOAP op for an in-process call.
 
 > **Join model.** Network flows join on the SOAP **operation** (UI `Api.url` ↔ System entry point). In-process flows have no endpoint — they join on the **façade/service method name** (the architectural seam), recorded on both sides, with the **code graph** supplying the precise control→façade→service→repository→SQL call chain.
 
@@ -217,45 +217,16 @@ Build the `payload` and `audit` documents per the schema below. **Hold them in y
 
 ## Functional Graph Rules
 
-### Outcome
+> **AUTHORITATIVE RULES — `Read` these two files FIRST, before drafting any node** (single source of truth, ADR 0001):
+> - `SHARED_FUNCTIONAL_PATH/core.md` — node model (Outcome → Scenario → Step → Action), reuse/dedup, `rule-a`, citations, write protocol, no-upper-cap-on-actions.
+> - `SHARED_FUNCTIONAL_PATH/human-overlay.md` — human-persona rules: platform-agnostic action language, the **forbidden UI-word list** (includes the ASP.NET words `postback`, `gridview`), per-field atomicity, `description = null` default.
+>
+> Do not keep a private copy of those definitions here. The shared `validate.py` enforces the hard gates (schema / rule-a / forbidden words / persona / citations) regardless. (`SHARED_FUNCTIONAL_PATH` is in your INPUTS; if unset/unreadable, fall back to `EXISTING_NEIGHBORHOOD`/training and let `validate.py` catch violations.) System / External action rules — rare in a UI pass, you record the call site not backend internals — are in `system-overlay.md`.
 
-A high-level business capability a persona needs to accomplish. NOT a technical function, page, or implementation detail.
-
-- Evaluate `EXISTING_NEIGHBORHOOD` first; reuse if a match exists.
-- Prefer broader Outcomes; capture variation as Scenarios.
-- Create a new Outcome only if no existing one can logically contain the intent.
-- Quality checks: understandable by a non-technical stakeholder, stable across implementation changes, broad enough to absorb future Scenarios.
-- If more than 3-4 new Outcomes appear necessary for one EP, you are over-segmenting. Anti-patterns to AVOID: per-control/per-panel outcomes; implementation concerns (`Initialise ViewState`, `Bind GridView`, `Load Page Data`) elevated to outcomes; MultiView/tab variants of the same intent split into separate Outcomes; one outcome per popup.
+**ASP.NET-specific Outcome guidance (adapter — on top of core.md §2):** prefer broad Outcomes; >3-4 for one EP = over-segmenting. Avoid per-control/per-panel outcomes; implementation concerns (`Initialise ViewState`, `Bind GridView`, `Load Page Data`) as outcomes; MultiView/tab variants of one intent split into separate Outcomes; one outcome per popup. Each MultiView/Wizard branch is a distinct **Scenario**.
 
 **Good:** `Manage Project Pipeline`, `Review Project Details`, `Configure Pipeline Alerts`
 **Bad:** `Handle Postback`, `Bind GridView`, `Open Detail Page`, `Initialise ViewState`
-
-### Scenario
-
-A specific user or system flow under an Outcome. Testable. Clear start and end.
-
-- Reuse existing Scenario if flow is semantically similar.
-- Create new only for genuinely distinct interaction paths (incl. each MultiView/Wizard branch).
-- If two Scenarios share >70% of their steps, consider merging.
-- Each Scenario MUST include a brief `description` covering end-to-end behavior plus constraints/limits.
-
-### Step
-
-Sequential stages within a Scenario. Typically 3-8. Short verb phrase, no description. Ordered. If >15 steps, some are probably separate Scenarios.
-
-### Action
-
-Atomic operations or user inputs.
-
-**HUMAN persona actions** (e.g. Admin, Member, User):
-- Describe what the user PROVIDES, DECIDES, OBSERVES, REQUESTS, CONFIRMS, DISMISSES, OPENS, CLOSES, SUBMITS, CANCELS, SPECIFIES, INDICATES, ACKNOWLEDGES, CHOOSES, REVIEWS.
-- Platform-agnostic. Same wording must work for web, mobile, CLI, voice.
-- **FORBIDDEN words in action names:** click, tap, swipe, hover, scroll, drag, drop, toggle, button, dropdown, modal, dialog, popup, panel, checkbox, radio, slider, tooltip, menu, sidebar, navbar, tab, icon, postback, gridview.
-- `description` is `null` unless a real user-facing constraint exists (e.g. "Required if Main Folder is selected", "Max 200 characters", "Available only to Admin role").
-
-**SYSTEM / EXTERNAL SYSTEM persona actions:** (rare in a UI pass — you record the call site, not backend internals) atomic operation; `description` = operation, payload shape, or auth mechanism.
-
-**Quantity:** Typically 1-5 actions per Step. Enumeration overrides this.
 
 ### ENUMERATION rule (critical)
 
@@ -263,7 +234,7 @@ When code lists items (form controls, `ListItem` options, GridView columns, file
 
 ### Rule A — Network-verb actions must have apis[]
 
-Every action whose verb is `{Submit, Generate, Upload, Download, Delete, Save, Send, Fetch, Retrieve, Publish, Persist, Sync, Import, Export, Share, Subscribe, Unsubscribe, Authenticate, Authorize, Refresh, Poll}` MUST have a non-empty `apis[]` (the SOAP operation it reaches). If you cannot find the operation, record in `audit.warnings[]` rather than silently omitting.
+Every action whose verb is a network verb (canonical set: `verbs.json → network_verbs` in `SHARED_FUNCTIONAL_PATH`; `validate.py rule-a` is the gate) MUST have a non-empty `apis[]` (the SOAP operation it reaches). If you cannot find the operation, record in `audit.warnings[]` rather than silently omitting.
 
 ### Rule B — Every service call resolved
 
@@ -308,7 +279,7 @@ Every citation:
 ```
 Build `reference`: take the absolute path, strip `REPO.root`, prepend `REPO.name + "/"`.
 
-**Where citations go:** `personas[0].citations[]` — every file you read (mandatory); `outcomes[i].citations[]` — files informing the outcome boundary (the page + its main façade); `scenarios[i].citations[]` — files specific to that scenario (the `.ascx`/MultiView, the service proxy). Do NOT put citations on steps or individual actions.
+**Where citations go (cite LOW — core.md §7):** prefer `actions[i].citations[]` (the control/code-behind/service-proxy that action came from), then `steps[i].citations[]` (files defining a stage), then `scenarios[i].citations[]` (the `.aspx`/`.ascx`/MultiView spanning the flow). **Do NOT cite at `outcomes[]` or `personas[]`** — shared/merged nodes, citing them pollutes; `validate.py citations` warns on it. Completeness is a union across all levels, so an action/step/scenario citation satisfies the gate.
 
 ---
 
@@ -445,7 +416,7 @@ Before writing anything to disk, run the checks below against your in-memory `{p
 | 1 | **Schema shape** | `payload.personas[]` length 1; persona name matches PERSONA; every scenario has non-empty description; every apis[i] has all 5 fields; apis[i].type is a non-empty protocol string (recommended REST/GraphQL/gRPC/WebSocket/Event/SOAP — free text, unknown values allowed) | Fix the offending node in-place. Most common: missing `description` on a synthesized scenario, or apis[i] missing `request`/`response`. |
 | 2 | **Rule A (side-effect verbs)** | For every action whose first word is a NETWORK VERB, check it has `apis.length >= 1` OR names a repository+table / stored proc in its `description` | (a) **Case A** service call → attach the SOAP op from the proxy; (b) **Case B** in-process → attach the data side effect (stored proc / table) OR name the repo+table in the description; (c) truly no side effect → rename to a non-network verb. NEVER leave a side-effect-verb action with neither an api nor a named identifier. |
 | 3 | **Service-chain coherence** | When `Authenticate …`, `Submit …`, `Persist …` appear under one step as a chain, they share the same apis[] entry | Copy the apis[] entry onto every chained action. |
-| 4 | **Forbidden UI words in action names** | Scan every action `name` for `{click, tap, swipe, hover, scroll, drag, drop, toggle, button, dropdown, modal, dialog, popup, panel, checkbox, radio, slider, tooltip, menu, sidebar, navbar, tab, icon, postback, gridview}` | Rewrite to platform-agnostic vocabulary (`button` → `control`; `dropdown` → `selector`; `panel`/`gridview` → `section`/`list`; `postback` → `submit`/`request`). Preserve semantics. |
+| 4 | **Forbidden UI words in action names** | Scan every action `name` for the forbidden UI words — the canonical list (incl. the ASP.NET words `postback`, `gridview`) is `verbs.json → forbidden_ui_words` (in `SHARED_FUNCTIONAL_PATH`); `validate.py forbidden` is the authoritative gate | Rewrite to platform-agnostic vocabulary (`button` → `control`; `dropdown` → `selector`; `panel`/`gridview` → `section`/`list`; `postback` → `submit`/`request`). Preserve semantics. |
 | 5 | **Citation prefix + audit shape** | Every `citations[i].reference` starts with `<REPO.name>/`; `audit.codeGraphSearches.length >= 1`; `audit.skippedForVisibility` exists; `audit.stats` present with all required keys | Prepend `<REPO.name>/` if missing; run the hygiene sweep if skipped; populate `audit.stats` (use `0`). |
 | 6 | **Pattern A collapse (field enumeration)** | Scan every `Specify`/`Fill`/`Complete`/`Configure`/`Enter`/`Provide`/`Edit` step for a catch-all single action (`Provide the form / fields / details / data / values`) or a "same field set as …" description | Reopen the markup, list every server control, replace the catch-all with one `Provide <label>` action per control, each with `description: "label: …; type: …; required: …"`. If the control list is dynamic, Code_Graph_Search the binding source before giving up. |
 | 7 | **API / effect reality (no invented endpoints)** | For every `apis[i].url`: **Case A (SOAP)** — grep the repo for the operation inside a proxy / service-reference / `.asmx` / `.svc` / WSDL; **Case B (SQL)** — grep for the stored-proc name / table / terminal `Repository.Method` in the code | If not found, the value was likely inferred from a façade method name. Re-read the chain (Phase 3) for the real operation / proc / table and replace it. If genuinely unresolvable, empty the `url` and add an `api_url_unresolved` warning. NEVER keep an endpoint/proc that does not appear in the source. |

@@ -49,7 +49,7 @@ EXISTING_PERSONAS:     [ "System", ... ]             # so you can set personas[]
 
 ## Persona is mechanical
 
-Tag each EP with its persona from the EP type — never read auth code to derive a human role:
+Tag each EP with its persona from the EP type — never read auth code to derive a human role. (This routing table mirrors the canonical EP→persona map in `skills/shared/functional/system-overlay.md §1`, the single source of truth — keep it in sync; it is inlined here because discovery routes EPs before any payload/validator exists.)
 
 | EP type | Persona |
 |---|---|

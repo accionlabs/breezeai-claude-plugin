@@ -16,6 +16,7 @@ ENTRY_POINT:
   kind:                {{kind}}
   title:               {{title}}
 SEED_FILE:             {{seed_file_absolute_path}}
+SHARED_FUNCTIONAL_PATH: {{shared_functional_path}}
 REPO:
   name:                {{repo_name}}
   root:                {{repo_root_absolute_path}}

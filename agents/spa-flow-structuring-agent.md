@@ -190,7 +190,7 @@ For every visibility gate you find:
 4. **Follow delegation all the way to the literal — not just one hop.** Trace every wrapper to the `fetch*`/`axios` literal: Redux thunk → service → URL; React-Query `useMutation`/`useQuery` → its `mutationFn`/`queryFn` → service → URL; **and any action that opens or delegates to a shared component (`*Form`, `*Dialog`, `*Modal`, `*Drawer`, or a toolbar/menu control) → `Read` that component → its `onSubmit`/`onSave`/`onConfirm` handler → the imported service function (resolve the import path) → the URL.** The submit endpoint frequently lives several hops away in a *different* file (e.g. a project-detail toolbar "Add to X" button → a shared `Form*` dialog → a service function in another module). Read across the hops; do not stop at the page.
 5. **NEVER invent a URL.** Every `apis[i].url` MUST be copied verbatim from a `fetch*`/`axios`/service literal you actually `Read` (resolve template params → `{param}`, query → `?key={value}`). Do NOT synthesise a URL from the action name, the component name, or the feature noun — e.g. do **not** write `/v2/search/watchlist` just because the component is `FormAddToWatchlist`; read its handler and find the real literal (`/v2/search/project-pipeline/detail/create`). If you cannot reach the literal after following the delegation chain in step 4, leave `url` empty and record `{ type: "api_url_unresolved", action: <name> }` in `audit.warnings[]`. **A confident wrong URL is worse than an honest gap.**
 6. **Rule B (mandatory):** every hook discovered in step 1 MUST resolve to a `Read` of a service file. If a hook reference is unresolved, go back and follow it before producing output.
-7. **Rule A (mandatory):** every action whose verb is one of `{Submit, Generate, Upload, Download, Delete, Save, Send, Fetch, Retrieve, Publish, Persist, Sync, Import, Export, Share, Subscribe, Unsubscribe, Authenticate, Authorize, Refresh, Poll}` MUST have a non-empty `apis[]` entry. If you cannot find a URL, append to `audit.warnings[]` instead of silently omitting.
+7. **Rule A (mandatory):** every action whose verb is one of a network verb (canonical set: `verbs.json → network_verbs` in `SHARED_FUNCTIONAL_PATH`; `validate.py rule-a` is the gate) MUST have a non-empty `apis[]` entry. If you cannot find a URL, append to `audit.warnings[]` instead of silently omitting.
 
 ### Phase 4 — Synthesis with dedup
 
@@ -215,61 +215,22 @@ Build the `payload` and `audit` documents per the schema below. **Hold them in y
 
 ## Functional Graph Rules
 
-### Outcome
+> **AUTHORITATIVE RULES — `Read` these two files FIRST, before drafting any node** (single source of truth, ADR 0001):
+> - `SHARED_FUNCTIONAL_PATH/core.md` — the node model (Outcome → Scenario → Step → Action), reuse/dedup, `rule-a`, citations, write protocol, the no-upper-cap-on-actions rule.
+> - `SHARED_FUNCTIONAL_PATH/human-overlay.md` — this is a UI pass → **human personas**: platform-agnostic action language, the **forbidden UI-word list**, per-field atomicity, `description = null` default, persona derivation.
+>
+> Do not keep a private copy of those definitions here — they live in one place now. The shared `validate.py` enforces the hard gates (schema / rule-a / forbidden words / persona / citations) on your payload regardless of whether you reloaded the prose. (`SHARED_FUNCTIONAL_PATH` is in your INPUTS; if it is unset or unreadable, fall back to the rules embedded in `EXISTING_NEIGHBORHOOD`/your training and let `validate.py` catch violations.) System / External rules, if ever needed, are in `system-overlay.md`.
 
-A high-level business capability a persona needs to accomplish. NOT a technical function, endpoint, or implementation detail.
-
-- Evaluate `EXISTING_NEIGHBORHOOD` first; reuse if a match exists.
-- Prefer broader Outcomes; capture variation as Scenarios.
-- Create a new Outcome only if no existing one can logically contain the intent.
-- Quality checks: understandable by a non-technical stakeholder, stable across implementation changes, broad enough to absorb future Scenarios.
-- If more than 3-4 new Outcomes appear necessary for one EP, you are over-segmenting — re-evaluate. Common anti-patterns to AVOID:
-  - **Per-widget outcomes.** A dashboard page with 4 summary cards (e.g. Latest Updates / Pipeline / Key Accounts / Updates feed) is ONE outcome — e.g. `Monitor Recent Activity` — with each card surfacing as a Scenario or Step. Do NOT emit `Track Pipeline Rollups`, `Track Key Account Rollups`, `Track Updates Feed` as separate Outcomes.
-  - **Implementation concerns elevated to outcomes.** `Initialise Session State`, `Load Page Data`, `Fetch Master Data`, `Hydrate Stores`, `Acknowledge Popups` are NOT user-facing outcomes. They are setup steps inside a Scenario (or out of user scope entirely). Outcomes describe what a user accomplishes, not what the page boots up.
-  - **Tab variants of the same intent.** A search page with Projects-tab and Companies-tab is ONE outcome (`Search Projects and Companies`) with two Scenarios. Do NOT split them into `Search Projects` and `Search Companies` as separate Outcomes.
-  - **One outcome per popup/dialog.** Opening a saved-search dialog or a filter popup is NOT its own outcome; it's a Step or Scenario inside the parent's outcome.
+**SPA-specific Outcome guidance (adapter — applies on top of core.md §2 reuse rules):** prefer broad Outcomes; more than 3-4 new Outcomes for one EP means you are over-segmenting. Avoid:
+- **Per-widget outcomes.** A dashboard page with 4 summary cards (Latest Updates / Pipeline / Key Accounts / Updates feed) is ONE outcome — e.g. `Monitor Recent Activity` — each card a Scenario or Step. Do NOT emit `Track Pipeline Rollups` etc. as separate Outcomes.
+- **Implementation concerns elevated to outcomes.** `Initialise Session State`, `Load Page Data`, `Fetch Master Data`, `Hydrate Stores`, `Acknowledge Popups` are setup steps inside a Scenario (or out of user scope), not Outcomes.
+- **Tab variants of the same intent.** A search page with Projects-tab and Companies-tab is ONE outcome (`Search Projects and Companies`) with two Scenarios — not `Search Projects` + `Search Companies`.
+- **One outcome per popup/dialog.** A saved-search dialog or filter popup is a Step/Scenario inside the parent's outcome, not its own Outcome.
 
 **Good:** `Manage Code Ontologies`, `Monitor Compliance Status`, `Discover Projects and Companies via Dashboard Search`
 **Bad:** `Handle API Requests`, `Render Components`, `Open Dashboard`, `Track Pipeline Watchlists`, `Initialise Dashboard Session State`
 
-### Scenario
-
-A specific user or system flow under an Outcome. Testable — you can write acceptance criteria. Clear start and end.
-
-- Reuse existing Scenario if flow is semantically similar.
-- Create new only for genuinely distinct interaction paths.
-- If two Scenarios share >70% of their steps, consider merging.
-- Each Scenario MUST include a brief `description` covering end-to-end behavior plus constraints/limits.
-
-### Step
-
-Sequential stages within a Scenario.
-
-- Typically 3-8 Steps. Use more when the flow genuinely has more sequential phases — do not split a coherent phase to hit a target count, and do not merge distinct phases to stay under one.
-- Short verb phrase. No description needed.
-- Ordered.
-- If you find yourself with >15 Steps in one Scenario, ask whether some of those Steps are actually separate Scenarios.
-
-### Action
-
-Atomic operations or user inputs.
-
-**HUMAN persona actions** (e.g. Admin, Owner, Member, User):
-- Describe what the user PROVIDES, DECIDES, OBSERVES, REQUESTS, CONFIRMS, DISMISSES, OPENS, CLOSES, SUBMITS, CANCELS, SPECIFIES, INDICATES, ACKNOWLEDGES, CHOOSES, REVIEWS.
-- Platform-agnostic. Same wording must work for web, mobile, CLI, voice.
-- **FORBIDDEN words in action names:** click, tap, swipe, hover, scroll, drag, drop, toggle, button, dropdown, modal, dialog, popup, panel, checkbox, radio, slider, tooltip, menu, sidebar, navbar, tab, icon.
-- `description` is `null` unless a real user-facing constraint exists (e.g. "Required if X is selected", "File must be JSON or ZIP, max 256 MB", "Available only to ADMIN role users").
-
-**SYSTEM persona actions:**
-- Atomic internal operations.
-- `description` REQUIRED on every System action — formula, threshold, field names, condition, error message, data format, or input/output contract.
-- `null` only for trivial glue (e.g. "Log completion").
-
-**EXTERNAL SYSTEM persona actions:**
-- Atomic API / integration operations.
-- `description` = endpoint, payload shape, or auth mechanism.
-
-**Quantity:** Typically 1-5 actions per Step. Enumeration overrides this — if a step is "Specify the form fields" and the form has 18 fields, list all 18 as actions under that one Step rather than splitting into 4 artificial Steps.
+**Enumeration (SPA, on top of human-overlay §3):** one atomic action per editable field — a Step "Specify the form fields" over an 18-field form lists all 18 actions under that ONE Step; never split into artificial Steps to hit a count.
 
 ### ENUMERATION rule (critical)
 
@@ -277,7 +238,7 @@ When code lists items (form fields, filter options, columns, file types, action 
 
 ### Rule A — Network-verb actions must have apis[]
 
-Every action whose verb is `{Submit, Generate, Upload, Download, Delete, Save, Send, Fetch, Retrieve, Publish, Persist, Sync, Import, Export, Share, Subscribe, Unsubscribe, Authenticate, Authorize, Refresh, Poll}` MUST have a non-empty `apis[]`. If you cannot find a URL, record in `audit.warnings[]` rather than silently omitting.
+Every action whose verb is a network verb (canonical set: `verbs.json → network_verbs` in `SHARED_FUNCTIONAL_PATH`; `validate.py rule-a` is the gate) MUST have a non-empty `apis[]`. If you cannot find a URL, record in `audit.warnings[]` rather than silently omitting.
 
 ### Rule B — Every hook resolved
 
@@ -359,12 +320,11 @@ Every citation looks like:
 
 To build `reference`: take the absolute file path, strip the `REPO.root` prefix, prepend `REPO.name + "/"`.
 
-**Where citations go:**
-- `personas[0].citations[]` — every file you read (mandatory)
-- `outcomes[i].citations[]` — files that informed the outcome boundary (typically the page + its main service)
-- `scenarios[i].citations[]` — files specific to that scenario (forms, modals, services)
-
-Do NOT put citations on steps or individual actions — keep payload size sane.
+**Where citations go (cite LOW — core.md §7):**
+- `actions[i].citations[]` — **preferred.** The file the action came from (the form/component/service for that field or call). This is the tightest link.
+- `steps[i].citations[]` — files that define that stage when no single action owns them.
+- `scenarios[i].citations[]` — files that span the whole flow (the page/route component).
+- **Do NOT cite at `outcomes[]` or `personas[]`** — they are shared and merged by name across many EPs, so file refs there pollute the shared node. `validate.py citations` warns on it. (Completeness is a union across all levels, so citing at the action/step/scenario fully satisfies the gate — you never need persona/outcome citations.)
 
 ---
 
@@ -458,7 +418,7 @@ Do NOT put citations on steps or individual actions — keep payload size sane.
 - `citations[i].reference` MUST start with `<REPO.name>/`.
 - No `description` field may contain FORBIDDEN words from the HUMAN action rules section.
 - No HUMAN persona action `name` may contain FORBIDDEN UI words (see HUMAN action rules).
-- Every action whose first word is a NETWORK VERB (`{Submit, Generate, Upload, Download, Delete, Save, Send, Fetch, Retrieve, Publish, Persist, Sync, Import, Export, Share, Subscribe, Unsubscribe, Authenticate, Authorize, Refresh, Poll}`) MUST have a non-empty `apis[]`. If the action is genuinely client-side (e.g. saving an in-memory `Blob` to disk), rename the action to a non-network verb such as `Capture …`, `Obtain …`, `View …`, `Open …`, `Get a local copy of …`. Never paper over a missing API by leaving `apis: []` under a network-verb name.
+- Every action whose first word is a NETWORK VERB (a network verb (canonical set: `verbs.json → network_verbs` in `SHARED_FUNCTIONAL_PATH`; `validate.py rule-a` is the gate)) MUST have a non-empty `apis[]`. If the action is genuinely client-side (e.g. saving an in-memory `Blob` to disk), rename the action to a non-network verb such as `Capture …`, `Obtain …`, `View …`, `Open …`, `Get a local copy of …`. Never paper over a missing API by leaving `apis: []` under a network-verb name.
 - When a single network call is split across multiple actions (e.g. `Authenticate …`, `Submit …`, `Persist …`), EVERY action in the chain must carry the same `apis[]` entry. The chain shares a network event; it does not have one entry per call.
 - **Every `apis[i].url` MUST be a literal you extracted from a `fetch*`/`axios`/service file you `Read`, NEVER a URL synthesised from an action/component/feature name (see Phase 3 steps 4–5).** Before emit, re-confirm each `url` traces to a file in `audit.filesRead`. If a network-verb action's URL was unresolvable, its `url` is empty AND `audit.warnings[]` carries an `api_url_unresolved` entry for it — a confident guessed URL must never be emitted. Delegated submits (toolbar/menu → shared `*Form`/`*Dialog`/`*Drawer`) are the highest-risk spot: verify those handlers were actually followed to the service literal.
 - `audit.filesRead` MUST list every file you `Read`.
@@ -504,7 +464,7 @@ Before writing anything to disk, run the checks below against your in-memory `{p
 | 1 | **Schema shape** | `payload.personas[]` length 1; persona name matches PERSONA; every scenario has non-empty description; every apis[i] has all 5 fields; apis[i].type is a non-empty protocol string (recommended REST/GraphQL/gRPC/WebSocket/Event/SOAP — free text, unknown values allowed) | Fix the offending node in-place. Most common cause: missing `description` on a synthesized scenario, or apis[i] missing `request`/`response`. |
 | 2 | **Rule A (network-verb apis[])** | For every action whose first word is a NETWORK VERB (list above), check `apis.length >= 1` | Either: (a) the action IS a network call — re-grep service files for the URL and attach; (b) it's actually client-side — rename to a non-network verb. NEVER leave `apis: []` under a network-verb name. |
 | 3 | **Network-chain coherence** | When `Authenticate …`, `Submit …`, and `Persist …` appear under one step as a chain, they should share the same apis[] entry | Copy the apis[] entry from whichever action discovered it onto every chained action. The chain shares one network event. |
-| 4 | **Forbidden UI words in action names** | Scan every action `name` for `{click, tap, swipe, hover, scroll, drag, drop, toggle, button, dropdown, modal, dialog, popup, panel, checkbox, radio, slider, tooltip, menu, sidebar, navbar, tab, icon}` | Rewrite to platform-agnostic vocabulary. Common substitutions: `drop` → `upload`; `drop-zone` → `upload area`; `dialog` / `modal` → `overlay` or omit; `button` → `control` or omit; `dropdown` → `selector`; `panel` → `section`. Confirm semantics are preserved — never change what the action does, only its naming. |
+| 4 | **Forbidden UI words in action names** | Scan every action `name` for the forbidden UI words — the canonical list is `verbs.json → forbidden_ui_words` (in `SHARED_FUNCTIONAL_PATH`); `validate.py forbidden` is the authoritative gate | Rewrite to platform-agnostic vocabulary. Common substitutions: `drop` → `upload`; `drop-zone` → `upload area`; `dialog` / `modal` → `overlay` or omit; `button` → `control` or omit; `dropdown` → `selector`; `panel` → `section`. Confirm semantics are preserved — never change what the action does, only its naming. |
 | 5 | **Citation prefix + audit shape** | Every `citations[i].reference` starts with `<REPO.name>/`; `audit.codeGraphSearches.length >= 1`; `audit.skippedForVisibility` exists (`[]` is valid); `audit.stats` present with all required keys | Prepend `<REPO.name>/` if missing. If no cgs calls were made, you skipped the mandatory hygiene sweep — go back to Phase 1 and run one. Populate `audit.stats` with real counts (use `0` rather than omitting). |
 | 6 | **Pattern A collapse (field enumeration)** | Scan every scenario for steps whose name starts with any of: `Specify` / `Fill` / `Complete` / `Configure` / `Enter` / `Adjust` / `Update` / `Modify` / `Provide` / `Save` / `Edit` / `Review and update` / `Update the` / `Edit the`. Within each such step, flag any action whose name matches the catch-all regex `^(Provide\|Submit\|Fill\|Enter\|Adjust\|Update\|Modify\|Save\|Edit)\s+(the\s+)?(form\|payload\|fields\|details\|data\|input\|values\|configuration\|settings\|metadata\|branch-specific\s+fields\|node\s+fields\|item\s+fields\|selected\s+\w+\s+fields)$` — these are catch-all placeholders. Also flag any such step that contains ONLY ONE action whose name does NOT reference a specific named field (e.g. `Provide tags` under a step called `Provide the updated tags`, or `Adjust the branch-specific fields` under `Adjust the node fields` — both are collapses because the action name is the same noun the step already used). Also flag scenarios whose ONLY field-bearing step contains an action whose description starts with `Same field set as` / `See the create scenario` / `Same as …` — these are explicit references to fields that should have been enumerated in-place. | Reopen the form's source file, list every input element inside it, and replace the catch-all action with one `Provide <field-label>` action per field, each with `description: "label: …; type: …; required: …; …"` per Phase 2 Pattern A. If you cannot resolve the field list from the seed file's import tree, issue a Code_Graph_Search query for the form component (e.g. `FunctionalNodeDialog`, `DocumentEditMetadataDialog`, `ProjectForm`) before giving up. NEVER leave a field-bearing step with a generic single-action collapse or a "same as another scenario" pointer. |
 | 7 | **API URL reality (no invented endpoints)** | For every `apis[i].url`, take its last 2–3 path segments (drop scheme/host, query string, `{params}`, and any `(annotation)`) and `Grep` the UI repo for that literal inside a `fetch*`/`axios`/service call. | If the literal is **not** found, the URL was almost certainly inferred from a name (the classic failure: a toolbar or `*Form`/`*Dialog` submit, e.g. `/v2/search/watchlist` invented from `FormAddToWatchlist`). Re-read the action's delegation chain (Phase 3 step 4) to find the real `fetch*` literal and replace it. If genuinely unresolvable, empty the `url` and add an `api_url_unresolved` entry to `audit.warnings[]`. NEVER keep a URL that does not appear in the source. |

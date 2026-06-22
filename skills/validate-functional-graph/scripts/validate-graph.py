@@ -29,23 +29,37 @@ from collections import Counter, defaultdict
 from datetime import datetime
 
 
-# --- UI-specific words forbidden in human persona actions ---
-FORBIDDEN_UI_WORDS = [
-    "click", "tap", "swipe", "hover", "scroll", "drag", "drop",
-    "toggle", "button", "dropdown", "modal", "dialog", "popup",
-    "panel", "checkbox", "radio", "slider", "tooltip", "menu",
-    "sidebar", "navbar", "tab", "icon",
-]
-
-# --- Forbidden persona names ---
-FORBIDDEN_PERSONA_NAMES = [
-    "developer", "engineer", "programmer", "architect",
-    "api", "service", "component", "module", "worker",
-    "backend", "frontend", "database",
-    "controller", "handler", "repository",
-]
-
-SYSTEM_PERSONAS = {"system", "external system"}
+# --- Word lists: imported from the single source of truth (ADR 0001) ---
+# skills/shared/functional/verbs.json. A markdown SSOT would never reach this Python
+# file, so it loads the JSON directly. Inline values are a fallback only.
+_VERBS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "..", "..", "shared", "functional", "verbs.json")
+try:
+    with open(_VERBS_PATH, encoding="utf-8") as _vf:
+        _VERBS = json.load(_vf)
+    FORBIDDEN_UI_WORDS = list(_VERBS["forbidden_ui_words"])
+    FORBIDDEN_PERSONA_NAMES = list(_VERBS["forbidden_persona_names"])
+    SYSTEM_PERSONAS = set(_VERBS["system_personas"])
+    OVERLAP_KEYWORDS = list(_VERBS["overlap_keywords"])
+except Exception:
+    FORBIDDEN_UI_WORDS = [
+        "click", "tap", "swipe", "hover", "scroll", "drag", "drop",
+        "toggle", "button", "dropdown", "modal", "dialog", "popup",
+        "panel", "checkbox", "radio", "slider", "tooltip", "menu",
+        "sidebar", "navbar", "tab", "icon",
+    ]
+    FORBIDDEN_PERSONA_NAMES = [
+        "developer", "engineer", "programmer", "architect",
+        "api", "service", "component", "module", "worker",
+        "backend", "frontend", "database",
+        "controller", "handler", "repository",
+    ]
+    SYSTEM_PERSONAS = {"system", "external system"}
+    OVERLAP_KEYWORDS = [
+        "bond", "static data", "price", "fx", "p&l", "expense",
+        "pdf", "audit", "exception", "waiv", "tolerance", "upload",
+        "report", "dashboard", "validation",
+    ]
 
 
 def parse_graph_file(filepath):
@@ -347,11 +361,7 @@ def run_checks(graph, sources=None):
 
     # === CHECK 8: Cross-Persona Overlap ===
     keyword_personas = defaultdict(set)
-    overlap_keywords = [
-        "bond", "static data", "price", "fx", "p&l", "expense",
-        "pdf", "audit", "exception", "waiv", "tolerance", "upload",
-        "report", "dashboard", "validation",
-    ]
+    overlap_keywords = OVERLAP_KEYWORDS  # from verbs.json (project-tunable)
     for s in all_scenarios:
         sname_lower = s["scenario"].lower()
         for kw in overlap_keywords:

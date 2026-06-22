@@ -42,8 +42,8 @@ structurally in `action.apis[]`.
 - **Installed agent** — `agents/spa-flow-structuring-agent.md` (plugin root). Invokable as `subagent_type: "breeze:spa-flow-structuring-agent"`. The agent's full methodology — phases, rules, schema, self-check, self-validate, write-to-disk, upsert — lives in its system prompt.
 - `references/spa-flow-structuring-agent.prompt.md` — short **per-call input renderer** with `{{...}}` placeholders. The parent substitutes and passes the rendered text as the `prompt` argument.
 - `references/rules.md` — functional graph semantics (also embedded in the agent's system prompt)
-- `schemas/upsert.schema.json` — JSON-schema for the `/functional-graph/v2/upsert` REST payload (v2 accepts the same body as v1). Reference only; the agent self-validates against the rules in its system prompt.
-- `validators/validate.py` — Standalone debugging helper (subcommands `schema | rule-a | forbidden | citations | coverage | api-urls`). **Not invoked by the skill — the agent self-validates in Phase 6.** Useful only for manual inspection of `ui_ep{NN}_{persona}_*.json` files.
+- Schema + word lists live in the **single source of truth** `../shared/functional/{upsert.schema.json, verbs.json}` (ADR 0001) — JSON-schema for the `/functional-graph/v2/upsert` payload; reference only, the agent self-validates.
+- `validators/validate.py` — a thin **shim** that delegates to `../shared/functional/validate.py` (the one validator engine), injecting `--kind human` (the UI pass writes only human personas). Standalone debugging helper (subcommands `schema | rule-a | forbidden | citations | coverage | api-urls`). **Not invoked by the skill — the agent self-validates in Phase 6.** Useful for manual inspection of `ui_ep{NN}_{persona}_*.json` files.
 - `validators/requirements.txt` — Python dependency: `jsonschema`
 
 ## Inputs
@@ -336,6 +336,7 @@ Then load `references/spa-flow-structuring-agent.prompt.md` and substitute the `
 | `{{kind}}` | `ep.type` (`route` / `panel` / `route-variant`) |
 | `{{title}}` | `ep.title` |
 | `{{seed_file_absolute_path}}` | absolute path to `ep.component` |
+| `{{shared_functional_path}}` | absolute path to the **shared functional SSOT** dir — `<pluginRoot>/skills/shared/functional` (sibling of this skill, i.e. `<this skill dir>/../shared/functional`). The agent reads `core.md` + `human-overlay.md` from here for the canonical rules (ADR 0001). |
 | `{{repo_name}}` | basename of the UI repo path |
 | `{{repo_root_absolute_path}}` | absolute path to the UI repo |
 | `{{project_uuid}}` | `projectUuid` from `.breeze.json` |

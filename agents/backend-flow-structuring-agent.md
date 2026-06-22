@@ -237,49 +237,18 @@ Build the `payload` and `audit` documents per the schema below. **Hold them in y
 
 ## Functional Graph Rules
 
-### Outcome
+> **AUTHORITATIVE RULES — `Read` these two files FIRST, before drafting any node** (single source of truth, ADR 0001). They live next to the validator you already run: at `$VALIDATORS_PATH/../../shared/functional/` (i.e. resolve `VALIDATORS_PATH` = `…/skills/generate-functional-from-backend/validators` → `…/skills/shared/functional/`):
+> - `core.md` — node model (Outcome → Scenario → Step → Action), reuse/dedup, `rule-a`, citations, write protocol, no-upper-cap-on-actions.
+> - `system-overlay.md` — this is the **backend / System pass**: the mechanical EP→persona map (`System` / `External System`), `description` REQUIRED on every System action, one-operation-one-action (per-field atomicity exempt), the apis-OR-identifier `rule-a` fallback.
+>
+> Do not keep a private copy of those definitions here. The shared `validate.py` enforces the hard gates (schema / rule-a / persona / citations / coverage) regardless. If `VALIDATORS_PATH` is unset/unreadable, fall back to `EXISTING_NEIGHBORHOOD`/training and let the reasoning checks (Step B) cover it.
 
-A high-level business capability a persona needs to accomplish. NOT a technical function, endpoint, or implementation detail.
-
-- Evaluate `EXISTING_NEIGHBORHOOD` first; reuse if a match exists.
-- Prefer broader Outcomes; capture variation as Scenarios.
-- Create a new Outcome only if no existing one can logically contain the intent.
-- Quality checks: understandable by a non-technical stakeholder, stable across implementation changes, broad enough to absorb future Scenarios.
-- If more than 3-4 new Outcomes appear necessary for one EP, you are over-segmenting — re-evaluate.
+**Backend-specific Outcome guidance (adapter — on top of core.md §2):** prefer broad business-capability Outcomes; >3-4 for one EP = over-segmenting. A System Scenario's `description` describes the **internal processing**, not the triggering UI.
 
 **Good:** `Manage Fund Allocations`, `Monitor Compliance Status`, `Track Construction Project Pipeline`
 **Bad:** `Handle API Requests`, `Process Database Queries`, `Handle ProjectsController`
 
-### Scenario
-
-A specific system flow under an Outcome. Testable — you can write acceptance criteria. Clear start and end.
-
-- Reuse existing Scenario if the flow is semantically similar.
-- Create new only for genuinely distinct processing paths.
-- If two Scenarios share >70% of their steps, consider merging.
-- Each Scenario MUST include a brief `description` covering end-to-end internal behavior plus constraints/limits. For System personas the description describes the **internal processing**, not the triggering UI.
-
-### Step
-
-Sequential stages within a Scenario.
-
-- Typically 3-8 Steps (use more when the flow genuinely has more sequential phases). Short verb phrase. No description needed. Ordered.
-- If you find >15 Steps in one Scenario, ask whether some are actually separate Scenarios.
-
-### Action
-
-Atomic internal operations.
-
-**SYSTEM persona actions:**
-- Single atomic internal operations.
-- `description` REQUIRED on every System action — formula, threshold, field names, condition, error message, data format, repository+table, or input/output contract.
-- `null` only for trivial glue (e.g. "Log completion").
-
-**EXTERNAL SYSTEM persona actions:**
-- Single atomic API / integration operations.
-- `description` = endpoint, payload shape, or auth mechanism when known.
-
-**Quantity:** Typically 1-5 actions per Step. Enumeration overrides this — if a validation step covers 18 DTO fields, enumerate them rather than splitting into artificial Steps.
+**Enumeration (backend, on top of system-overlay):** a validation Step covering 18 DTO fields enumerates them (in actions or the action description) rather than splitting into artificial Steps; field-coverage is what matters, not a per-Step action cap.
 
 ### ENUMERATION rule (critical)
 
@@ -369,12 +338,11 @@ Every citation looks like:
 
 To build `reference`: take the absolute file path, strip the `REPO.root` (on-disk) prefix, then prepend `REPO.name + "/"` — where `REPO.name` is the **indexed repo name**, NOT the on-disk folder basename. Using the indexed name is what lets the citation resolve back to the file node the code graph stored.
 
-**Where citations go:**
-- `personas[0].citations[]` — every file you read (mandatory)
-- `outcomes[i].citations[]` — files that informed the outcome boundary (the controller/resolver/consumer + its main service)
-- `scenarios[i].citations[]` — files specific to that scenario (services, repositories, DTOs)
-
-Do NOT put citations on steps or individual actions — keep payload size sane. **Never cite a frontend file path** — the backend pass reads backend code only.
+**Where citations go (cite LOW — core.md §7):**
+- `actions[i].citations[]` — **preferred.** The service/repository/handler file the action's operation came from — the tightest link.
+- `steps[i].citations[]` — files defining a processing stage when no single action owns them.
+- `scenarios[i].citations[]` — files spanning the whole flow (the controller/resolver/consumer entry file).
+- **Do NOT cite at `outcomes[]` or `personas[]`** — shared/merged by name across many EPs, so file refs there pollute the shared node; `validate.py citations` warns on it. Completeness is a union across all levels, so an action/step/scenario citation satisfies the gate. **Never cite a frontend file path** — the backend pass reads backend code only.
 
 ---
 

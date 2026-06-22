@@ -1,3 +1,14 @@
+> **⚠ This file is superseded as the rule authority (ADR 0001).** The single source of
+> truth for the functional ontology is now the layered set in
+> [`functional/`](functional/): `core.md` (universal), `human-overlay.md`,
+> `system-overlay.md`, `verbs.json`, `upsert.schema.json`, `validate.py`. Read those for
+> the node model, persona rules, action language, forbidden words, citations, `rule-a`,
+> and validation. The sections below are retained because they additionally document the
+> **MCP per-node write path** (`Call_Create_/Update_Functional_Node_` data-model shapes
+> and the MCP tool map) used by the `analyze-functional` / `update-functional-graph`
+> skills — that material is not in `functional/core.md`. Where any rule here disagrees
+> with `functional/`, **`functional/` wins.**
+
 ### Functional Graph
 
 The functional graph consists of 5 components in a strict hierarchy:

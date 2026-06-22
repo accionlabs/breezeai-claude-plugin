@@ -215,6 +215,49 @@ the user confirms the first repo, gently surface this:
 
 This is informational — do not block on it. Continue with the upload.
 
+## Step 4.5 — Configure exclusions (`.repoignore`)
+
+The generator has **no `--exclude` CLI flag**. Exclusions are driven by a
+gitignore-style **`.repoignore`** file at the repo root, which the generator
+parses and merges with its **built-in** `.repoignore`. The built-in already
+skips `.git/`, `node_modules/`, `vendor/`, `dist/`, `build/`, `target/`,
+`.gradle/`, `tests/`, `/docs/`, `*.csv`, images, `.env*`, etc. — so common
+dependency/build/test noise is handled automatically.
+
+The generator only parses **source languages** (perl, javascript, python,
+java, typescript, c#, go, php, …), so non-source artifacts (`.json`, `.md`,
+PDFs) are never turned into code nodes even without an ignore entry. You still
+want a `.repoignore` when:
+
+- a folder contains **source files you don't want indexed** — generated code,
+  vendored copies, scratch/planning dirs, sample apps, or a previous tool's
+  output that happens to hold `.java`/`.js`/etc.;
+- a large generated/output folder would needlessly slow the directory walk;
+- the user explicitly names folders to skip.
+
+**What to do before running:**
+
+1. Check for an existing `<repo>/.repoignore` — if present, honor it (the tool
+   merges it automatically; just tell the user it's in effect).
+2. Scan the repo root for obvious non-source / generated / output folders
+   (e.g. a tool's output dir, `merge_plan/`, `*-output/`, a checkpoint folder)
+   and any secrets file (`.breeze.json` holds the apiKey — never index it).
+3. If you find any, **propose a `.repoignore`** listing them and write it after
+   the user confirms (don't silently exclude — show the list). Use
+   gitignore syntax: a trailing `/` means "directory, matched anywhere"
+   (`merge_plan/` → skipped at any depth); a leading `/` anchors to repo root.
+
+```
+# example <repo>/.repoignore
+.breeze-p3-output/      # generated functional-graph payloads (not source)
+merge_plan/             # scratch / planning folder
+.breeze.json            # contains apiKey — never index
+```
+
+Negation (`!pattern`) is **not** supported by the generator. Skipping this
+step is fine for a clean single-module repo; it matters most for large
+monorepos or trees that mix source with generated output.
+
 ## Step 5 — Run the generator
 
 **Prepend the activation prefix from Step 2** to every command below.
