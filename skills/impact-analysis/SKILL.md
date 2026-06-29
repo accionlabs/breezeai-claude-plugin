@@ -64,12 +64,14 @@ If a search returns no results, note "No matches found" for that graph. If the A
 Based on the Functional_Graph_Search results, drill deeper into the functional graph:
 
 1. ALWAYS call `Get_all_personas` first to get the full persona list with their IDs. Cache the response — you will need each persona's `name` AND `type` (if present) when rendering the Functional Layer section of the detailed report, which groups by persona with type-aware glyphs (`👤` human / `🤖` system / `☁️` external).
-2. For outcomes/scenarios returned by the search, match the `personaId` field in each outcome back to the persona list to identify which personas are affected.
-3. Call `Get_all_outcomes_for_a_persona_id` for each affected persona to get their full outcome list.
-4. Call `Get_all_scenarios_for_a_outcome_id` for each relevant outcome.
-5. For each relevant scenario, call `Get_all_steps_actions_for_a_scenario_id` to get the complete steps and actions.
+2. For outcomes/scenarios returned by the search, match the `personaId` / `outcomeId` fields on each hit back to the persona list to identify the affected personas and the touched outcome(s). A Scenario or Outcome hit from `Functional_Graph_Search` already carries the `outcomeId` you need for step 3 — you do NOT have to enumerate a persona's full outcome set to reach it. (If a query returns only Step/Action hits, recover the `outcomeId` from the scenario root in the step 4 response.)
+3. Call `Get_all_scenarios_for_a_outcome_id` for each touched outcome to enumerate ALL of its scenarios — this catches sibling scenarios that search did not rank (e.g. an alternate fan-out path on the same outcome), which matters for blast-radius completeness.
+4. For each relevant scenario, call `Get_all_steps_actions_for_a_scenario_id` to get the complete steps and actions.
+5. **Escalation only — `Get_all_outcomes_for_a_persona_id`.** This call enumerates a persona's *entire* outcome set and seeds an expensive fan-out (per persona → all outcomes → per outcome → all scenarios → steps/actions), most of it irrelevant to a surgical change. Skip it by default for narrow, search-anchored changes. Fire it only when (a) `Functional_Graph_Search` recall is weak/ambiguous and no outcome anchor surfaced, or (b) the change is broad enough that you need cross-outcome closure under a persona (a sibling *outcome* search never surfaced).
 
 This gives you the full functional chain: Persona → Outcome → Scenario → Step → Action. Steps are first-class members of the chain — do not collapse them into their parent scenario at render time.
+
+`Get_all_steps_actions_for_a_scenario_id` also returns any `Api` node nested under its parent Action via the `HAS_API` relation, carrying the endpoint contract (`method`, `url`, `type`, `request` DTO name, `response` shape). Only entry-point actions have one — most actions return `children: []`. Use this Api node to populate the Code Context / Code Layer `Endpoint / Page` column and the ApiGateway request-path reasoning **without** a separate code-graph lookup. Field-level request/response detail is NOT on the Api node — reconstruct it from the sibling `Validate <field>` actions' descriptions.
 
 ## Step 2.2 — Architecture Impact
 
@@ -107,6 +109,26 @@ For the top 3–5 `Code_Graph_Search` hits, call `Get_Code_Nodes_By_Label(label=
 - You need explicit repo + clusterId + module info to anchor a Code Context entry confidently.
 
 For each enriched hit, retain the parent repo (from the inventory in Step 2). When the touched code spans multiple repos, render Code Context entries with their parent repo prefix (e.g. `frontendweb_react_tnlm: src/utils/posthog.ts`) so cross-repo coordination is visible at a glance — never bare paths when more than one repo is involved.
+
+### Statement-level verification (optional escalation — verify the claim, don't restate the ticket)
+
+When the change hinges on a **specific literal, query, guard, or statement inside a function** (e.g. a value swap like `3072 → 1024`, a particular Cypher/SQL string, a `size()`/null guard, a branch), escalate from file granularity to the function/class body:
+
+```
+Get_Code_Nodes_By_Label(label="Function" | "Class", filters={"name": "<symbol>"}, children=true)
+```
+
+This returns the symbol's `statements[]` (each with verbatim `text` + line range) and its resolved `calls[]` — letting you confirm the touchpoint against the indexed graph instead of paraphrasing the ticket. Use it for the 1–3 **primary** touchpoints only.
+
+Guardrails (all learned the hard way — follow them):
+
+- **Scope by `codeOntologyId`, not `repositoryName`.** Use `filters={"name": "<symbol>", "codeOntologyId": <repo._id>}`, where `<repo._id>` is the `_id` from `Call_List_Repositories_` (it equals the `codeOntologyId` stamped on every node). This is a stable, immutable key. Do NOT filter by `repositoryName`: the value `Call_List_Repositories_` returns there is the **slug** (`"breezeai-backend"`), but nodes store the repo's **display name** (`"BreezeAI Backend"`), so filtering by the slug returns zero rows with no error — and `repositoryName` is mutable (a rename leaves stale names on nodes) so it is unreliable to filter on regardless. (Tracked as a generator bug; `codeOntologyId` is the canonical scoping key.) If you only have a symbol name and no repo id, filter by `name` alone (optionally `+ path`).
+- **Do NOT restrict `fields` if you need statement text.** The `fields` parameter silently drops the nested statement `text`, leaving only line ranges. Omit it (accept the larger payload) when you need to read the code.
+- **Follow `calls[]` to the true touchpoint.** A search hit is often a thin router/wrapper that delegates the real logic to another function (resolved via `calls[].path`). Pull that callee before concluding — e.g. a `vectorSearchWithFilters` that just routes into an `executeSingleVectorSearch` where the actual query lives.
+- **Treat an empty `statements: []` as a PARSER BLIND SPOT, not "no logic".** The generator captures only a narrow allow-list (declarations/returns) at the function-body root and skips bare expression-statements and anything nested inside `try`/`catch`/`if`/`for` blocks; for several non-JS/TS languages (Java, C#, Python, PHP, Go, Apex, Perl) statement capture is currently a silent no-op entirely (see the *Code Ontology Capture Matrix* tracker). When statements are absent, fall back to the node's `embedText`/`calls`, or read the source file directly — never report "no logic found" from an empty array.
+- **Cap at 1–3 functions.** Statement payloads are large and can exceed the tool's token limit (spilling to a file); over-fetching whole files with `children=true` will blow the budget.
+
+Feed the verified result into the Code Context / Code Layer `Current → Adds` columns and the `Cross-checks vs the prompt` block: a literal confirmed (or contradicted — e.g. the value is already changed in the indexed commit) at statement level is a graph-grounded finding, materially stronger than restating the ticket.
 
 If `Code_Graph_Search` returned zero hits, skip this step. Steps 2.1 and 2.3 are independent and can run in parallel.
 
