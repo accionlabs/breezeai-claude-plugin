@@ -23,40 +23,26 @@ Design Ontology
 │           └── Component (UI elements: atoms, molecules, organisms, templates)
 ```
 
-**Hierarchy rules:**
-
-- **Scenario → UserJourney** — 1:1 mapping, always
-- **UserJourney → Flow(s)** — one or many flows per journey, discovered
-  from the UI code. The functional graph captures WHAT the user does;
-  the UI code reveals HOW MANY WAYS they can do it. These don't always
-  align. Each flow is also multiplied per selected modality.
-- **Flow → Page(s)** — one or many pages per flow. A simple flow
-  may complete on a single page; a complex flow requires navigating
-  through multiple pages in sequence.
-- **Page → Component(s)** — the actual UI elements (atoms, molecules,
-  organisms, templates) that make up the page and enable the user to
-  complete the flow.
-
-**Functional graph linkage:**
-
-- `scenarioId` on UserJourney
-- `stepIds[]` on Flows and Pages (steps distribute across flows/pages)
-- `actionIds[]` on Components and Pages (actions map to the components
-  that implement them)
-
 Unlike `generate-design` which infers components from action
-descriptions, this skill **reads the actual JSX/TSX code** to discover
+descriptions, this skill **reads the actual UI code** to discover
 real components, their nesting, props, states, and flow structure.
+
+See [design-ontology.md](references/design-ontology.md) for hierarchy
+rules, entity fields, and functional graph linkage.
 
 ## Resources
 
-- For design graph rules (component types, supportingComponents,
-  reuse, payload structure), read
-  [references/rules.md](references/rules.md)
-- For shared design ontology guide (API tools, payload schemas), read
-  [../generate-design/references/guide.md](../generate-design/references/guide.md)
-- For atomic design theory and component classification, read
-  [../generate-design/references/atomic-design-theory.md](../generate-design/references/atomic-design-theory.md)
+**⛔ MANDATORY REFERENCES — Read at the specified points below.**
+
+These reference documents contain critical rules that MUST be followed. They are extracted from the main flow to reduce verbosity while maintaining completeness.
+
+| Reference | What it covers | When to read |
+|---|---|---|
+| **[references/blocking-gates.md](references/blocking-gates.md)** | ⛔ All blocking gates, validation rules, per-scenario checklist, recovery procedures | **Before Step 2** (processing loop) — review all gates. Refer back inline at each gate. |
+| **[references/flow-discovery-patterns.md](references/flow-discovery-patterns.md)** | Grep patterns, Type A/B classification, multi-page detection, evidence block format | **At Step 3** (flow discovery) — follow grep strategy exactly. |
+| **[references/atomic-design-rules.md](references/atomic-design-rules.md)** | Component classification (ATOM/MOLECULE/ORGANISM/TEMPLATE), composition rules, naming, scope | **At Step 5** (component classification) — use decision tree and examples. |
+| [../generate-design/references/guide.md](../generate-design/references/guide.md) | Shared design ontology guide, bulk upsert payload schema | For payload structure details |
+| [../generate-design/references/atomic-design-theory.md](../generate-design/references/atomic-design-theory.md) | Atomic design theory background | For additional classification context |
 
 ## Inputs
 
@@ -79,9 +65,11 @@ real components, their nesting, props, states, and flow structure.
 
 ---
 
-## Project
+## Guard
 
-This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
+1. Read `.breeze.json` from the plugin working directory
+2. If missing or incomplete, tell the user to run `/breeze:setup-project`
+3. Extract `projectUuid`
 
 > **Parameter naming hint:** All Breeze MCP tools require the project ID
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
@@ -141,8 +129,24 @@ Ask user which processing mode to use:
 | --------- | ---------------------------------------------------------- |
 | `confirm` | Show preview and ask for confirmation before each scenario |
 | `auto`    | Skip per-scenario confirmation; process all automatically  |
+| `outcome` | Process all scenarios within an outcome on auto, then pause and wait for user input before starting the next outcome |
+| `dry-run` | Build all payloads but do NOT call any MCP mutation tools. Instead, append each call to `apicalls.json` for review or external execution |
 
 Default: `confirm` if user doesn't specify.
+
+In `dry-run` mode:
+
+- Behaves like `auto` for scenario processing (no per-scenario
+  confirmation, no pausing)
+- **ALL MCP mutation calls are replaced with file writes** — see
+  Step 6g-dry and 6i-dry below
+- Read-only MCP calls (fetching scenarios, steps, actions) still
+  execute normally — only mutations are deferred
+- `existingcomponents.json` and flow/page registries are still
+  updated on disk (these are local files, not API calls)
+- Scenarios are NOT marked as processed (`isDesignGenerated` stays
+  `false`) since the upsert hasn't actually happened
+- At the end, show the total count of queued calls and the file path
 
 In `auto` mode:
 
@@ -151,17 +155,31 @@ In `auto` mode:
 - On error: log the failure, skip the scenario, continue to the next
 - **CRITICAL — DO NOT STOP OR PAUSE DURING AUTO MODE.** When `auto` mode is selected, you MUST process ALL scenarios from start to finish without stopping to ask "should I continue?", "shall I proceed?", or any continuation prompt. The user has given blanket consent by selecting `auto`. Process every scenario until the loop exits naturally. The ONLY acceptable reason to stop is an unrecoverable error that prevents ALL further processing.
 
+In `outcome` mode:
+
+- **Scenario selection is automatically Option 4 (Outcome-by-Outcome)**
+  — skip the scenario selection question in Step 2a entirely
+- Within each outcome: behaves like `auto` — no per-scenario
+  confirmation, no pausing, process all scenarios sequentially
+- **Between outcomes: STOP and show an outcome summary**, then wait
+  for user input before proceeding to the next outcome
+- This gives the user a natural checkpoint to review progress, fix
+  issues, or stop without losing work
+- On error within an outcome: log the failure, skip the scenario,
+  continue to the next scenario in the SAME outcome (don't skip
+  the whole outcome)
+
 ### 0c. Detect & Confirm Modalities
 
 **Auto-detect the primary modality from the repo:**
 
 | Repo Signal                                                        | Detected Modality         |
 | ------------------------------------------------------------------ | ------------------------- |
-| React Router, Next.js, Nuxt, Vue Router, Angular Router, SvelteKit | `web`                     |
-| React Native, `react-native` in package.json, `expo`               | `mobile`                  |
-| Electron, `electron` in package.json, Tauri                        | `desktop`                 |
-| Ionic, Capacitor                                                   | `mobile` + `web` (hybrid) |
-| Flutter web, responsive meta tags + mobile breakpoints             | `web` + `mobile`          |
+| React Router, Next.js, Nuxt, Vue Router, Angular Router, SvelteKit | `WEB`                     |
+| React Native, `react-native` in package.json, `expo`               | `MOBILE`                  |
+| Electron, `electron` in package.json, Tauri                        | `DESKTOP`                 |
+| Ionic, Capacitor                                                   | `MOBILE` + `WEB` (hybrid) |
+| Flutter web, responsive meta tags + mobile breakpoints             | `WEB` + `MOBILE`          |
 
 1. Detect the primary modality from the framework identified in 0a
    and `package.json` dependencies
@@ -186,16 +204,24 @@ In `auto` mode:
 
 ---
 
-## Step 1: Initialize Component Registry File
+## Step 1: Load or Create Registries (No Upfront MCP Fetch)
 
-> **MANDATORY — DO NOT RELY ON CACHING FOR COMPONENT REUSABILITY.**
-> At the start of every run, create (or overwrite) a local
-> `existingcomponents.json` file in the project root.
+> **No MCP queries at startup.** The backend deduplicates by
+> `projectUuid + name` (case-insensitive), so even if the local
+> registries are empty, including a node by name in the bulk payload
+> will link to an existing node — never creating a duplicate.
+>
+> Registries are populated incrementally via post-upsert sync
+> (Step 6h) as scenarios are processed. Disk files provide
+> cross-session persistence.
 
-### 1a. Check if `existingcomponents.json` Exists
+### 1a. Load or create `existingcomponents.json`
 
 Look for `existingcomponents.json` in the plugin working directory.
-If it does **not** exist, create it with the empty structure:
+
+- **If it exists and is non-empty** → load it as-is (data from prior
+  sessions)
+- **If it does NOT exist or is empty** → create with empty structure:
 
 ```json
 {
@@ -206,34 +232,8 @@ If it does **not** exist, create it with the empty structure:
 }
 ```
 
-### 1b. Query All Existing Components (Paginated)
-
-Fetch **all** components already in the design graph by paginating
-through `Get_all_Design_By_Label`:
-
-```
-allComponents = []
-page = 1
-limit = 50
-
-LOOP:
-  1. Call Get_all_Design_By_Label(
-       uuid: <projectUuid>,
-       label: "Component",
-       page: "<page>",
-       limit: "<limit>"
-     )
-  2. Append returned nodes to allComponents
-  3. IF returned count < limit → EXIT (no more pages)
-  4. page += 1
-  5. REPEAT
-END LOOP
-```
-
-### 1c. Write `existingcomponents.json`
-
-Populate (or overwrite) the file. Structure uses **component name as
-key** for fast lookup:
+**Component Registry structure** — component name as key for fast
+lookup:
 
 ```json
 {
@@ -250,53 +250,21 @@ key** for fast lookup:
 }
 ```
 
-### 1d. Build Flow & Page Registries (Disk-Persisted)
+### 1b. Load or create `existingflows.json`
 
 > **Flows and Pages are reusable across scenarios.** A "Login" flow
 > created for Scenario A can be reused when Scenario B also passes
-> through login. Same for pages — a "Dashboard" page can appear in
-> many flows. These registries enable LINK-before-CREATE at every level.
+> through login. Same for pages. These registries enable
+> LINK-before-CREATE at every level.
 >
-> **⛔ These registries are persisted to disk** (like
-> `existingcomponents.json`) so they survive across batched runs and
-> separate Claude Code sessions. This is critical for the Python
-> orchestration script workflow.
-
-#### 1d-i. Load or create `existingflows.json`
+> **⛔ These registries are persisted to disk** so they survive across
+> batched runs and separate Claude Code sessions.
 
 Look for `existingflows.json` in the plugin working directory.
 
-**If it exists and is non-empty** → load it as the Flow Registry.
-Skip the MCP query below (the file is the source of truth from
-prior runs).
-
-**If it does NOT exist or is empty** → create it, then populate
-from MCP:
-
-1. Create the file with empty structure: `{}`
-2. Query existing Flows via paginated MCP calls:
-   ```
-   allFlows = []
-   page = 1, limit = 50
-   LOOP:
-     Call Get_all_Design_By_Label(uuid, label: "Flow", page, limit)
-     Append to allFlows
-     IF count < limit → EXIT
-     page += 1
-   END LOOP
-   ```
-3. For each flow returned, add to the registry keyed by
-   `"{name}|{modality}"`:
-   ```json
-   {
-     "Login|WEB": {
-       "id": "flow-uuid-1",
-       "stepIds": ["step-1"],
-       "modality": "WEB"
-     }
-   }
-   ```
-4. Write the populated registry to `existingflows.json`
+- **If it exists and is non-empty** → load it as the Flow Registry
+- **If it does NOT exist or is empty** → create with empty structure:
+  `{}`
 
 **Flow Registry structure** — index by `(name, modality)`:
 
@@ -315,47 +283,32 @@ from MCP:
 }
 ```
 
-#### 1d-ii. Load or create `existingpages.json`
+### 1c. Load or create `existingpages.json`
 
 Same pattern as flows. Look for `existingpages.json` in the plugin
 working directory.
 
-**If it exists and is non-empty** → load it as the Page Registry.
+- **If it exists and is non-empty** → load it as the Page Registry
+- **If it does NOT exist or is empty** → create with empty structure:
+  `{}`
 
-**If it does NOT exist or is empty** → create and populate from MCP:
+> **Pages have NO modality field.** Modality lives on the Flow only.
+> The same page can be shared across web and mobile flows. The Page
+> Registry is keyed by `(name, pageType)` — NOT `(name, pageType, modality)`.
 
-1. Create with empty structure: `{}`
-2. Query existing Pages:
-   ```
-   Get_all_Design_By_Label(uuid, label: "Page", page: "1", limit: "50")
-   ```
-   (paginate if needed)
-3. For each page, add to registry keyed by
-   `"{name}|{pageType}|{modality}"`:
-   ```json
-   {
-     "Dashboard|dashboard|WEB": {
-       "id": "page-uuid-1",
-       "stepIds": ["step-3"],
-       "pageType": "dashboard"
-     }
-   }
-   ```
-4. Write to `existingpages.json`
-
-**Page Registry structure** — index by `(name, pageType, modality)`:
+**Page Registry structure** — index by `(name, pageType)`:
 
 ```json
 {
-  "Dashboard|dashboard|WEB": {
+  "Dashboard|DASHBOARD": {
     "id": "page-uuid-1",
     "stepIds": ["step-3"],
-    "pageType": "dashboard"
+    "pageType": "DASHBOARD"
   },
-  "Login|form|WEB": {
+  "Login|FORM": {
     "id": "page-uuid-2",
     "stepIds": ["step-1"],
-    "pageType": "form"
+    "pageType": "FORM"
   }
 }
 ```
@@ -369,33 +322,26 @@ across batched sessions) can reuse them — same pattern as
 
 ## Step 2: Select Scenarios & Process
 
-> **MANDATORY — DO NOT BULK FETCH THE FUNCTIONAL GRAPH.**
-> NEVER call `Get_complete_functional_graph` or any tool that returns the
-> entire functional graph in one shot. Always fetch incrementally per
-> scenario.
+> **⛔ Three non-negotiable constraints:**
+> 1. **No bulk graph fetch** — always fetch incrementally per scenario
+> 2. **Sequential scenario processing** — one at a time, each must
+>    fully complete before next begins. (UI file reads within a
+>    scenario CAN be parallelized — reading is safe)
+> 3. **Skip System/External System personas** — no UI to design
+>    (see blocklist in Step 2a-pre)
 
-> **⛔ MANDATORY — ONE SCENARIO AT A TIME. NO PARALLEL PROCESSING.**
-> You MUST process scenarios strictly sequentially — one at a time.
-> NEVER launch parallel agents, concurrent tool calls, or background
-> tasks to process multiple scenarios simultaneously. Each scenario
-> must fully complete (including all blocking gates: existingcomponents.json
-> update, bulk upsert, MCP sync, and marking as processed) before the
-> next scenario begins. This is non-negotiable — parallel processing
-> causes registry corruption and duplicate design nodes.
+> **⛔ MANDATORY READ: [references/blocking-gates.md](references/blocking-gates.md)**
 >
-> **Exception: UI code reading IS parallelizable.** Within a single
-> scenario, you SHOULD launch multiple parallel agents to read UI
-> files simultaneously (Steps 3–4). For example, spawn separate agents
-> to read page files, widget files, and component files at the same
-> time. This is safe because reading is read-only and does not mutate
-> registries. The sequential constraint applies to **scenario-level
-> processing** (Steps 6d onward: registry updates, bulk upsert, MCP
-> sync).
-
-> **SKIP SYSTEM PERSONA SCENARIOS.**
-> This skill generates design nodes for UI — System and External System
-> persona scenarios have no user interface and MUST be excluded.
-> See Step 2a-pre below for how to build the blocklist.
+> Before proceeding, read the blocking gates reference document. It contains:
+> - All 7 blocking gates with detailed steps
+> - Per-scenario checklist
+> - What happens when you skip a gate
+> - Recovery procedures
+> - Auto mode clarification
+>
+> You will encounter gates at Steps 2a-pre, 3e, 6d, 6f, 6h, 6h-post, and 6i.
+> Refer back to the document at each gate to verify you're following the
+> correct procedure.
 
 ### 2a-pre. Build non-human outcome blocklist ⛔ BLOCKING GATE
 
@@ -440,9 +386,13 @@ each scenario has an `outcomeId`. Check it against `blockedOutcomeIds`:
 
 ### 2a. Scenario Selection Mode
 
+> **Skip this question in `outcome` mode.** When processing mode is
+> `outcome`, automatically use **Option 4 (Outcome-by-Outcome)** below.
+> Do not ask the user to choose a scenario selection mode.
+
 Ask the user how they want to select scenarios for design generation:
 
-**Question:** "How would you like to select scenarios?\n\n1. **Browse & Pick** — I'll show you 10 scenarios at a time, you pick which ones to process\n2. **Search & Generate** — Search for a scenario by name, then generate design for it\n3. **Process All** — Process all unprocessed scenarios one by one (batch mode)\n\nChoose 1, 2, or 3:"
+**Question:** "How would you like to select scenarios?\n\n1. **Browse & Pick** — I'll show you 10 scenarios at a time, you pick which ones to process\n2. **Search & Generate** — Search for a scenario by name, then generate design for it\n3. **Process All** — Process all unprocessed scenarios one by one (batch mode)\n4. **Outcome-by-Outcome** — Process all scenarios grouped by outcome, pause between outcomes\n\nChoose 1, 2, 3, or 4:"
 
 ---
 
@@ -488,7 +438,7 @@ Ask the user how they want to select scenarios for design generation:
    selection mode
 7. Process selected scenario(s) using the Processing Loop below
 
-#### Option 3: Process All (Default)
+#### Option 3: Process All (Default for `auto` mode)
 
 Batch mode. All unprocessed scenarios (`isDesignGenerated=false`) are
 processed one by one, **skipping any whose `outcomeId` is in
@@ -496,166 +446,329 @@ processed one by one, **skipping any whose `outcomeId` is in
 
 ---
 
+#### Option 4: Outcome-by-Outcome (Default for `outcome` mode)
+
+> **This option is automatically selected when processing mode is
+> `outcome`.** It can also be chosen manually from the selection menu.
+
+Process all unprocessed scenarios grouped by their parent outcome.
+After all scenarios in one outcome complete, pause and wait for user
+input before starting the next.
+
+**Step 4a. Build the outcome queue:**
+
+1. Call `Get_all_personas(uuid: "<projectUuid>")` — reuse the data
+   from Step 2a-pre (already fetched for the blocklist)
+2. For each **human persona**, call
+   `Get_all_outcomes_for_a_persona_id(uuid, personaId: "<id>")`
+3. For each outcome, fetch its scenarios **directly by outcome ID**:
+   ```
+   Get_all_scenarios_for_a_outcome_id(
+     uuid: "<projectUuid>",
+     outcome_id: "<outcomeId>",
+     page: 1,
+     limit: 10
+   )
+   ```
+   Paginate using the `total`-based rule (see
+   [mcp-tools.md § Pagination Rule](references/mcp-tools.md)).
+   Filter out already-processed scenarios client-side
+   (`isDesignGenerated == true` → skip).
+   > **Why per-outcome fetch?** `Get_all_scenarios_for_a_outcome_id`
+   > returns only scenarios belonging to one outcome — much smaller
+   > payload than fetching ALL unprocessed scenarios project-wide and
+   > filtering by `outcomeId` client-side. The only client-side filter
+   > needed is `isDesignGenerated` (not supported by this tool).
+4. Build the outcome queue — only include outcomes with ≥ 1
+   unprocessed scenario:
+
+```
+outcomeQueue = [
+  {
+    outcomeId, outcomeName, personaName,
+    scenarios: [{ id, name, outcomeId }, ...]
+  },
+  ...
+]
+```
+
+**Step 4b. Show the outcome queue to the user:**
+
+```
+Outcome Queue ({N} outcomes, {M} total scenarios):
+
+  1. [End User] Registration — 5 scenarios
+  2. [End User] Login — 3 scenarios
+  3. [Admin] User Management — 8 scenarios
+  ...
+
+Processing mode: outcome (auto within each outcome, pause between outcomes)
+```
+
+**Step 4c. Process outcomes one at a time:**
+
+```
+FOR each outcome in outcomeQueue:
+  1. Show outcome header:
+     "━━━ OUTCOME {i}/{total}: [{personaName}] {outcomeName} ({N} scenarios) ━━━"
+  2. ⛔ RUN UPFRONT GREP DISCOVERY for this outcome (Step 3-upfront below)
+     — Grep ALL target routes, pages, branching patterns for ALL
+       scenarios in this outcome BEFORE processing any of them
+     — Compile the Grep Evidence Cache
+  3. Process all scenarios in this outcome using the Processing Loop
+     (Step 2b) with auto-mode behavior (no per-scenario confirmation)
+     — set selectedScenarios = outcome.scenarios for the loop
+     — each scenario uses the Grep Evidence Cache from step 2 instead
+       of running its own greps
+  4. After ALL scenarios in this outcome are processed (or failed),
+     show the Outcome Summary:
+
+     ┌─── OUTCOME COMPLETE: "{outcomeName}" ───┐
+     │ Processed: {N} scenarios                 │
+     │ Succeeded: {N}                           │
+     │ Failed: {N}                              │
+     │ Skipped (system): {N}                    │
+     │                                          │
+     │ Registry counts:                         │
+     │   Components: {N}                        │
+     │   Flows: {N}                             │
+     │   Pages: {N}                             │
+     │                                          │
+     │ Next outcome: [{persona}] {name} ({N})   │
+     └──────────────────────────────────────────┘
+
+  4. ⛔ PAUSE AND WAIT FOR USER INPUT.
+     Ask: "Outcome complete. Continue to next outcome, or stop?"
+
+     | Response       | Action                                   |
+     | -------------- | ---------------------------------------- |
+     | **continue/y** | Proceed to the next outcome              |
+     | **stop/n**     | Exit the loop, show final summary        |
+     | **skip**       | Skip the next outcome, show the one after|
+
+  5. REPEAT for next outcome
+END FOR
+```
+
+> **Why pause between outcomes?** This mode is designed for interactive
+> sessions where context window management matters. Each outcome is a
+> natural boundary — scenarios within an outcome tend to share pages
+> and components, so they benefit from shared context. Between outcomes,
+> the user can review results, and if the context window is getting
+> large, they can stop and start a fresh session knowing the registries
+> on disk will preserve all progress.
+
+---
+
 ### 2b. Processing Loop
 
-Process selected scenarios one at a time (incremental batch processing).
-
-Before entering the loop, determine `totalScenarios`:
-
-- **Option 1 & 2:** count of user-selected scenarios
-- **Option 3:** fetch total using `Get_scenarios_by_uuid(uuid, page: "1", limit: "1", isDesignGenerated: "false")` and read `total` from response
-
-> **⛔ AUTO MODE — NO CONTINUATION PROMPTS.**
-> When processing mode is `auto`: you MUST NOT pause, stop, or ask the user
-> whether to continue at any point during this loop. Process ALL scenarios
-> sequentially without interruption. Do not ask "should I continue?", "shall
-> I proceed?", "do you want me to keep going?", or any variation. The loop
-> runs to completion.
+> **⛔ NO CONTINUATION PROMPTS in `auto` or `outcome` mode.** Process
+> all scenarios without pausing. In `outcome` mode, pauses happen in
+> Option 4's outer loop between outcomes — not here.
 
 ```
-⛔ STRICTLY SEQUENTIAL — no parallel agents or concurrent scenario processing.
+⛔ STRICTLY SEQUENTIAL — one scenario at a time, no parallel processing.
 
-⛔ PER-SCENARIO CHECKLIST (verify ALL before moving to next scenario):
-  □ Flow & page discovery greps executed (Type A + Type B + page nav)
-  □ existingcomponents.json updated with new components (Step 6d)
-  □ Bulk_Update_Design_Nodes called (Step 6g)
-  □ existingcomponents.json synced from MCP with real IDs (Step 6h-post)
-  □ Flow & Page registries updated AND written to disk (Step 6h)
-  □ Scenario marked as processed (Step 6i)
-  If ANY box is unchecked → DO NOT proceed to the next scenario.
-
-counter = 0
-skippedSystem = 0
+counter = 0, skippedSystem = 0
 LOOP:
-  1. Get next scenario to process (ONE at a time, wait for previous to fully complete)
-     - Option 3: Fetch ONE scenario where isDesignGenerated=false
-     - Option 1/2: Take next from selectedScenarios list
-  2. IF no scenario remaining → EXIT
-  3. Check scenario's outcomeId against blockedOutcomeIds:
-     - IF outcomeId IN blockedOutcomeIds →
-       Show: "Skipping '{scenarioName}' — belongs to non-human persona (no UI)"
-       skippedSystem += 1
-       REPEAT from step 1
+  1. Get next scenario (Option 3: fetch one where isDesignGenerated=false;
+     Option 1/2: take next from selectedScenarios)
+  2. IF none remaining → EXIT
+  3. IF outcomeId IN blockedOutcomeIds → skip, skippedSystem++, REPEAT
   4. counter += 1
-  5. Fetch steps and actions for THIS scenario ONLY
-     → Get_all_steps_actions_for_a_scenario_id(uuid, parameters0_Value: <scenarioId>)
-     → Extract and store:
-        - scenarioId (the scenario UUID)
-        - For each step: stepId (UUID), step name, step order
-        - For each action under each step: actionId (UUID), action name, action description
-     → These IDs are REQUIRED for linking design nodes to functional nodes
-  6. Show progress: "[counter/totalScenarios] Scenario: <name>"
-  7. ⛔ INLINE SELF-CHECK — READ THIS EVERY ITERATION:
-     Before executing Steps 3-7, confirm you will do ALL of the following
-     for THIS scenario (not from memory of earlier scenarios):
-     ┌─────────────────────────────────────────────────────────────┐
-     │ □ GREP the entire repo for navigate()/Link refs to target  │
-     │   route (Type A entry-point flows) — Step 3b               │
-     │ □ GREP the target page directory for conditional rendering, │
-     │   tabs, auth methods, feature flags (Type B on-page flows) │
-     │   — Step 3b                                                 │
-     │ □ GREP each page file for outbound navigate()/Link calls   │
-     │   to detect multi-page flows — Step 3b-post                │
-     │ □ PRODUCE the Flow Discovery Evidence Block — Step 3e      │
-     │ □ READ actual TSX/JSX files before inferring components    │
-     │   — Step 4                                                  │
-     │ □ UPDATE existingcomponents.json BEFORE bulk upsert — 6d   │
-     │ □ SYNC existingcomponents.json from MCP AFTER upsert — 6h  │
-     │ □ WRITE existingflows.json & existingpages.json to disk — 6h│
-     │ If you are about to skip ANY box → you are drifting. STOP. │
-     └─────────────────────────────────────────────────────────────┘
-  8. Execute Steps 3-7 for this scenario
-     (In `auto` mode: skip user confirmation in Step 6)
-  9. ⛔ BLOCKING: Update existingcomponents.json with new components (Step 6d)
-     — READ the file FIRST, then WRITE with new components added
-     — VERIFY the write succeeded before continuing
-  10. Call Bulk_Update_Design_Nodes (Step 6g) — ONLY after step 9 is done
-  11. ⛔ BLOCKING: Post-upsert MCP sync of existingcomponents.json (Step 6h-post)
-      — Fetch real component IDs from MCP and update existingcomponents.json
-      — DO NOT proceed to next scenario until sync is complete
-  12. ⛔ CHECKPOINT: Verify existingcomponents.json is up-to-date
-      — Read existingcomponents.json and confirm it contains ALL components
-        created/reused in this scenario with real MCP IDs
-      — If any component from this scenario is missing → STOP and fix
-      — This checkpoint exists because Claude tends to forget this step
-        after processing several scenarios. IT IS NOT OPTIONAL.
-  13. Mark scenario as processed (Step 6i)
-  14. REPEAT from step 1
+  5. Fetch steps/actions: Get_all_steps_actions_for_a_scenario_id(
+       uuid, parameters0_Value: <scenarioId>)
+     → Extract scenarioId, stepIds, actionIds
+  6. Show: "[counter/total] Scenario: <name>"
+  7. Execute Steps 3→4→5→6 for this scenario
+
+  ⛔ PER-SCENARIO GATE (verify ALL before next scenario):
+    □ Flow discovery evidence produced (Step 3e)
+    □ UI files read, components classified (Steps 4-5)
+    □ existingcomponents.json updated (Step 6d) — BEFORE bulk upsert
+    □ Bulk_Update_Design_Nodes called (Step 6g) — or appended to
+      apicalls.json in dry-run mode (Step 6g-dry)
+    □ Flow/Page registries written to disk (Step 6h)
+    □ Scenario marked processed (Step 6i) — SKIPPED in dry-run mode
+    If ANY unchecked → DO NOT proceed.
+
+  8. REPEAT
 END LOOP
 ```
-
-> **⛔ The loop order above is non-negotiable.** Step 9 (update
-> `existingcomponents.json`) MUST happen before Step 10 (bulk upsert),
-> and Step 11 (MCP sync of existingcomponents.json) MUST complete
-> before Step 13 (next scenario) on EVERY iteration.
 > Do not reorder, batch, or skip these steps.
 
-### 2c. Extracted Data from `Get_all_steps_actions_for_a_scenario_id`
+### 2c. Extracted Data
 
-The response returns the full hierarchy. Extract and hold in memory
-for the current scenario iteration:
-
-```json
-{
-  "scenarioId": "scenario-uuid",
-  "scenarioName": "Register New Account",
-  "steps": [
-    {
-      "stepId": "step-uuid-1",
-      "stepName": "Provide registration details",
-      "order": 1,
-      "actions": [
-        {
-          "actionId": "action-uuid-1",
-          "actionName": "Provide email address",
-          "description": null
-        },
-        {
-          "actionId": "action-uuid-2",
-          "actionName": "Provide password",
-          "description": null
-        }
-      ]
-    },
-    {
-      "stepId": "step-uuid-2",
-      "stepName": "Submit registration",
-      "order": 2,
-      "actions": [
-        {
-          "actionId": "action-uuid-3",
-          "actionName": "Submit registration form",
-          "description": null
-        }
-      ]
-    }
-  ]
-}
-```
-
-These IDs are used in Step 6 to populate:
-
-- `scenarioId` on UserJourney
-- `stepIds[]` on Flows and Pages
-- `actionIds[]` on Components and Pages
+From `Get_all_steps_actions_for_a_scenario_id`, extract and hold in
+memory: `scenarioId`, and for each step: `stepId`, `stepName`, `order`,
+and each action's `actionId`, `actionName`. These IDs wire into the
+design payload (see
+[design-ontology.md § Linkage](references/design-ontology.md)).
 
 ---
 
 ## Step 3: Locate UI Code & Discover Flows for This Scenario
 
-> **⛔ CRITICAL — FLOW & PAGE DISCOVERY IS MANDATORY, NOT OPTIONAL.**
-> You MUST execute the full grep-based discovery strategy below for
-> EVERY scenario. Do NOT default to "1 flow, 1 page" without evidence.
-> Do NOT skip Type A or Type B discovery. Do NOT guess flow/page counts
-> from the scenario name alone. The whole point of this skill is that
-> flows and pages come from **actual UI code analysis**, not inference.
-> A scenario with only 1 flow is valid — but only AFTER you have grepped
-> and confirmed there is truly only one navigation path and no on-page
-> branching. Skipping discovery produces shallow, inaccurate design graphs.
+> **⛔ MANDATORY READ: [references/flow-discovery-patterns.md](references/flow-discovery-patterns.md)**
+>
+> Before starting flow discovery, read the flow discovery patterns document. It contains:
+> - Complete grep patterns for all major frameworks
+> - Type A (entry-point) and Type B (on-page) classification rules
+> - Multi-page detection strategy
+> - Evidence block format requirements
+> - Common edge cases and misclassifications
+>
+> **Follow the grep strategy exactly.** Do not skip, infer, or abbreviate.
 
-Using the step names and action names from the fetched functional data,
-locate the corresponding UI code and discover how many distinct
-paths/flows exist in the UI for completing this scenario.
+> **⛔ GREP-FIRST RULE:** Run all grep discovery **UPFRONT** for the
+> batch/outcome (Step 3-upfront) before processing individual
+> scenarios. Every scenario MUST have grep evidence — never default to
+> "1 flow, 1 page" without it.
+
+### 3-upfront. Batch Grep Discovery (⛔ RUN BEFORE ANY SCENARIO)
+
+> **⛔ BLOCKING GATE — You MUST complete this step before processing
+> the FIRST scenario in the batch/outcome.** This is the single most
+> important quality gate in the entire skill. Skipping it causes
+> shallow, inaccurate design graphs for all subsequent scenarios.
+
+Run all grep-based discovery for ALL scenarios in the current batch
+upfront, compile results into a **Grep Evidence Cache**, then use
+that cache during per-scenario processing.
+
+**Why upfront?**
+- Prevents grep-skipping drift (the #1 quality problem)
+- More efficient — one grep pass covers all scenarios sharing a page
+- Actions on the same page (modals, drawers, conditional UI) are
+  only visible when you grep the FULL page against ALL scenario actions
+
+**Step 3-upfront procedure:**
+
+1. **Identify all target routes/pages** for the batch's scenarios:
+   - Use citations on the parent Outcome (preferred) or grep for
+     route matches from scenario/step/action names
+   - Group scenarios by target page — many scenarios in an outcome
+     will share a page (e.g., 8 search scenarios → `/main/search`)
+
+2. **For each unique target page, run ALL greps ONCE:**
+
+   a. **Type A greps** — entry-point flows (navigate/Link to target):
+      ```
+      Grep entire repo for navigate()/Link/to= pointing to <route>
+      ```
+   b. **Type B greps** — on-page branching:
+      ```
+      Grep target page directory for:
+        - Conditional rendering (ternary JSX)
+        - Tabs/steppers
+        - Modal/drawer/dialog triggers
+        - Feature flags / mode toggles
+        - Auth method switches
+      ```
+   c. **Page nav greps** — outbound navigation:
+      ```
+      Grep target page files for navigate()/Link calls to OTHER routes
+      ```
+   d. **Read the page files** — understand the full component tree,
+      all conditional sections, all modals/drawers/panels
+
+3. **For each scenario in the batch, analyze its actions against
+   the grep results:**
+
+   For every action in the scenario, ask:
+   - Does this action trigger a **modal/dialog**? (grep hit for
+     `showModal`, `openDialog`, `<Modal>`, `<Dialog>` etc.)
+   - Does this action open a **drawer/panel**? (grep hit for
+     `openDrawer`, `<Drawer>`, `<Sheet>` etc.)
+   - Does this action use a **different entry point**? (Type A hit
+     from a different source page)
+   - Does this action depend on **specific state**? (Type B hit for
+     conditional rendering based on data state)
+
+4. **Compile the Grep Evidence Cache:**
+
+   ```json
+   {
+     "targetPages": {
+       "/main/search": {
+         "files": ["src/pages/Search/index.tsx", ...],
+         "typeA": {
+           "grepCommand": "...",
+           "hits": 3,
+           "entryPoints": [
+             { "source": "Sidebar", "via": "Link" },
+             { "source": "Dashboard", "via": "navigate" }
+           ]
+         },
+         "typeB": {
+           "grepCommand": "...",
+           "hits": 5,
+           "branchingPatterns": [
+             { "pattern": "showSaveModal && <SaveSearchModal>", "line": 42 },
+             { "pattern": "showDeleteConfirm && <ConfirmDialog>", "line": 78 },
+             { "pattern": "isFilterDrawerOpen && <FilterDrawer>", "line": 55 }
+           ]
+         },
+         "pageNav": {
+           "grepCommand": "...",
+           "outboundLinks": []
+         }
+       }
+     },
+     "scenarioAnalysis": {
+       "Search for projects": {
+         "targetPage": "/main/search",
+         "actionFlows": "main page only — no modals/drawers triggered",
+         "flows": 1, "pages": 1
+       },
+       "Save current search": {
+         "targetPage": "/main/search",
+         "actionFlows": "triggers SaveSearchModal (line 42)",
+         "flows": 1, "pages": 2
+       },
+       "Delete saved search": {
+         "targetPage": "/main/search",
+         "actionFlows": "triggers ConfirmDialog (line 78)",
+         "flows": 1, "pages": 2
+       }
+     }
+   }
+   ```
+
+   This cache is held in memory (not written to disk) and used by
+   Step 3e to produce per-scenario evidence blocks without re-running
+   greps.
+
+5. **Show the compiled summary to the user** (before processing):
+
+   ```
+   ┌─── GREP EVIDENCE CACHE: Outcome "{outcomeName}" ───┐
+   │                                                      │
+   │ Target pages: 1 (/main/search)                       │
+   │ Entry points: 2 (Sidebar, Dashboard)                 │
+   │ Branching patterns: 3 (modal, dialog, drawer)        │
+   │                                                      │
+   │ Per-scenario flow/page breakdown:                    │
+   │   1. Search for projects     → 1 flow, 1 page       │
+   │   2. Save current search     → 1 flow, 2 pages (+modal) │
+   │   3. Delete saved search     → 1 flow, 2 pages (+dialog) │
+   │   4. Apply saved search      → 1 flow, 1 page       │
+   │   5. Sort search results     → 1 flow, 1 page       │
+   │   6. Filter search results   → 1 flow, 2 pages (+drawer) │
+   │   7. Paginate results        → 1 flow, 1 page       │
+   │   8. Export search results   → 1 flow, 2 pages (+modal) │
+   │                                                      │
+   │ Total unique flows: 1                                │
+   │ Total unique pages: 5 (main + 3 modals + 1 drawer)  │
+   └──────────────────────────────────────────────────────┘
+   ```
+
+> **After this step, the per-scenario Step 3 can reference the cache
+> instead of running fresh greps.** Step 3e evidence blocks still
+> required for every scenario, but they pull from the cache — no
+> new grep calls needed.
+
+---
 
 ### 3a. Map scenario to UI entry points
 
@@ -695,44 +808,9 @@ via `/breeze:analyze-functional`), fall back to grep:
 
 ### 3b. Discover flows (distinct paths) from UI code
 
-> **⛔ CRITICAL — GREP IS NON-NEGOTIABLE.**
-> You MUST grep the ENTIRE UI repo for navigation calls to the target
-> route (Type A) AND grep the target page directory for branching
-> patterns (Type B). Both grep passes are mandatory for every scenario.
-> Do NOT skip either pass. Do NOT assume "there's probably just one flow"
-> without running the greps. The grep results are the ONLY valid source
-> for determining flow count.
-
-Detect how many distinct ways a user can complete this journey.
-There are **two types** of flow discovery:
-
-- **Type A: Entry-point flows** — different navigation paths TO the
-  target page (e.g. reaching `/ticket/:id` from project list vs
-  dashboard vs sidebar)
-- **Type B: On-page flows** — conditional rendering ON the target page
-  that creates different component trees (e.g. social login vs email
-  form)
-
-**Flow Discovery Strategy Summary (Type A + Type B)**
-
-Grep the entire codebase for all `navigate()`, `<Link>`, `to=`
-references pointing to each target route to discover all distinct
-navigation paths:
-
-| Target Page                                                           | Entry Points Found                                                                                             | Flows Created                                 |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| Example: Notifications Page (`/main/dashboard`, `/main/notification`) | Sidebar Menu (dashboard route), Top Bar Bell Icon (notification route), External Email Deep Link (`?emailId=`) | 2-3 flows per scenario depending on relevance |
-| Example: Project Detail Page (`/main/project/:id`)                    | From Notification templates (project link), From Dashboard (content-card), From ProjectTracker (card)          | 3 flows per scenario                          |
-| Example: Settings Page (`/main/setting`)                              | From Sidebar Menu                                                                                              | 1 flow                                        |
-| Example: Sub-pages (Preferences, Change Email, Change Password)       | From Settings Page (ItemList links)                                                                            | 1 flow each, multi-page                       |
-
-Then check for on-page branching patterns:
-
-| Pattern Found                                               | Result                                                                                        |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `isTablet ? <TabletLayout> : <DesktopLayout>`               | Responsive layout → separate scenario, not separate flow                                      |
-| `error?.status === 404 / === 401`                           | Error states → separate flows (404 path → NotFound page, 401 path → OutsideSubscription page) |
-| `templateRegistry[modules]` dispatching different templates | Template switching → separate scenarios, not separate flows                                   |
+Two types: **Type A** (entry-point — different navigation paths TO
+the page) and **Type B** (on-page — conditional rendering creating
+different component trees). Both grep passes are mandatory.
 
 ---
 
@@ -741,24 +819,25 @@ Then check for on-page branching patterns:
 **1. Identify the target route/page for this scenario** from Step 3a
 (e.g. `/ticket/:id`, `/settings/profile`).
 
-**2. Grep the ENTIRE UI repo for all navigation calls to that route:**
+**2. Grep the ENTIRE UI repo for all navigation calls to that route.**
 
-```
-# React Router
-grep -rn "navigate\(.*ticket\|<Link.*ticket\|to=.*ticket\|push\(.*ticket" --include="*.tsx" --include="*.jsx"
+Use the framework detected in Phase 0a to select the correct grep
+patterns. Replace `<route>` with the target route segment (e.g.
+`ticket`, `settings/profile`).
 
-# Next.js
-grep -rn "router\.push\(.*ticket\|<Link.*href=.*ticket" --include="*.tsx"
+| Framework | File globs | Navigation patterns to grep |
+|---|---|---|
+| **React Router** | `*.tsx`, `*.jsx` | `navigate(.*<route>`, `<Link.*<route>`, `to=.*<route>`, `push(.*<route>` |
+| **Next.js** | `*.tsx`, `*.jsx` | `router.push(.*<route>`, `router.replace(.*<route>`, `<Link.*href=.*<route>`, `useRouter` |
+| **Vue 2/3** | `*.vue`, `*.ts`, `*.js` | `router.push(.*<route>`, `$router.push(.*<route>`, `<router-link.*<route>`, `<NuxtLink.*<route>` |
+| **Nuxt** | `*.vue`, `*.ts` | `navigateTo(.*<route>`, `<NuxtLink.*<route>`, `useRouter` |
+| **Angular** | `*.ts`, `*.html` | `routerLink=.*<route>`, `router.navigate(.*<route>`, `router.navigateByUrl(.*<route>` |
+| **SvelteKit** | `*.svelte`, `*.ts` | `goto(.*<route>`, `<a.*href=.*<route>`, `pushState` |
+| **Always include** | (same as framework) | `href=.*<route>`, `window.location.*<route>`, `target="_blank"` |
 
-# Vue Router
-grep -rn "router\.push\(.*ticket\|\$router\.push\(.*ticket\|<router-link.*ticket" --include="*.vue" --include="*.ts"
-
-# Angular
-grep -rn "routerLink=.*ticket\|router\.navigate\(.*ticket" --include="*.ts" --include="*.html"
-
-# Generic
-grep -rn "href=.*ticket\|window\.location.*ticket" --include="*.tsx" --include="*.ts"
-```
+Run **both** the framework-specific patterns AND the generic
+patterns — some codebases mix approaches (e.g. `<a href>` alongside
+`<Link>`).
 
 **3. For each hit, identify the source page/component:**
 
@@ -788,24 +867,24 @@ grep -rn "href=.*ticket\|window\.location.*ticket" --include="*.tsx" --include="
 
 #### Type B: Discover on-page flows (conditional paths on the target page)
 
-**1. Grep the target page directory for branching patterns:**
+**1. Grep the target page directory for branching patterns.**
 
-```
-# Conditional rendering / branching
-grep -rn "? <\|: <\|&&\s*<" --include="*.tsx" --include="*.jsx"
+Use the file globs from the framework table above (e.g. `*.vue` for
+Vue, `*.svelte` for SvelteKit, `*.tsx`/`*.jsx` for React/Next).
 
-# Tab/stepper variants
-grep -rn "<Tab\|<Tabs\|<Stepper\|<Step\|activeStep\|activeTab\|TabPanel" --include="*.tsx"
+| Category | Patterns to grep |
+|---|---|
+| **Conditional rendering** | `? <`, `: <`, `&& <` (JSX/TSX), `v-if`, `v-else` (Vue), `*ngIf`, `@if` (Angular), `{#if`, `{:else}` (Svelte) |
+| **Tab/stepper variants** | `<Tab`, `<Tabs`, `<Stepper`, `<Step`, `activeStep`, `activeTab`, `TabPanel`, `mat-tab` (Angular), `v-tabs` (Vuetify) |
+| **Auth method switches** | `authMethod`, `loginType`, `signInWith`, `provider`, `OAuth`, `SSO`, `socialLogin` |
+| **Feature flags / modes** | `isAdvanced`, `viewMode`, `editMode`, `quickMode`, `expressMode`, `isBulk` |
+| **Modal vs page** | `openModal`, `showDrawer`, `useDisclosure`, `isInline`, `isFullPage`, `MatDialog` (Angular), `v-dialog` (Vue) |
 
-# Auth method switches
-grep -rn "authMethod\|loginType\|signInWith\|provider\|OAuth\|SSO\|socialLogin" --include="*.tsx"
-
-# Feature flags / mode toggles
-grep -rn "isAdvanced\|viewMode\|editMode\|quickMode\|expressMode\|isBulk" --include="*.tsx"
-
-# Modal vs page alternatives
-grep -rn "openModal\|showDrawer\|useDisclosure\|isInline\|isFullPage" --include="*.tsx"
-```
+> **Conditional rendering syntax varies by framework.** JSX uses
+> ternary (`? <X/> : <Y/>`) and logical AND (`&& <X/>`). Vue uses
+> `v-if`/`v-else`/`v-show`. Angular uses `*ngIf`/`@if`/`@else`.
+> Svelte uses `{#if}`/`{:else}`. Always grep for the syntax matching
+> the detected framework.
 
 **2. Read each hit and classify:**
 
@@ -852,12 +931,11 @@ grep -rn "openModal\|showDrawer\|useDisclosure\|isInline\|isFullPage" --include=
 ### 3b-post. Page Discovery Strategy
 
 > **⛔ CRITICAL — MULTI-PAGE DETECTION IS MANDATORY.**
-> You MUST grep each page file for outbound navigation calls
-> (`navigate()`, `<Link>`, `to=`, `router.push`, `target="_blank"`)
-> to discover if the flow spans multiple pages. A flow with only 1 page
-> is valid — but only AFTER you have grepped and confirmed there are no
-> outbound navigation links that lead to a next step in the flow.
-> Do NOT assume single-page flows without evidence.
+> You MUST grep each page file for outbound navigation calls using the
+> framework-specific patterns from the Type A table above. A flow with
+> only 1 page is valid — but only AFTER you have grepped and confirmed
+> there are no outbound navigation links that lead to a next step in
+> the flow. Do NOT assume single-page flows without evidence.
 
 Multi-page flows are identified by following navigation links in code:
 
@@ -895,11 +973,20 @@ all discovered flows):
 
 ### 3e. Flow Discovery Evidence Gate (⛔ BLOCKING GATE)
 
-> **⛔ HARD STOP: You MUST NOT proceed to Step 4 until you have
+> **⛔ GATE 2 — See [references/blocking-gates.md](references/blocking-gates.md#gate-2-flow-discovery-evidence-block)**
+>
+> **HARD STOP: You MUST NOT proceed to Step 4 until you have
 > produced a Flow Discovery Evidence Block for this scenario.**
-> This gate exists because Claude consistently skips grep-based flow
+> This gate exists because AI agents consistently skip grep-based flow
 > discovery after ~10 scenarios, defaulting to "1 flow, 1 page" without
 > evidence. The evidence block makes skipping observable.
+
+**If Step 3-upfront was run** (outcome mode, or batch pre-processing),
+pull this scenario's data from the **Grep Evidence Cache**. No new
+grep calls needed — the cache has all Type A/B/page-nav results.
+
+**If Step 3-upfront was NOT run** (single scenario, search mode),
+you must run the greps now per Step 3b.
 
 **Before proceeding, write the following evidence block** (in your
 response, not to a file):
@@ -909,31 +996,32 @@ response, not to a file):
 │                                                   │
 │ TARGET ROUTE: /path/to/page                       │
 │ TARGET FILES: src/pages/PageName/index.tsx         │
+│ SOURCE: Grep Evidence Cache / fresh greps         │
 │                                                   │
-│ TYPE A GREPS (entry-point flows):                 │
-│   grep command: <exact command run>               │
+│ TYPE A (entry-point flows):                       │
 │   hits: <N> results                               │
 │   entry points found:                             │
 │     1. <sourcePage> → <targetRoute> (via <Link>)  │
 │     2. <sourcePage> → <targetRoute> (via navigate) │
 │   classification: <N> distinct flows              │
 │                                                   │
-│ TYPE B GREPS (on-page branching):                 │
-│   grep command: <exact command run>               │
+│ TYPE B (on-page branching):                       │
 │   hits: <N> results                               │
 │   branching patterns found:                       │
 │     1. <pattern> → <separate flow? yes/no + why>  │
 │   classification: <N> additional flows            │
 │                                                   │
-│ PAGE NAV GREPS (multi-page detection):            │
-│   grep command: <exact command run>               │
-│   hits: <N> results                               │
-│   outbound links found:                           │
-│     1. <targetPage> (via navigate/Link)           │
+│ THIS SCENARIO'S ACTION ANALYSIS:                  │
+│   Action: "<actionName>"                          │
+│   → Triggers: <component> (found at line <N>)     │
+│   → RESULT: <modal page / drawer / same page>     │
+│                                                   │
+│ PAGE NAV (multi-page detection):                  │
+│   outbound links: <N>                             │
 │   classification: <N> pages per flow              │
 │                                                   │
 │ FINAL: <N> flows, <N> pages                       │
-│ EVIDENCE: grep-confirmed / citation-confirmed     │
+│ EVIDENCE: cache-confirmed / grep-confirmed        │
 └───────────────────────────────────────────────────┘
 ```
 
@@ -941,21 +1029,21 @@ response, not to a file):
 
 1. **Every field must be filled** — no placeholders, no "N/A",
    no "skipped". If a grep returns 0 hits, write `hits: 0 results`
-   and explain why (e.g. "route is defined but never linked from
-   other pages → single entry point confirmed")
-2. **Grep commands must be real** — you must have actually run
-   the Grep tool or Bash grep. Fabricating grep results is worse
-   than skipping the gate entirely
-3. **If using citations** (Option 1 from Step 3a), replace grep
-   commands with the citation file paths you read, but still fill
-   in the evidence for Type A/B/page-nav patterns found in those files
-4. **If flow count = 1 AND page count = 1**, the evidence block MUST
+   and explain why
+2. **The "THIS SCENARIO'S ACTION ANALYSIS" section is MANDATORY** —
+   this is the part that differs per scenario even when sharing a page.
+   You must map each action to the specific UI element it triggers
+   (modal, drawer, conditional section, or main page interaction)
+3. **If flow count = 1 AND page count = 1**, the evidence block MUST
    include an explicit line:
-   `SINGLE-FLOW JUSTIFICATION: <why no other entry points or branching>`
+   `SINGLE-FLOW JUSTIFICATION: <why this action doesn't trigger
+   any modal/drawer/conditional UI>`
+4. **If using the Grep Evidence Cache**, write `SOURCE: Grep Evidence
+   Cache (from Step 3-upfront)` — this is valid and expected
 
 **⛔ Gate check:** If this evidence block is not present in your
 response for the current scenario, you have skipped flow discovery.
-STOP and go back to Step 3b.
+STOP and go back to Step 3b (or Step 3-upfront if it wasn't run).
 
 ---
 
@@ -1006,290 +1094,83 @@ components.
 
 ## Step 5: Build Component Hierarchy from UI Code
 
-### 5a. Classify components by atomic design level
+> **⛔ MANDATORY READ: [references/atomic-design-rules.md](references/atomic-design-rules.md)**
+>
+> Before classifying any component, read the atomic design rules document. It contains:
+> - Complete classification rules for ATOM/MOLECULE/ORGANISM/TEMPLATE
+> - Code pattern recognition (state hooks, composition depth, etc.)
+> - Decision tree for edge cases
+> - Real-world examples from codebases
+> - Common misclassifications and fixes
+> - Component naming conventions (use exact repo names)
+> - `supportingComponents` composition rules
+> - Scope assignment logic
+>
+> **Use the decision tree and examples** — do not rely on intuition or component name alone.
 
-Classification uses **actual code patterns**, not guesswork:
+For each component found in Step 4:
 
-| UI Code Pattern                           | Classification | Example                                                               |
-| ----------------------------------------- | -------------- | --------------------------------------------------------------------- |
-| Page-level container with own hooks/state | ORGANISM       | Sidebar, Contents, TopDetails, TabDetails                             |
-| Composed atoms with minimal state         | MOLECULE       | NotificationCard, SidebarContactCard, AccordionTable, DateFilter      |
-| Single UI element / thin wrapper          | ATOM           | TNLMIcon, Typography, Button, TextField, Skeleton                     |
-| Layout-only wrapper                       | TEMPLATE       | SplitPaneLayout, DetailPageLayout, SettingsPageLayout, FormPageLayout |
-
-**ATOM indicators:** Single HTML element/thin wrapper, no internal
-state, props-only interface.
-
-**MOLECULE indicators:** 2-4 atoms composed together, minimal internal
-state.
-
-**ORGANISM indicators:** Self-contained section with own state
-management (hooks), contains multiple molecules/atoms.
-
-**TEMPLATE indicators:** Layout-only, no business logic, just slots
-for children.
-
-Component names MUST use exact repo names (e.g. `SidebarContactCard`
-not `ContactSummaryCard`).
-
-### 5b. Build `supportingComponents` from JSX nesting
-
-Map actual JSX children to `supportingComponents` arrays:
-
-| Component Type | `supportingComponents` contains |
-| -------------- | ------------------------------- |
-| TEMPLATE       | ORGANISM names only             |
-| ORGANISM       | MOLECULE and/or ATOM names      |
-| MOLECULE       | ATOM names only                 |
-| ATOM           | `[]` (empty)                    |
-
-### 5c. Component naming (USE REPO NAMES)
-
-> **CRITICAL: Use the actual component names from the codebase.**
-> This is the key advantage of this skill over `generate-design` —
-> design nodes should match the real code, not invented generic names.
-
-**Naming priority:**
-
-1. **Use the exact exported component name from the repo** — if the
-   code has `export const SearchFilterPanel`, the design node name is
-   `SearchFilterPanel`
-2. **Use the file name** if the component is a default export with no
-   explicit name — e.g. `search-filter-panel.tsx` → `SearchFilterPanel`
-3. **Use PascalCase** — convert kebab-case or snake_case file names to
-   PascalCase for the design node name
-
-**Examples — repo name → design node name:**
-
-| Code / File                                      | Design Node Name    | Type     |
-| ------------------------------------------------ | ------------------- | -------- |
-| `export const DataTable`                         | `DataTable`         | ORGANISM |
-| `export const SearchFilterPanel`                 | `SearchFilterPanel` | ORGANISM |
-| `export const TextInputField`                    | `TextInputField`    | MOLECULE |
-| `export const IconButton`                        | `IconButton`        | ATOM     |
-| `<Button>` from `ui/button.tsx`                  | `Button`            | ATOM     |
-| `<DateRangePicker>` from `date-range-picker.tsx` | `DateRangePicker`   | MOLECULE |
-| `default export` in `project-card.tsx`           | `ProjectCard`       | MOLECULE |
-| Layout in `page-layout.tsx`                      | `PageLayout`        | TEMPLATE |
-
-**When the repo doesn't have a named component:**
-
-- HTML elements used directly (`<input>`, `<button>`, `<div>`) →
-  use the design system name if from a library (e.g. MUI `TextField`
-  → `TextField`), or standard name (`TextInput`, `Button`) if raw HTML
-- Third-party library components → use the library's component name
-  (e.g. `AgGridReact`, `ReactSelect`, `ChakraModal`)
-
-**Reuse matching:**
-When checking `existingcomponents.json` for reuse, match by the
-**repo component name** first. Two scenarios using the same
-`<SearchFilterPanel>` component should map to the same design node.
-
-### 5d. Component reuse resolution
-
-> **Always read `existingcomponents.json` before creating any component.**
-
-Walk this priority order, stop at first match:
-
-1. **Exact name match** in `existingcomponents.json` → REUSE
-   (same repo component = same design node)
-2. **Exact `designSystemRef` match** → REUSE
-3. **Semantic + type match in same domain** → REUSE
-4. **Template/layout match** → REUSE
-5. **Create new** → narrowest correct scope (GLOBAL > DOMAIN > PAGE)
-
-**Scope rules:**
-
-- ORGANISMs: page-specific → always CREATE NEW, reuse children
-- TEMPLATEs: named by layout pattern (`FormPageLayout`), never by
-  page name — this is the one exception where we use a generic name
-  since templates are layout patterns, not code components
+1. **Classify** by atomic level using code patterns from atomic-design-rules.md
+   (hooks → ORGANISM, composed atoms → MOLECULE, single element → ATOM, layout-only → TEMPLATE)
+2. **Name** using the exact exported/file name from the repo (PascalCase)
+3. **Build `supportingComponents`** from JSX nesting per composition rules
+4. **Check reuse** against `existingcomponents.json` — read it before
+   creating any component. Backend dedup by name handles linking
 
 ---
 
 ## Step 6: Build and Upsert Design Payload
 
-### Functional Graph Linkage Reference
-
-Every design node MUST be linked back to functional graph IDs:
-
-| Design Node | Linked To                                                         |
-| ----------- | ----------------------------------------------------------------- |
-| UserJourney | `scenarioId` (1:1 with functional scenario)                       |
-| Flow        | `stepIds[]` (steps that belong to this path)                      |
-| Page        | `stepIds[]` + `actionIds[]` (steps/actions rendered on this page) |
-| Component   | `actionIds[]` (actions this component implements)                 |
-
 ### 6a. Assemble the design hierarchy (REUSE FIRST at every level)
 
-Use the flows discovered in Step 3b and the step/action UUIDs from
-Step 2c to build the design tree. At every level, **check for existing
-nodes before creating new ones**.
-
----
-
-**1. Scenario → UserJourney (1:1, always new)**
-
-- `scenarioId` = scenario UUID (always required)
-- UserJourneys are always unique per scenario — no reuse here
-
----
-
-**2. Discovered paths → Flows (LINK before CREATE)**
-
-For each flow discovered from UI code (Step 3b):
-
-1. Check the **Flow Registry** (Step 1d) for a match by `(name, modality)`
-2. **If match found → REUSE:**
-   - Call `Update_Design_Node` to append current step UUIDs to the
-     existing flow's `stepIds[]`
-   - **Omit this flow from the bulk payload** — it already exists with
-     all its pages and components
-   - Show as "REUSE EXISTING" in the preview
-   - The reused flow still appears under the UserJourney (backend links it)
-3. **If no match → CREATE:**
-   - Include as new flow in the bulk payload
-   - `Flow.stepIds` = stepIds that belong to this path
-   - After upsert, add to Flow Registry for future scenarios
-
-**Example — two scenarios sharing the same flow:**
-
-```
-Scenario 1: "Generate User Stories"
-  → Type A discovery finds: navigate("/ticket/:id") in projects.tsx
-  → Creates flow: "Projects List to Ticket"
-     Pages: Projects List → Ticket
-  → Flow Registry: { "Projects List to Ticket|WEB": { id: "flow-123", ... } }
-
-Scenario 2: "Edit Ticket Details"     (processed later)
-  → Type A discovery also finds: navigate("/ticket/:id") in projects.tsx
-  → Check Flow Registry for ("Projects List to Ticket", "WEB")
-  → MATCH FOUND → REUSE:
-     Call Update_Design_Node(nodeId: "flow-123", data: { stepIds: [...existing, ...new] })
-     Omit flow from bulk payload — pages and components already exist
-     Only create the UserJourney + link to existing flow
-```
-
-The flow, its pages, and all components are created once. Every
-subsequent scenario that uses the same navigation path just links
-its stepIds to the existing flow.
-
----
-
-**3. Pages within each flow (LINK before CREATE)**
-
-For each page in a new flow (skip if flow was reused — pages already exist):
-
-1. Check the **Page Registry** (Step 1d) for a match by
-   `(name, pageType, modality)`
-2. **If match found → REUSE:**
-   - Call `Update_Design_Node` to append current step/action UUIDs to
-     the existing page's `stepIds[]` / `actionIds[]`
-   - **Omit this page from the bulk payload** — it and its components
-     already exist
-   - Show as "REUSE EXISTING" in the preview
-3. **If no match → CREATE:**
-   - Include as new page in the bulk payload
-   - `Page.stepIds` = stepIds for steps rendered on this page
-   - `Page.actionIds` = actionIds for page-level actions
-   - After upsert, add to Page Registry for future scenarios
-
-**Example:** Three different scenarios all end at the "Dashboard Web
-Page". Only the first creates it; scenarios 2 and 3 just link their
-stepIds to the existing page.
-
----
-
-**4. Components on each page (REUSE via existingcomponents.json)**
-
-For each component on a new page (skip if page was reused):
-
-1. Check `existingcomponents.json` using the priority order from
-   Step 5c (designSystemRef → semantic match → global match → create)
-2. **If match found → REUSE:**
-   - Include in payload with `designSystemRef` — backend appends
-     `actionIds` automatically via upsert
-3. **If no match → CREATE:**
-   - Include as new component in payload
-   - After upsert, add to `existingcomponents.json`
-
-**Reusability by component type:**
-
-| Type     | Reuse behavior                                                     |
-| -------- | ------------------------------------------------------------------ |
-| ATOM     | Always reuse globally (`TextInput`, `Button`, `Label`)             |
-| MOLECULE | Reuse globally or by domain (`TextInputField`, `SearchBar`)        |
-| ORGANISM | Always create new (page-specific), but reuse child molecules/atoms |
-| TEMPLATE | Reuse globally by layout pattern (`FormPageLayout`)                |
-
----
-
-**Linking completeness rule:**
-Every stepId and actionId from the fetched functional data MUST appear
-in at least one design node — whether newly created or linked to an
-existing node via `Update_Design_Node`.
-
-### 6b. Determine page types from UI code
-
-Derive `pageType` from actual UI analysis:
-
-| UI Pattern                    | `pageType`  |
-| ----------------------------- | ----------- |
-| Form with inputs + submit     | `form`      |
-| Table/list with rows          | `list`      |
-| Detail view with data display | `detail`    |
-| Dashboard with widgets/cards  | `dashboard` |
-| Modal/dialog overlay          | `modal`     |
-| Search with filters + results | `search`    |
-| Settings with sections        | `settings`  |
-| Multi-step wizard/stepper     | `wizard`    |
-| Report/chart view             | `report`    |
-
-### 6c. Assign TEMPLATEs
-
-Every Page MUST have a TEMPLATE. Map `pageType` to layout pattern:
-
-| `pageType`              | TEMPLATE Name        |
-| ----------------------- | -------------------- |
-| form / create / edit    | `FormPageLayout`     |
-| list / table / search   | `ListPageLayout`     |
-| detail / view / profile | `DetailPageLayout`   |
-| dashboard / overview    | `DashboardLayout`    |
-| wizard / multi-step     | `WizardLayout`       |
-| master-detail / split   | `SplitPaneLayout`    |
-| login / signup / reset  | `AuthPageLayout`     |
-| modal                   | `ModalLayout`        |
-| settings                | `SettingsPageLayout` |
-
-Check `existingcomponents.json` → TEMPLATE section. If matching
-TEMPLATE exists → REUSE. Otherwise → CREATE with scope `GLOBAL`.
-
-### 6d. Update `existingcomponents.json` (BLOCKING GATE)
-
-> **⛔ HARD STOP: You MUST NOT call `Bulk_Update_Design_Nodes` until
-> `existingcomponents.json` has been updated for this scenario.**
+> **Read [reusability.md](references/reusability.md) for backend dedup
+> mechanism and reuse rules per level.** Key principle: include nodes
+> by name in the payload — the backend deduplicates by
+> `projectUuid + name` and handles all linking automatically.
 >
-> **⛔ THIS IS THE MOST COMMONLY SKIPPED STEP.** After processing 3-5
-> scenarios, Claude often forgets to update this file. If you are
-> reading this during scenario processing, STOP and check: did you
-> update `existingcomponents.json` for the PREVIOUS scenario? If not,
-> you have a bug — the previous scenario's components are missing from
-> the registry and subsequent scenarios cannot deduplicate against them.
+> **Read [design-ontology.md](references/design-ontology.md) for
+> entity fields and functional graph linkage.**
+
+Build the tree using flows from Step 3b and IDs from Step 2c:
+
+**1. Scenario → UserJourney** — 1:1, always new. `scenarioId` required.
+
+**2. Flows** — check Flow Registry by `(name, modality)`.
+Match → include by name with `pages: []`. No match → create with
+full pages. After upsert, add to registry.
+
+> **⛔ ALWAYS include reused flows in the payload.** A UserJourney
+> with `flows: []` is orphaned — the backend only creates edges from
+> the nested payload.
+
+**3. Pages** — check Page Registry by `(name, pageType)`.
+Match → include by name with `components: []`. No match → create.
+
+**4. Components** — check `existingcomponents.json` using
+[reuse resolution rules](references/component-rules.md). Include
+by name — backend dedup handles linking.
+
+**Linking completeness:** Every stepId and actionId from the fetched
+functional data MUST appear in at least one design node.
+
+### 6b. Determine page types and assign TEMPLATEs
+
+Derive `pageType` from UI code (`FORM`, `LIST`, `DETAIL`, `DASHBOARD`).
+Every Page MUST have a TEMPLATE — see
+[design-ontology.md § Template Rules](references/design-ontology.md)
+for the pageType→TEMPLATE mapping. Check `existingcomponents.json`
+TEMPLATE section for reuse before creating.
+
+### 6d. Update `existingcomponents.json` (⛔ BLOCKING — before bulk upsert)
+
+> **⛔ GATE 3 — See [references/blocking-gates.md](references/blocking-gates.md#gate-3-component-registry-pre-upsert-update)**
 >
-> **Symptoms of skipping this step:**
-> - Duplicate components appearing in the design graph
-> - Components that should be REUSED being created as new
-> - `existingcomponents.json` stuck at an early state with few entries
->
-> **Self-check prompt (run mentally before EVERY scenario):**
-> "Have I updated existingcomponents.json since the last
-> Bulk_Update_Design_Nodes call? If no → do it NOW before proceeding."
+> **MUST complete before `Bulk_Update_Design_Nodes`.** Skipping
+> causes duplicate components — the #1 drift bug after ~5 scenarios.
 
 1. Read `existingcomponents.json`
-2. For each new component in the payload, add it under the appropriate
-   type key (`ATOM`, `MOLECULE`, `ORGANISM`, `TEMPLATE`)
-3. Write the file back
-4. Verify the file was written successfully before proceeding
+2. Add each new component under its type key (`ATOM`/`MOLECULE`/`ORGANISM`/`TEMPLATE`)
+3. Write the file back and verify success
 
 ### 6e. Build the bulk payload
 
@@ -1321,7 +1202,6 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
               "requiresAuth": false,
               "allowedRoles": [],
               "stepIds": ["step-uuid-1"],
-              "actionIds": ["action-uuid-1", "action-uuid-2"],
               "components": [
                 {
                   "name": "FormPageLayout",
@@ -1363,7 +1243,6 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
               "description": "Confirm email address",
               "pageType": "detail",
               "stepIds": ["step-uuid-2"],
-              "actionIds": ["action-uuid-3"],
               "components": [
                 {
                   "name": "ConfirmationMessage",
@@ -1390,7 +1269,6 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
               "pageType": "form",
               "requiresAuth": false,
               "stepIds": ["step-uuid-1", "step-uuid-3"],
-              "actionIds": ["action-uuid-4", "action-uuid-5"],
               "components": [
                 {
                   "name": "SocialAuthPanel",
@@ -1427,37 +1305,26 @@ Assemble the nested tree: UserJourney → Flows → Pages → Components
 - **Nesting = hierarchy** — backend wires parent-child relationships
 - **`scenarioId`** links UserJourney to functional scenario
 - **`stepIds`** links Flows/Pages to functional steps
-- **`actionIds`** links Components/Pages to functional actions
+- **`actionIds`** links Components to functional actions
 - **Multi-modality** — separate Flow entries per modality under same
   UserJourney
 - **NO `children` field** — composition via `supportingComponents` only
 
 ### 6f. Flow Count Validation Gate (⛔ BLOCKING)
 
-> **⛔ This check runs in BOTH `confirm` and `auto` mode.**
-> Before showing the preview or logging progress, validate flow/page
-> counts against grep evidence.
+> **⛔ GATE 4 — See [references/blocking-gates.md](references/blocking-gates.md#gate-4-flow-count-validation)**
 
-**Validation rules:**
+Validate before preview/progress log (all modes):
 
-| Condition | Action |
-| --------- | ------ |
-| flows = 1, pages = 1 | ⛔ REQUIRES `SINGLE-FLOW JUSTIFICATION` in the Step 3e evidence block. If justification is missing → STOP, go back to Step 3b, run the greps |
-| flows = 1, pages > 1 | OK — single flow can span multiple pages |
-| flows > 1 | OK — multiple flows discovered from grep evidence |
-| flows = 0 | ⛔ ERROR — every scenario must have at least 1 flow |
-
-**In `auto` mode:** If validation fails (flow=1, page=1, no
-justification), log a warning and **re-run Step 3b greps** for this
-scenario rather than skipping. The goal is accuracy, not speed.
-
-**Self-check question:** "Am I reporting 1 flow / 1 page because
-I actually grepped and found no branching, or because I skipped
-the greps? If I skipped → go back NOW."
+- **1 flow, 1 page** → requires `SINGLE-FLOW JUSTIFICATION` in
+  Step 3e evidence. Missing → re-run greps
+- **1 flow, >1 pages** → OK
+- **>1 flows** → OK
+- **0 flows** → ERROR — every scenario needs ≥ 1 flow
 
 ### 6f-post. User confirmation (confirm mode only)
 
-> **Skip in `auto` mode.** Print a progress line instead:
+> **Skip in `auto` and `outcome` mode.** Print a progress line instead:
 > `"[{current}/{total}] Processing: {scenarioName} → {flowCount} Flows, {pageCount} Pages, {componentCount} Components"`
 
 Show preview covering: UserJourney, Flows, Pages, Components
@@ -1470,7 +1337,9 @@ design nodes?"**
 | **No**     | Skip this scenario, move to next         |
 | **Modify** | Let user specify changes before creating |
 
-### 6g. Make the bulk upsert call
+### 6g. Make the bulk upsert call (live modes)
+
+> **Skip this step in `dry-run` mode** — use Step 6g-dry instead.
 
 ```
 Bulk_Update_Design_Nodes(
@@ -1481,85 +1350,93 @@ Bulk_Update_Design_Nodes(
 
 **One call per scenario.** Never batch multiple scenarios.
 
+### 6g-dry. Append to `apicalls.json` (dry-run mode only)
+
+> **Replaces 6g, 6i in `dry-run` mode.** No MCP mutations are made.
+
+Instead of calling MCP, append the call to `apicalls.json` in the
+plugin working directory. Each entry is one API call that would have
+been made:
+
+**File structure — JSON array, one entry per call, in execution order:**
+
+```json
+[
+  {
+    "order": 1,
+    "scenarioName": "Register New Account",
+    "scenarioId": "scenario-uuid",
+    "tool": "Bulk_Update_Design_Nodes",
+    "params": {
+      "uuid": "<projectUuid>",
+      "data": { "userJourneys": [{ ... full payload from 6e ... }] }
+    }
+  },
+  {
+    "order": 2,
+    "scenarioName": "Register New Account",
+    "scenarioId": "scenario-uuid",
+    "tool": "Update_Functional_Node",
+    "params": {
+      "uuid": "<projectUuid>",
+      "label": "Scenario",
+      "id": "<scenario-uuid>",
+      "data": { "isDesignGenerated": true },
+      "citationId": [0],
+      "citations": [{ "type": "document", "name": "skip", "inputText": "skip" }]
+    }
+  }
+]
+```
+
+**Write protocol:**
+
+1. Read `apicalls.json` from disk (or create `[]` if first scenario)
+2. Append the `Bulk_Update_Design_Nodes` entry
+3. Append the `Update_Functional_Node` entry
+4. Write `apicalls.json` to disk
+5. Log: `"[dry-run] Queued 2 calls for '{scenarioName}' (total: {N} calls in apicalls.json)"`
+
+> **⛔ Read-append-write, not overwrite.** Like `existingcomponents.json`,
+> each scenario appends to the existing array. Never overwrite the file.
+
+**What dry-run mode does NOT do:**
+- Does NOT call `Bulk_Update_Design_Nodes`
+- Does NOT call `Update_Functional_Node`
+- Does NOT mark scenarios as processed (`isDesignGenerated` stays `false`)
+- Does NOT update flow/page registries with real IDs (no upsert response
+  to read from) — registries are updated with **names only** (no `id`
+  field), which is sufficient for local dedup
+
 ### 6h. Post-upsert: update Flow & Page registries (⛔ PERSIST TO DISK)
 
-After `Bulk_Update_Design_Nodes` succeeds, update the **Flow and Page
-registries** with real IDs so subsequent scenarios can LINK to them
-via `Update_Design_Node(nodeId)`.
-
-> **⛔ CRITICAL: Write registries to disk after EVERY scenario.**
-> These files (`existingflows.json`, `existingpages.json`) are the
-> cross-session persistence mechanism. If you only update in-memory
-> and the session ends (or gets batched by the orchestration script),
-> the next session loses all flow/page reuse data.
-
-**Flow Registry → `existingflows.json`:**
-
-1. Read `existingflows.json` from disk
-2. For each new flow in the payload, fetch its real ID from the
-   `Bulk_Update_Design_Nodes` response (or query
-   `Design_Graph_Search` for the flow name)
-3. Add/update entry keyed by `"{name}|{modality}"`:
-   `{ id: <real UUID>, stepIds: [...], modality: "WEB" }`
-4. **Write `existingflows.json` back to disk**
-5. Verify the write succeeded
-
-**Page Registry → `existingpages.json`:**
-
-1. Read `existingpages.json` from disk
-2. For each new page in the payload, fetch its real ID
-3. Add/update entry keyed by `"{name}|{pageType}|{modality}"`:
-   `{ id: <real UUID>, stepIds: [...], pageType: "..." }`
-4. **Write `existingpages.json` back to disk**
-5. Verify the write succeeded
-
-> **Why Flows/Pages need IDs but Components don't:**
+> **⛔ GATE 5 — See [references/blocking-gates.md](references/blocking-gates.md#gate-5-registry-disk-persistence-post-upsert)**
 >
-> - **Flows/Pages** — when reused across scenarios, we call
->   `Update_Design_Node(nodeId, data: { stepIds: [...] })` to append
->   new stepIds. This requires the node's real UUID.
-> - **Components** — reuse is handled by including the same
->   `designSystemRef` in the bulk payload. The backend deduplicates
->   automatically via upsert. No `Update_Design_Node` call needed,
->   so no ID needed in `existingcomponents.json`.
-
-### 6h-post. Sync `existingcomponents.json` from MCP (⛔ BLOCKING GATE)
-
-> **⛔ HARD STOP: You MUST NOT proceed to the next scenario until
-> `existingcomponents.json` has been synced with real MCP data.**
+> **Write registries to disk after EVERY scenario.** These are the
+> cross-session persistence mechanism.
 >
-> **⛔ THIS STEP IS PAIRED WITH 6d. BOTH ARE MANDATORY. EVERY TIME.**
-> If you skipped 6d, you MUST go back and do it before this step.
-> If you are about to skip this step "to save time" — DON'T.
-> The entire component reuse system breaks without this sync.
+> **In dry-run mode:** still update registries, but with names only
+> (no `id` field since there's no upsert response). This enables
+> flow/page dedup for subsequent scenarios in the same run.
 
-After `Bulk_Update_Design_Nodes` succeeds and Flow/Page registries
-are updated, sync `existingcomponents.json` with real IDs from MCP:
+For each new flow/page in the payload:
+1. **Live modes:** Fetch real ID from bulk upsert response (or
+   `Design_Graph_Search`)
+2. **Dry-run mode:** Use name only, set `id: "pending"`
+3. Add to registry: Flow → `existingflows.json` keyed by
+   `"{name}|{modality}"`, Page → `existingpages.json` keyed by
+   `"{name}|{pageType}"`
+4. Write to disk and verify
 
-1. Fetch newly created components from MCP via
-   `Get_all_Design_By_Label(uuid, label: "Component", page: "1", limit: "50")`
-   (paginate if needed)
-2. For each component in the response, update the corresponding entry
-   in `existingcomponents.json` with:
-   - Real MCP UUID (`id`)
-   - Confirmed `designSystemRef`
-   - Confirmed `scope`
-   - Confirmed `supportingComponents`
-3. Write the updated file back
-4. **Read the file back and verify** it contains the expected component
-   count before proceeding to the next scenario
+See [reusability.md § Registry Update Timing](references/reusability.md)
+for the full protocol.
 
-**Why blocking?** Pending/placeholder IDs are unreliable for
-cross-scenario deduplication. The next scenario's reuse resolution
-depends on accurate, MCP-sourced data in the registry.
+### 6i. Mark scenario as processed (live modes only)
 
-> **⛔ FINAL GATE BEFORE NEXT SCENARIO:** Before moving to Step 6i,
-> mentally confirm: "existingcomponents.json has been (1) updated in 6d,
-> (2) synced from MCP in 6h-post, and (3) I can see the updated file
-> contains all components from this scenario." If ANY of these are
-> false → STOP and fix before continuing.
-
-### 6i. Mark scenario as processed
+> **⛔ GATE 7 — See [references/blocking-gates.md](references/blocking-gates.md#gate-7-scenario-processed-marker)**
+>
+> **Skip in `dry-run` mode** — the call is already queued in
+> `apicalls.json` (Step 6g-dry).
 
 ```
 Update_Functional_Node(
@@ -1574,19 +1451,20 @@ Update_Functional_Node(
 
 ### 6j. Error handling
 
-| Failure Point          | `confirm` mode                             | `auto` mode                                    |
-| ---------------------- | ------------------------------------------ | ---------------------------------------------- |
-| Entire bulk call fails | Retry once; if still fails, report to user | Retry once; log error, skip scenario, continue |
-| Partial failure        | Log failed nodes, report to user           | Log failed nodes, continue                     |
+| Failure Point          | `confirm` mode                             | `auto` / `outcome` mode                        | `dry-run` mode                      |
+| ---------------------- | ------------------------------------------ | ----------------------------------------------- | ----------------------------------- |
+| Entire bulk call fails | Retry once; if still fails, report to user | Retry once; log error, skip scenario, continue  | N/A — no API calls made             |
+| Partial failure        | Log failed nodes, report to user           | Log failed nodes, continue                      | N/A                                 |
+| File write fails       | Report to user                             | Log error, skip scenario, continue              | Report to user — payload data lost  |
 
-In `auto` mode, collect errors in `failedScenarios` list for the
-final summary.
+In `auto` and `outcome` mode, collect errors in `failedScenarios`
+list for the final summary (or per-outcome summary in `outcome` mode).
 
 ---
 
 ## Step 7: Output Summary
 
-**Processing Summary** (`auto` mode only)
+**Processing Summary**
 
 | Metric           | Count |
 | ---------------- | ----- |
@@ -1594,7 +1472,28 @@ final summary.
 | Processed        | N     |
 | Skipped (errors) | N     |
 
-**Failed Scenarios** (`auto` mode, only if errors)
+**Dry-run Summary** (`dry-run` mode only)
+
+```
+Dry-run complete — no API calls were made.
+
+  Scenarios processed: {N}
+  API calls queued:    {N} (in apicalls.json)
+    Bulk_Update_Design_Nodes: {N}
+    Update_Functional_Node:   {N}
+
+  File: apicalls.json ({size})
+
+  To execute: review apicalls.json, then re-run in `auto` mode
+  to make the actual API calls. Or use an external script to
+  replay the queued calls from the file.
+```
+
+> **In dry-run mode:** scenarios are NOT marked as processed. Re-running
+> in `auto` mode will process the same scenarios and make real API calls.
+> The `apicalls.json` file is preserved for reference/audit.
+
+**Failed Scenarios** (all modes, only if errors)
 
 | Scenario | Error |
 | -------- | ----- |
