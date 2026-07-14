@@ -130,7 +130,7 @@ Both new skills resolve their target repo in this order: explicit path arg → `
 |-------|---------|-------------|
 | **Update Functional Graph** | `/breeze:update-functional-graph` | Create or update functional-graph nodes from code, documents, or Figma designs |
 | **Validate Functional Graph** | `/breeze:validate-functional-graph` | Validate the functional graph against source documents — coverage, duplicates, persona quality, citation traceability |
-| **Generate Code** | `/breeze:generate-code <feature>` | Generate code and test cases informed by the functional graph and code graph |
+| **Generate Code** | `/breeze:generate-code [feature \| ui \| backend \| fullstack] [persona]` | Generate code and tests from the functional + code graphs. **Selective** (single scenario/feature) or **full-app**: pick the persona — a **System** persona generates a **backend**, any non-System (human) persona generates the **user-facing UI**, and a mixed selection generates **fullstack**. Confirms the tech stack first, then for full builds runs orchestration mode — scaffold a shared foundation once and fan out one module-builder sub-agent per feature domain (`breeze:app-ui-module-agent` / `breeze:app-backend-module-agent`) with action-level coverage, then integrate + build + smoke-test + QA. |
 | **Generate Spec** | `/breeze:generate-spec` | Generate functional specification documents from the functional graph |
 
 ### Recommended pipelines

@@ -109,6 +109,14 @@ If the query doesn't fit a single-graph fast-path, pick the layers it implies an
 
 > Running all graphs is fine when the question is genuinely cross-cutting. Don't over-narrow out of caution, but don't fan out for a question that's obviously single-layer.
 
+### 1c. Output structure — per-ontology (always)
+
+There is one output shape: the **per-ontology view** (Phase 4). Every synthesized answer is an exhaustive summary, then one native-hierarchy tree per graph, then cross-ontology checks. There is no separate "woven narrative" mode.
+
+- Search **all five layers by default** — Functional, Design, Code, Architecture, and **Data (DDL)** — unless the query is explicitly scoped to a subset. Cross-ontology comparison is the whole point, so favor breadth. Always include the DDL fetch (`Architecture_Graph_Search` with DDL `include_labels` and/or `Get_DB_Schema_Nodes_By_Label` on the touched DataLake) so the Data layer renders when the schema is onboarded.
+- The output shape does **not** change *which* graphs you search — Phase 1a/1b scoping and Phase 3 drill-down still apply; this only fixes how Phase 4 renders.
+- For an obviously single-layer lookup (e.g. "where is function X"), still use the per-ontology shape — just render the one relevant block; never pad with empty trees.
+
 ---
 
 ## Phase 2 — Execute in Parallel
@@ -155,30 +163,31 @@ For "how does X work" questions, drill all the way to Steps/Actions. For "who do
 
 ### Cross-Persona Drill-Down
 
-When drilling into a functional Outcome, check if the **same Outcome name exists under other Personas** (common for features that span UI and backend). After finding an Outcome under a User persona, also fetch it under the System persona (and vice versa) via `Get_all_outcomes_for_a_persona_id`, then `Get_all_scenarios_for_a_outcome_id` on the matching outcome. Merge both into the narrative.
+When drilling into a functional Outcome, check if the **same Outcome name exists under other Personas** (common for features that span UI and backend). After finding an Outcome under a User persona, also fetch it under the System persona (and vice versa) via `Get_all_outcomes_for_a_persona_id`, then `Get_all_scenarios_for_a_outcome_id` on the matching outcome. Render both under their respective persona blocks in the Functional tree.
 
 ---
 
-## Phase 4 — Synthesize into One Narrative
+## Phase 4 — Synthesize (Per-Ontology Output)
 
-Present a **single coherent answer**, not a per-graph ranked list.
+Present every answer as the **per-ontology view**. Do NOT weave the layers into a single running narrative, and do NOT emit a flat per-graph ranked list — structure the answer in three fixed parts:
 
-### For behavior / "how does X work" questions
-Build a sequential flow:
-1. **Trigger** — what initiates it (UI event, cron, webhook, queue message).
-2. **UI interaction** — from Design / functional User persona.
-3. **Backend processing** — from functional System persona + Code (anchored to repo).
-4. **Deployed path** — which services / queues / data stores / tables carry it (from Architecture + DDL), if architecture was in scope.
-5. **Completion** — side effects, confirmation.
+**1. Answer summary (exhaustive prose).**
+- Write a thorough, self-contained answer — a reader who stops here should grasp the whole picture without reading the trees. Cover, as they apply: what triggers it and **who** can trigger it (personas + any role gates); **every distinct entry path or variant** (e.g. upload vs git vs recorded-session; blueprint vs image); the **request path** (UI → gateway → service) with the key endpoint(s) as `method` + `route`; the **backend processing** and any **external system** it delegates to (n8n webhook, S3, Bedrock); **sync vs async** behavior and how completion / polling / status works; the **data read vs written** and where (source-of-truth vs cache/index); **preconditions / guards**; and the notable **failure / error paths**. Favor depth over brevity — a few tight paragraphs or a dense bulleted brief, not 2–4 sentences. Name concrete entities (scenarios, files, endpoints, nodes) inline.
+- End the summary with a one-line **Coverage:** list naming only the layers that returned findings, e.g. `Coverage: Functional ✓ · Code ✓ · Architecture ✓`. Never list a layer that returned nothing (don't-surface-gaps rule).
 
-### For discovery questions
-Provide a ranked list including:
-- Entity type (Persona / Outcome / Scenario / Step / Action / Component / File / Function / Service / DataLake / DDLTable / DDLColumn / …)
-- Name + one-line description (and parent repo for code entries, parent DataLake for DDL entries)
-- Pointer to drill down further if useful
+**2. Per-ontology hierarchy blocks.** One block per layer that returned findings, each rendered in that graph's **native hierarchy** as a fenced monospace tree. Omit any empty layer silently. Fixed order: Functional → Design → Code → Architecture → Data.
 
-### Always when multiple layers fire
-Weave them: *functional flow → code file/function (with repo) → deployed service/queue/data store → underlying table/view*. Show the connection; don't just list per layer.
+- **🧠 Functional** — `Persona → Outcome → Scenario → Step → Action`. Group by Persona with type glyphs (👤 human · 🤖 System · ☁️ External System). Indent the tree; for "how does X work" drill all the way to Action. **Attach the endpoint contract from the graph itself:** entry-point Actions carry an `Api` child via the `HAS_API` relation (returned by `Get_all_steps_actions_for_a_scenario_id`). Render it as an `Api:` leaf under its Action showing `method` + `url` (+ request DTO / response shape when present). Source the endpoint from this `Api` node — do NOT reach into the code graph for a route the functional graph already carries. Most Actions have no `Api` child (only entry points do); render the leaf only where it exists.
+- **🎨 Design** — `UserJourney → Flow → Page → Component`.
+- **💻 Code** — `Repo → File → Class/Function → key statement`, every leaf tagged `repo: path:line`. Show the real call chain / route decorator / DTO / enum literal, not just symbol names.
+- **🏗️ Architecture** — the deployed path across layers (`UserExperience → ApiGateway → Services → Agents → DataLake`), naming concrete nodes and the read/write direction on stores.
+- **🗄️ Data (DDL)** — `DataLake → Table → (Columns / Constraints / Indexes / Views / Procedures)`. Source columns from the table's `ddlText`; use `Get_DB_Schema_Nodes_By_Label(data_lake_id, label=…)` for a complete column/FK/view set. Omit silently if the schema layer isn't onboarded for the project.
+
+Keep each tree compact but **preserve depth** — never flatten a 5-level functional chain into a single arrow line. Use real node names/IDs for existing nodes.
+
+**3. Cross-ontology checks.** A short bulleted section reconciling the views — this is where the per-ontology mode earns its keep:
+- ✅ **Agreements** — where layers corroborate each other (e.g. functional System scenario ↔ code controller/workflow ↔ route/enum literal).
+- ⚠️ **Divergences** — the highest-value output. Examples: a rule the functional graph asserts that the code does not enforce (e.g. a role gate present only in the UI while the route is `authorizedRole:[]`); a code write to a table that has no matching DDL onboarded; an architecture SPOF on the path. State divergences as concrete findings, but keep graph-completeness/onboarding gaps out of end-user-facing wording per the Don'ts.
 
 ---
 
@@ -191,7 +200,7 @@ For any question shaped like *"what happens when…"*, *"explain the flow of…"
 3. Add **Architecture** if the flow crosses services / queues / data stores (which is usually true). Add DDL labels too if the prompt names specific tables or asks about persistence shape.
 4. In the functional graph, query **twice** — once with user-centric terms (UI actions, clicks, forms) and once with system-centric terms ("System processes…", "backend handles…", "External System…"). This captures both the trigger side and the processing side of the dual-persona model.
 5. Drill the top functional hits all the way to Steps/Actions via the Phase 3 hierarchy chain.
-6. Merge everything into one sequential trace (Phase 4).
+6. Render as the per-ontology view — exhaustive Answer summary + per-graph trees + cross-ontology checks (Phase 4).
 
 A single search returns an incomplete picture for process questions — always fan out.
 
@@ -210,7 +219,7 @@ A single search returns an incomplete picture for process questions — always f
 
 ## Output
 
-- **Behavior questions** → numbered sequential flow (trigger → UI → backend → deployed path → completion).
-- **Discovery questions** → ranked list with entity type, name, description, parent (repo for code, DataLake for DDL), drill-down hints.
+- **Every answer uses the per-ontology view** (Phase 4): an **exhaustive Answer summary** + `Coverage:` line → one native-hierarchy tree per layer (Functional / Design / Code / Architecture / Data-DDL, empty layers omitted) → Cross-ontology checks (✅ agreements, ⚠️ divergences). Preserve each graph's hierarchy depth; never flatten into a single running narrative or a flat ranked list.
+- For a discovery-style query, the per-graph trees carry the ranked entities (entity type, name, parent repo/DataLake) and the summary states what was found; for a single-layer lookup, render just the one relevant block.
 - **Always** name concrete entities (e.g., *Scenario "Run hourly ANZ ETL"*, *file `backend_nodejs_global_tnlm: src/project/.../search-result-project.dsl.ts`*, *Service node "global_tnlm"*, *DDLTable `RESEARCH_PROJECT_VERSION`*) rather than vague references.
 - **Link the layers**: when functional + code + architecture + DDL all fire, show how they connect on this specific flow.

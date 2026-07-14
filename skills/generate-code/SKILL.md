@@ -3,11 +3,21 @@ name: generate-code
 description: >
   Generate code and test cases informed by the functional graph and
   code graph. Ensures implementations align with requirements and
-  existing patterns. Use when: "generate code for X", "write tests
-  for Y", "implement this scenario", "scaffold the API for Z",
-  "generate frontend", "generate backend", "build the UI",
-  "scaffold the full app". Supports both selective (single scenario)
-  and full-project generation.
+  existing patterns. Scoped by persona: a System (or External System)
+  persona generates a backend; any non-System human persona generates
+  the user-facing UI; a mixed selection generates fullstack. Re-engineers
+  by deriving the most viable modern tech stack from the functional
+  requirements (not the legacy stack), and lets the user override. Full
+  builds run an orchestration mode
+  that scaffolds a shared foundation once and fans out one module-builder
+  sub-agent per feature domain with action-level coverage, then integrates
+  + builds + smoke-tests. Use when: "generate code for X", "write tests
+  for Y", "implement this scenario", "scaffold the API for Z", "generate
+  frontend", "generate backend", "build the UI", "scaffold the full app",
+  "build the whole app", "recreate the frontend for persona X end to end",
+  "generate the backend for the System persona", "fan out agents to build
+  each module". Supports both selective (single scenario) and full
+  persona-scoped generation.
 ---
 
 ## Project
@@ -18,25 +28,82 @@ This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE
 
 ## Determine Generation Scope
 
-Parse $ARGUMENTS to determine scope:
+Parse `$ARGUMENTS` for three things: **which persona(s)** to build for, **what to build**, and the
+**tech stack**.
 
-**Selective generation** (single scenario or feature):
-- "generate code for login", "implement VAL-001", "scaffold the upload page"
-- → Go to **Workflow A: Selective Generation**
+### Selective vs full build
+- **Selective** (single scenario or feature) — "generate code for login", "implement VAL-001",
+  "scaffold the upload page" → **Workflow A**. (Persona routing below doesn't apply.)
+- **Full build** — "generate frontend / backend / the whole app", "recreate the frontend for persona
+  X", "build everything" → choose the persona, then route per the rule below.
 
-**Full frontend generation:**
-- "generate frontend", "build the UI", "create React app", "scaffold frontend"
-- → Go to **Workflow B: Full Frontend Generation**
+### Persona scope drives UI vs backend
+Call `Get_all_personas`. Resolve the target persona(s):
+- The prompt names a persona (e.g. *"for AAC-A"*, *"the Admin persona"*, *"the System persona"*) →
+  match it. It names several or *"all personas"* → take those. **None given → list the personas and
+  ask which to generate for** (don't guess).
 
-**Full backend generation:**
-- "generate backend", "build the API", "scaffold backend", "create Express app"
-- → Go to **Workflow C: Full Backend Generation**
+Then route by **persona kind** — this is the default mapping:
 
-**Full-stack:**
-- "generate full app", "build everything", "scaffold full-stack"
-- → Run Workflow B then Workflow C sequentially
+| Persona kind | Target | Workflow |
+|---|---|---|
+| **`System`** | Backend (background jobs, pipelines, internal processing — no UI) | **Workflow C** |
+| **`External System`** | Backend (API-key / integration surface, no user login) | **Workflow C** |
+| **Any non-System (human) persona** | User-facing UI | **Workflow B** |
+| **Mixed** (a human persona *and* `System`, or "full app / everything") | **Fullstack** — run B for the human persona(s) **and** C for `System`, linked on the shared `HAS_API` contracts | **B + C** |
 
-If ambiguous, ask the user which scope they want.
+### Explicit target override
+A `ui` / `backend` / `fullstack` token in the prompt overrides the persona-kind default (e.g. force a
+mock-backed UI for the System persona, or a stub backend for a human persona). If still ambiguous after
+both signals, ask once.
+
+### Tech stack — derive the most viable, let the user override
+This skill **re-engineers** from the functional graph — it does **not** replicate the legacy stack by
+default. Choose the **most viable modern stack from what the app needs functionally**:
+- **Derive from the app's shape** (read it off the outcomes/scenarios): dashboards + data tables +
+  filters + charts + forms + role-gated admin → an SPA; document/content-heavy or SEO-facing → SSR;
+  a `System` persona with background jobs / queues / schedulers → a service with a worker;
+  `External System` (integration-only) → an API surface; data-/ML-heavy domains → Python.
+- **Map that to a sensible default** — UI: React + TypeScript + Vite + Tailwind + React Router
+  (add a charts lib when there are dashboards); Backend: Node + Express + TypeScript, or FastAPI +
+  Postgres for Python-leaning domains, adding a queue/worker when the graph implies async jobs.
+- **User override always wins** — if the prompt names a stack ("in Next.js", "Vue + Pinia",
+  "Spring Boot", "FastAPI + Postgres"), use it verbatim, no questions asked.
+- **Matching an existing codebase is opt-in, not the default** — only when the user is *extending* a
+  live repo (rather than re-engineering) should you detect its stack via `Code_Graph_Search` /
+  `package.json` and match its conventions.
+- **Announce** `Stack: <chosen> — <one-line why it fits the functional needs>` and proceed. The user can
+  redirect at any time; don't block waiting for confirmation, and don't silently inherit the legacy stack.
+
+---
+
+## Orchestration mode — parallel module agents (recommended for full builds)
+
+Workflows B and C can be run inline, but for a whole-app build the robust path is to **fan out one
+sub-agent per feature domain** so the work parallelises and the parent never holds every file in
+context. This plugin ships two module-builder agents for exactly this:
+- `breeze:app-ui-module-agent` — builds one frontend feature module from a set of outcomes.
+- `breeze:app-backend-module-agent` — builds one backend module (routes / services / validation / tests).
+
+The loop (use the B/C step detail below to fill each phase):
+1. **Traverse** the graph to the **action level** for the chosen persona(s) — every Outcome →
+   Scenario → Step → Action. **Coverage is the acceptance gate: an Action with no UI behaviour /
+   endpoint is a missing flow.**
+2. **Plan domains** — group outcomes into ~5–12-outcome feature domains, each with its **own folder**
+   and **non-overlapping route/prefix ownership** (so parallel agents never edit the same file), plus a
+   curated nav (UI). Pair a UI domain with its backend domain on the shared Outcome + `HAS_API` url.
+3. **Scaffold the shared foundation ONCE** (design system + app shell + route registry + data layer +
+   persona gating for UI; framework skeleton + middleware + store + router-registry for backend), then
+   render `references/agent-guide.template.md` → `<APP_DIR>/AGENT_GUIDE.md`.
+4. **Pilot** one module agent to validate MCP access + conventions + that it builds, then **fan out**
+   the rest in parallel — render `references/ui-module-agent.prompt.md` /
+   `references/backend-module-agent.prompt.md` as each agent's `prompt`.
+5. **Integrate & verify** — wire each module's exported routes/router into the registry (parent-only
+   edit), install, build, **smoke-test it runs** (Playwright for UI, endpoint hits for backend), then
+   **QA every outcome/action is covered exactly once** and patch any gap before reporting done.
+
+Use orchestration mode for "build the whole app / recreate the frontend for persona X end to end"; use
+inline Workflows A/B/C for smaller or single-feature work.
 
 ---
 
@@ -221,12 +288,18 @@ Create a **single TypeScript dummy data file** (`src/data/dummy.ts`) that:
 
 ### B7. SCAFFOLD — Generate the project
 
-Ask the user for tech stack preferences, or suggest based on any
-existing code in the repo (check via `Code_Graph_Search`).
+Use the stack resolved in *Determine Generation Scope* — derived from the functional needs (or the
+user's explicit override). Don't re-ask here.
 
-**Default frontend stack:** React + TypeScript + Vite + Tailwind CSS
+**Typical derived frontend stack:** React + TypeScript + Vite + Tailwind CSS (+ a charts lib for
+dashboards) — unless the requirements point elsewhere (e.g. SSR → Next.js) or the user chose otherwise.
 
 #### B7.1. Generation Order and Parallelization Strategy
+
+> **Preferred for full apps: orchestration mode** (see the section above). Build the shared foundation
+> yourself, then fan out **one `breeze:app-ui-module-agent` per feature domain** (one owner per folder,
+> action-level coverage), and integrate. The layer-split below (foundation agents → page-group agents)
+> is the lighter inline alternative for small apps where a full per-domain fan-out is overkill.
 
 Generate in two phases to maximize speed:
 
@@ -448,9 +521,13 @@ Call `Documents` for:
 
 ### C7. SCAFFOLD — Generate the backend
 
-Ask the user for tech stack preferences.
+Use the stack already confirmed in *Determine Generation Scope* (default: Node.js + Express + TypeScript;
+FastAPI for Python repos).
 
-**Default backend stack:** Node.js + Express + TypeScript
+> **Preferred for full backends: orchestration mode.** Scaffold the shared skeleton (bootstrap +
+> middleware + store + router-registry) yourself, then fan out **one `breeze:app-backend-module-agent`
+> per resource/domain** (one owner per folder; endpoints honour the `HAS_API` contracts so they match
+> what the UI calls), and integrate. Generate inline (below) for small services.
 
 Generate files in this order:
 
