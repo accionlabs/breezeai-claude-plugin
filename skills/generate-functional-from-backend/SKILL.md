@@ -15,6 +15,17 @@ description: >
 argument-hint: "[repo-path]"
 ---
 
+> ### ⚠️ Is this the right functional-generation skill?
+> | Repo shape | Use |
+> |---|---|
+> | SPA frontend (React / Vue / Angular / Next) | `/breeze:generate-functional-from-ui` |
+> | **◀ Headless backend API — REST / GraphQL / queue (incl. ASP.NET Core, Node, Java, Python) — THIS SKILL** | `/breeze:generate-functional-from-backend` |
+> | ASP.NET **Web Forms** monolith (`.aspx`/`.ascx` + in-process backend, one repo) | `/breeze:generate-functional-from-aspnet-webforms` (single unified pass) |
+> | ASP.NET **MVC / Razor Pages** full-stack (Razor views + controllers, one repo) | run **BOTH** `-from-ui` (views) **and** this skill (controllers) — they join by the action-route URL *(no unified skill yet)* |
+> | P3 / Vert.x metadata (MAPL / MSCR) | `/breeze:generate-functional-from-metadata` |
+>
+> This skill produces the **System / External System** half. For a headless API (like a .NET Core GraphQL/REST service) that's the whole graph from this repo; the **human** half comes from the consuming frontend's `-from-ui` run, joined by URL/operation. **Web Forms is the exception** — its in-process seam has no URL, so it uses the single unified `-from-aspnet-webforms` skill instead of this + `-from-ui`.
+
 ## Project
 
 This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).

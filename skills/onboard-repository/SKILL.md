@@ -2,19 +2,18 @@
 name: onboard-repository
 description: >
   Get a source repository into the Breeze code graph for the current
-  project. Wraps the `breeze-code-ontology-generator` CLI with
-  `--capture-statements` so method-level statements are available
-  for downstream skills (generate-functional-from-ui,
+  project. Wraps the Python `breezeai-cog` parser (run on demand via
+  `uvx`) with `--capture-statements` so method-level statements are
+  available for downstream skills (generate-functional-from-ui,
   generate-functional-from-backend, generate-code, search). Supports
-  two upload modes: automatic (CLI streams to the backend, needs an
-  API key) or manual (CLI writes ndjson locally and the user uploads
-  via the Breeze UI at /code-ontology/<projectUuid>). API key is
-  optional — collected on-demand only if the user picks automatic
-  mode. Verifies Node.js is exactly v22.x before running (Node 24
-  fails silently due to a tree-sitter native-binding + ESM-TLA
-  incompatibility) and resolves the target
-  repo from a path argument or the current directory. Run once per
-  repo. Re-run to re-index after large changes.
+  two upload modes: automatic (cog streams to the backend, needs an
+  API key) or manual (cog writes a gzipped ndjson file locally and the
+  user uploads it via the Breeze UI at /code-ontology/<projectUuid>).
+  API key is optional — collected on-demand only if the user picks
+  automatic mode. Requires Python 3.10+, uv (provides uvx), and git on
+  PATH (on Windows, run under WSL); resolves the target repo from a
+  path argument or the current directory. Run once per repo. Re-run to
+  re-index after large changes.
   Use when: "onboard repo", "upload repository", "index repo into
   breeze", "add repo to project", "ingest codebase", "register code
   graph", or whenever a Breeze skill reports the project has no code
@@ -61,15 +60,17 @@ the LLM substitutes at runtime — don't hardcode the literal hosts.
 
 ## Step 1 — Pick the upload mode
 
-This skill runs the `breeze-code-ontology-generator` CLI to parse the
-repo into an ndjson tree. There are **two ways** to get that tree
-into the Breeze backend, and the user picks which one based on
-whether they have an API key handy:
+This skill runs the Python `breezeai-cog` parser (via `uvx`) to parse
+the repo into a gzipped ndjson file. There are **two ways** to get
+that data into the Breeze backend, and the user picks which one based
+on whether they have an API key handy:
 
-### Mode A — Automatic upload (CLI streams to backend)
+### Mode A — Automatic upload (cog streams to backend)
 
-Requires an `apiKey` in `.breeze.json`. The CLI does not authenticate
-via Keycloak OAuth like the MCP tools — it needs an explicit key.
+Requires an `apiKey` in `.breeze.json`. The parser does not
+authenticate via Keycloak OAuth like the MCP tools — it needs an
+explicit key (passed as `--user-api-key`, sent as the `api-key`
+header).
 
 1. Read `.breeze.json`. If `apiKey` is present → set
    `uploadMode = "automatic"` and continue to Step 2.
@@ -84,7 +85,7 @@ via Keycloak OAuth like the MCP tools — it needs an explicit key.
    > I'll save it to `.breeze.json` for next time.
    >
    > **B. Skip — I'll upload manually via the UI** — I'll just
-   > generate the ndjson locally in `./breezeai/`, and at the end
+   > generate the gzipped ndjson file locally, and at the end
    > I'll give you the upload URL.
 
 3. Based on the choice:
@@ -96,10 +97,10 @@ via Keycloak OAuth like the MCP tools — it needs an explicit key.
 
 ### Mode B — Manual upload (UI)
 
-When `uploadMode = "manual"`, this skill will run the CLI **without**
-`--upload`, producing only the local ndjson tree under `./breezeai/`.
-At the end (Step 6), it points the user at the Breeze UI to drop the
-ndjson in:
+When `uploadMode = "manual"`, this skill will run the parser
+**without** `--upload`, producing only the local
+`<repo>-project-analysis.ndjson.gz` file. At the end (Step 6), it
+points the user at the Breeze UI to upload it:
 
 ```
 <uiBaseUrl>/code-ontology/<projectUuid>?page=1
@@ -108,65 +109,37 @@ ndjson in:
 **Security (Mode A only):** Never print the key in output or commit
 it. Make sure `.breeze.json` is in `.gitignore`.
 
-## Step 2 — Activate Node.js v22.x
+## Step 2 — Verify prerequisites (Python + uv + git)
 
-The CLI requires **Node.js 22 specifically**. Node 24+ fails with
-`ERR_REQUIRE_ASYNC_MODULE` (or silently exits depending on stdout
-buffering) because tree-sitter native bindings became ESM with
-top-level await. Node 20 and older fail with syntax/ESM errors.
+The parser is the Python **`breezeai-cog`**, run on demand via **`uvx`** — no Node.js, no global install, no runtime-version pinning. `uvx` fetches and runs `breezeai-cog` from GitHub in an ephemeral, isolated environment each time (cached per version after the first run). **Verify the toolchain is present; STOP and ask the user only if something is missing.**
 
-**Try to activate Node 22 automatically. STOP and ask the user only
-if no version manager is installed.**
+> **Windows → run under WSL.** The parser and `uvx` expect a POSIX shell. If the user is on native Windows (PowerShell/cmd), tell them to re-run this skill from a **WSL** terminal.
 
-### 2a. Check what's on PATH
+### 2a. Check the toolchain
 
 ```bash
-node --version
+python3 --version   # need 3.10+
+uvx --version       # uv provides uvx
+git --version       # must be on PATH (uvx installs from git+https://…)
 ```
 
-If the output is `v22.x.x`, the system default is already correct —
-record an empty activation prefix and skip to Step 3.
+### 2b. If `uvx` is missing — install uv
 
-### 2b. Try managers in order, capture an activation prefix
+`uvx` ships with **uv**. Install it, then re-check `uvx --version`:
 
-If `node` is missing or any other major, try each manager in this
-order. **Each Bash tool call is a fresh shell**, so the manager's
-init must be sourced *in the same command* as the `use 22`:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
-| Manager | Detect | Activate + verify |
-|---|---|---|
-| nvm | `[ -s "$HOME/.nvm/nvm.sh" ]` | `. "$HOME/.nvm/nvm.sh" && nvm use 22 && node --version` |
-| fnm | `command -v fnm >/dev/null` | `eval "$(fnm env)" && fnm use 22 && node --version` |
-| volta | `command -v volta >/dev/null` | `volta run --node 22 node --version` |
+After install, `uvx` lives in `~/.local/bin` — ensure that's on `PATH` (open a new shell, or `source ~/.bashrc`). uv can also provision Python if needed: `uv python install 3.12`.
 
-If a manager exists but reports `version "22" is not installed` (or
-similar), install it first, then retry:
+### 2c. STOP conditions
 
-- nvm: `nvm install 22 && nvm use 22`
-- fnm: `fnm install 22 && fnm use 22`
-- volta: `volta install node@22`
+- **Python < 3.10 or missing** → ask the user to install Python 3.10+ (or `uv python install 3.12` once uv is present).
+- **git missing** → ask the user to install git (uvx needs it to clone `git+https://github.com/accionlabs/breezeai-cog`).
+- **native Windows, no WSL** → ask the user to re-run under WSL.
 
-Once one of them prints `v22.x.x`, **remember the exact activation
-prefix that worked** — you'll prepend it to every CLI call in Step 5,
-because fresh shells lose the activation. Examples:
-
-- nvm → prefix is `. "$HOME/.nvm/nvm.sh" && nvm use 22 >/dev/null && `
-- fnm → prefix is `eval "$(fnm env)" && fnm use 22 >/dev/null && `
-- volta → wrap the whole CLI invocation in `volta run --node 22 …`
-  instead of using a prefix
-
-### 2c. STOP — no manager available
-
-If none of nvm/fnm/volta is detected, surface this and stop:
-
-> Your current Node is `<version>`. The CLI requires Node 22. I
-> couldn't find nvm, fnm, or volta on your machine to switch
-> automatically. Install one of them (recommended: nvm) and re-run
-> this skill, or download Node 22 LTS from https://nodejs.org/.
-
-Node 22 is the only runtime this skill needs. (Python with numpy /
-scikit-learn is only required by the retired
-`/breeze:deprecated-cluster-pipeline` — not by this skill.)
+No runtime activation prefix is needed (unlike the old Node CLI) — `uvx` is self-contained, so Step 5's commands run as-is in any shell where `uvx` is on `PATH`.
 
 ## Step 3 — Resolve the target repo
 
@@ -224,10 +197,7 @@ skips `.git/`, `node_modules/`, `vendor/`, `dist/`, `build/`, `target/`,
 `.gradle/`, `tests/`, `/docs/`, `*.csv`, images, `.env*`, etc. — so common
 dependency/build/test noise is handled automatically.
 
-The generator only parses **source languages** (perl, javascript, python,
-java, typescript, c#, go, php, …), so non-source artifacts (`.json`, `.md`,
-PDFs) are never turned into code nodes even without an ignore entry. You still
-want a `.repoignore` when:
+The parser only handles its **supported source languages** — **C#** (+ ASP.NET, Web Forms, WCF, GraphQL), **Java** (+ Spring Boot, JAX-RS, Vert.x), **Python** (+ FastAPI), **TypeScript/JavaScript** (+ Angular, React, NestJS, Express, LoopBack, GraphQL), and **VB** (+ VB ASP.NET). Other languages (Go, PHP, Perl, Ruby, …) and non-source artifacts (`.json`, `.md`, PDFs) are never turned into code nodes even without an ignore entry. (Run `uvx --from git+https://github.com/accionlabs/breezeai-cog breezeai-cog capabilities` for the authoritative, live list.) You still want a `.repoignore` when:
 
 - a folder contains **source files you don't want indexed** — generated code,
   vendored copies, scratch/planning dirs, sample apps, or a previous tool's
@@ -258,27 +228,20 @@ Negation (`!pattern`) is **not** supported by the generator. Skipping this
 step is fine for a clean single-module repo; it matters most for large
 monorepos or trees that mix source with generated output.
 
-## Step 5 — Run the generator
+## Step 5 — Run the parser
 
-**Prepend the activation prefix from Step 2** to every command below.
-If Step 2a succeeded (system default is already Node 22), the prefix
-is empty and the command starts at `npx -y …`. Examples shown use the
-nvm prefix.
-
-The exact command depends on `uploadMode` from Step 1.
+No activation prefix is needed — `uvx` runs `breezeai-cog` self-contained in any shell where `uvx` is on `PATH`. The exact command depends on `uploadMode` from Step 1. The parser writes a **single gzipped file** `<repo-name>-project-analysis.ndjson.gz` into `--out` (if `--out` is omitted it defaults to the repo's **parent** directory).
 
 ### Mode A — `uploadMode = "automatic"`
 
-Read `apiKey`, `projectUuid`, and `apiBase` from `.breeze.json`, then
-run:
+Read `apiKey`, `projectUuid`, and `apiBase` from `.breeze.json`, then run:
 
 ```bash
-. "$HOME/.nvm/nvm.sh" && nvm use 22 >/dev/null && \
-  npx -y github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+uvx --from git+https://github.com/accionlabs/breezeai-cog breezeai-cog repo-to-json-tree \
   --repo <resolved-repo-path> \
-  --out breezeai \
-  --upload \
+  --out <output-path> \
   --capture-statements \
+  --upload \
   --user-api-key <apiKey> \
   --uuid <projectUuid> \
   --baseurl <apiBase>
@@ -286,34 +249,23 @@ run:
 
 ### Mode B — `uploadMode = "manual"`
 
-Omit the `--upload`, `--user-api-key`, `--uuid`, and `--baseurl`
-flags. The CLI then only parses the repo and writes the ndjson tree
-to `./breezeai/` — no network call:
+Omit the `--upload`, `--user-api-key`, `--uuid`, and `--baseurl` flags. The parser then only analyzes the repo and writes the gzipped ndjson locally — no network call:
 
 ```bash
-. "$HOME/.nvm/nvm.sh" && nvm use 22 >/dev/null && \
-  npx -y github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+uvx --from git+https://github.com/accionlabs/breezeai-cog breezeai-cog repo-to-json-tree \
   --repo <resolved-repo-path> \
-  --out breezeai \
+  --out <output-path> \
   --capture-statements
 ```
 
 **Flag rationale:**
 
 - `--repo` — absolute path resolved in Step 3
-- `--out breezeai` — local output directory for the intermediate JSON
-  tree (always written; this is what the user uploads in Mode B)
-- `--upload` *(Mode A only)* — streams the parsed graph to the Breeze
-  backend in addition to writing it locally
-- `--capture-statements` — **mandatory in both modes**. Without this
-  flag, the generator only captures method signatures, not their
-  bodies. Downstream skills (especially
-  `generate-functional-from-backend`) need statement-level data to
-  extract route decorators, queue env vars, cron expressions, side
-  effects, and call chains. Re-uploading without this flag silently
-  degrades the graph.
-- `--user-api-key`, `--uuid`, `--baseurl` *(Mode A only)* —
-  credentials and project link from `.breeze.json`
+- `--out <dir>` — directory for the gzipped ndjson (`<repo-name>-project-analysis.ndjson.gz`). Optional; defaults to the repo's **parent**. Pick a writable dir you can point the user at for Mode B (e.g. the repo's parent, or a scratch folder).
+- `--upload` *(Mode A only)* — after writing the file locally, streams it to the Breeze backend
+- `--capture-statements` — **mandatory in both modes**. Without it the parser captures method signatures only, not their bodies. Downstream skills (especially `generate-functional-from-backend`) need statement-level data to extract routes, queue env vars, cron expressions, side effects, and call chains. Re-indexing without this flag silently degrades the graph.
+- `--user-api-key`, `--uuid`, `--baseurl` *(Mode A only)* — credentials + project link from `.breeze.json` (also readable from env `API_KEY` / `BREEZE_API_URL`).
+- Optional: `--language <lang>` (repeatable) to restrict languages; `--jobs <N>` to cap worker processes; `--verbose` for DEBUG logs.
 
 **Run it foregrounded so the user can see progress.** Large repos
 (100K+ LOC) can take 5–15 minutes. If the command fails, surface the
@@ -321,13 +273,16 @@ error verbatim — don't paraphrase. Common failure modes:
 
 | Symptom | Likely cause | Fix | Mode |
 |---|---|---|---|
-| `SyntaxError: Unexpected token` from npx | Node < 22 | Switch to Node 22.x (Step 2) | both |
-| Silent exit with no output beyond `npm warn …` lines | Node 24 or newer — tree-sitter native bindings can't be loaded via `require()` because the bindings are ESM with top-level await | Switch to Node 22.x (Step 2). Don't trust a "completed with exit 0" if no `./breezeai/` directory was created | both |
-| `Error [ERR_REQUIRE_ASYNC_MODULE]: ... tree-sitter-c-sharp/bindings/node/index.js` | Same root cause — bindings use top-level await; surfaces visibly on some Node versions | Switch to Node 22.x | both |
-| `401 Unauthorized` | Wrong / expired API key | Delete the `apiKey` field from `.breeze.json` and re-run this skill — Step 1 will prompt again (or pick Mode B) | A |
+| `uvx: command not found` | uv not installed | Install uv (Step 2b: `curl -LsSf https://astral.sh/uv/install.sh \| sh`), then re-open the shell | both |
+| `error: Python 3.10+ required` / version-related import errors | Python too old | Install Python 3.10+ (`uv python install 3.12`) | both |
+| First run pauses on `Resolved … packages` / `Building breezeai-cog` | `uvx` cloning + building `breezeai-cog` from GitHub (one-time per version; cached after) | Wait — subsequent runs reuse the cache | both |
+| `fatal: ... git ...` during `--from git+https://…` | git missing / no network | Install git; check connectivity to github.com | both |
+| No `<repo>-project-analysis.ndjson.gz` produced despite exit 0 | Wrong `--out` path, or all files skipped (unsupported languages) | Check `--out` is writable; run `… breezeai-cog capabilities` to confirm the repo's languages are supported | both |
+| `401 Unauthorized` / `upload failed` | Wrong / expired API key | Delete the `apiKey` field from `.breeze.json` and re-run this skill — Step 1 will prompt again (or pick Mode B) | A |
 | `404 Project not found` | Wrong projectUuid in `.breeze.json` | Re-run `/breeze:project setup` and re-link | A |
 | `ECONNREFUSED` / DNS error on baseurl | Wrong `apiBase` | Check the value in `.breeze.json` | A |
-| Hangs at "Uploading…" for many minutes | Large repo, slow link | Wait — uploads are streamed; cancel only if 30+ min with no progress | A |
+| Upload errors on ingest (`fileGraphStatus: error`) | Backend-side stale Neo4j constraint (a known DB migration issue), not a cog/file fault | Escalate to the Breeze backend team; the local `.ndjson.gz` is valid | A |
+| Hangs at "Uploading…" for many minutes | Large repo, slow link | Wait — cancel only if 30+ min with no progress | A |
 | Parser errors during walk | Unsupported language / encoding | Surface verbatim; the ndjson written so far still uploads in Mode B | both |
 
 ## Step 6 — Finalize (mode-dependent)
@@ -348,18 +303,13 @@ indexing finishes shortly after.
 
 ### Mode B — hand off the ndjson for manual upload
 
-The CLI has finished writing `./breezeai/` but the backend doesn't
-have the data yet. Tell the user:
+The parser has finished writing `<output-path>/<repo-name>-project-analysis.ndjson.gz` but the backend doesn't have the data yet. Tell the user (substitute the real file path):
 
-> ✅ ndjson generated under `./breezeai/`. To finish onboarding,
-> upload it via the Breeze UI:
+> ✅ Generated `<repo-name>-project-analysis.ndjson.gz` at `<output-path>`. To finish onboarding, upload it via the Breeze UI:
 >
 >   **`<uiBaseUrl>/code-ontology/<projectUuid>?page=1`**
 >
-> Drop the contents of `./breezeai/` into the upload area on that
-> page. Until you do this, downstream skills like
-> `/breeze:generate-functional-from-ui` and `/breeze:search` will
-> report "no code ontology" because the graph is still empty.
+> Drop that `.ndjson.gz` file into the upload area on that page. Until you do this, downstream skills like `/breeze:generate-functional-from-ui` and `/breeze:search` will report "no code ontology" because the graph is still empty.
 
 Substitute the actual `uiBaseUrl` (from `.breeze.json` → `breeze.config.json`
 → `https://ai.accionbreeze.com`) and `projectUuid` (from

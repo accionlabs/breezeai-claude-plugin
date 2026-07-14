@@ -11,6 +11,17 @@ description: >
 argument-hint: "[repo-path]"
 ---
 
+> ### ⚠️ Is this the right functional-generation skill?
+> | Repo shape | Use |
+> |---|---|
+> | **◀ SPA frontend (React / Vue / Angular / Next) — THIS SKILL** | `/breeze:generate-functional-from-ui` |
+> | Headless backend API — REST / GraphQL / queue (incl. **ASP.NET Core**, Node, Java, Python) | `/breeze:generate-functional-from-backend` |
+> | ASP.NET **Web Forms** monolith (`.aspx`/`.ascx` + in-process backend, one repo) | `/breeze:generate-functional-from-aspnet-webforms` (single unified pass) |
+> | ASP.NET **MVC / Razor Pages** full-stack (Razor views + controllers, one repo) | run **BOTH** this skill (views) **and** `-from-backend` (controllers) — they join by the action-route URL *(no unified skill yet; Razor `.cshtml` support here is limited — SPA is the primary target)* |
+> | P3 / Vert.x metadata (MAPL / MSCR) | `/breeze:generate-functional-from-metadata` |
+>
+> **Why Web Forms is one skill but MVC is two:** Web Forms' UI→backend seam is an *in-process method call* (no URL) → a single unified pass is required. MVC/Core expose the backend as a *URL* (the action/endpoint route) → the standard `-from-ui` + `-from-backend` passes join on that URL, same as a SPA + REST API.
+
 ## Project
 
 This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
@@ -133,13 +144,20 @@ Do not overwrite an existing `entrypoints.json`.
    - Angular: `*-routing.module.ts` or `app.routes.ts`
    - Nuxt: `pages/` with `.vue` files
    - SvelteKit: `src/routes/`
-   - **ASP.NET Web Forms** (server-rendered, not a SPA): `*.aspx` + `*.aspx.cs` pages, `*.ascx` controls, `*.master`, `Global.asax`, `web.config`, a Web Forms `*.csproj` (references `System.Web.UI`)
+   - **ASP.NET Web Forms** (server-rendered): `*.aspx` + `*.aspx.cs`, `*.ascx`, `*.master`, `Global.asax`, a `*.csproj` referencing `System.Web.UI`
+   - **ASP.NET MVC / Razor Pages** (server-rendered Razor): `*.cshtml` views, `*Controller.cs` returning `View(...)` (MVC), or `*.cshtml` + co-located `*.cshtml.cs` `PageModel` (Razor Pages); `_Layout.cshtml`, `_ViewImports.cshtml`, tag helpers / `@Html.*`
 2. Record the detected framework and router/entry file path.
 3. **Classify the stack** and record it in `entrypoints.json` as `stack`:
-   - `webforms` — ASP.NET Web Forms signals dominate (presence of `*.aspx` pages)
+   - `webforms` — `*.aspx`/`*.ascx` present ⇒ **STOP (see below)**
+   - `mvc` — Razor server-rendered: `*.cshtml` + controllers/PageModels, NO `*.aspx`
    - `spa` — otherwise (the default: React / Vue / Angular / Next / etc.)
 
-   This `stack` value drives sub-steps 0.3–0.4 (client-route vs `.aspx`-page discovery) and Step 3 (which per-EP agent to spawn). **All existing SPA behavior is unchanged when `stack = spa`.**
+   This `stack` value drives sub-steps 0.3–0.4 (client-route vs Razor-view discovery) and Step 3 (which per-EP agent to spawn). **All existing SPA behavior is unchanged when `stack = spa`.**
+
+> ⛔ **`stack = webforms` → STOP and redirect.** ASP.NET **Web Forms** needs the *unified* pass (its UI→backend seam is an in-process method call, no URL — a UI-only pass here can't join to the backend). Do NOT process it in this skill. Tell the user:
+> _"This is an ASP.NET Web Forms app. Web Forms uses a single unified skill (UI + in-process backend in one pass) — run `/breeze:generate-functional-from-aspnet-webforms <repo-path>` instead."_ Then end the run.
+>
+> **`stack = mvc` is supported here** (human half) via `breeze:aspnet-razor-flow-structuring-agent`. The **System** half comes from `/breeze:generate-functional-from-backend` on the same repo (controllers/minimal-APIs as routes); the two join by the **action-route URL**. So a full-stack MVC/Razor monolith = this skill (views) + `-from-backend` (controllers) — two passes, URL-joined (unlike Web Forms).
 
 ---
 
@@ -174,11 +192,12 @@ Do not overwrite an existing `entrypoints.json`.
 3. `Read` the router file locally
 4. `Read` the sidebar/navbar component for non-routed features
 
-**If `stack = webforms`:** entry points are `.aspx` pages **and `.ascx` user controls** — in many Web Forms / CMS apps the real features live in `.ascx` controls mounted into a generic page host, so controls are **first-class EPs**, not just panels.
-1. `Glob '**/*.aspx'` **AND** `Glob '**/*.ascx'`. Each `.aspx` page (`kind: page`) and each feature-bearing `.ascx` control (`kind: control`) is an EP — `route` = the page URL (or the control's mount route if dynamically loaded), `seed_file` = the `.aspx`/`.ascx` markup; the matching `.aspx.cs`/`.ascx.cs` code-behind is read by the agent.
-2. **Detect a generic page host.** If a few `.aspx` pages (e.g. `Page.aspx`, `Default.aspx`) `LoadControl(...)` / mount `.ascx` controls by config or route, treat those `.aspx` shells as containers and **promote the `.ascx` controls to the primary EPs** (that is where the fields and flows are). A handful of utility `.aspx` (reports, downloads, health checks) stay as their own page EPs.
-3. `Read` `web.config` (`<authorization>` + `<location path="…">`) and any `.sitemap` (`roles="…"`) to determine per-EP persona reachability for sub-step 0.4.
-4. Treat `.master` layouts as shared chrome the agent reads while processing the host EP — not usually a standalone EP.
+**If `stack = mvc`** (ASP.NET MVC / Razor Pages — Razor server-rendered): entry points are **Razor views**, each owned by a controller action or a Razor Page handler.
+1. **MVC:** `Glob '**/Views/**/*.cshtml'` (skip `_Layout`, `_ViewStart`, `_ViewImports`, `Shared/EditorTemplates`/`DisplayTemplates`, partials `_*.cshtml`). Each feature view (`Views/Accounts/Edit.cshtml`) is an EP — `kind: mvc-action`, `route` = the controller action route (convention `/{controller}/{action}` or the `[Route]`/`[HttpX("…")]` attribute), `seed_file` = the `.cshtml`; the agent reads the matching controller action (GET+POST) + view-model.
+2. **Razor Pages:** `Glob '**/Pages/**/*.cshtml'` with a co-located `.cshtml.cs`. Each page is an EP — `kind: razor-page`, `route` = the page route, `seed_file` = the `.cshtml`; the agent reads the `PageModel` (`OnGet*`/`OnPost*`).
+3. **Fold, don't promote, composed views:** `_Layout.cshtml` (chrome), partials/editor-templates/display-templates, and `@await Component.InvokeAsync(...)` view-components are **not** standalone EPs — they're read *inside* the parent view's pass (the MVC analogue of subpanels). Only routed views are EPs.
+4. `Read` `[Authorize]`/policies on controllers/PageModels + `_ViewImports` for per-EP persona reachability (sub-step 0.4).
+> **The System half is a separate pass.** MVC controllers/actions are captured by `/breeze:generate-functional-from-backend` on the same repo; this skill emits the **human** half only, and the two join on the **action-route URL**. (Web Forms is different — it was redirected out in 0.1 because its seam has no URL.)
 
 ---
 
@@ -353,17 +372,18 @@ Then load `references/spa-flow-structuring-agent.prompt.md` and substitute the `
 
 Pick the per-EP agent by the `stack` detected in sub-step 0.1:
 - `stack = spa` → `breeze:spa-flow-structuring-agent`
-- `stack = webforms` → `breeze:aspx-flow-structuring-agent`
+- `stack = mvc` → `breeze:aspnet-razor-flow-structuring-agent`
+- `stack = webforms` → **never reaches here** — redirected to `/breeze:generate-functional-from-aspnet-webforms` in sub-step 0.1.
 
 ```
 Agent(
-  subagent_type = "breeze:spa-flow-structuring-agent",   # or "breeze:aspx-flow-structuring-agent" when stack == webforms
+  subagent_type = "breeze:spa-flow-structuring-agent",   # or "breeze:aspnet-razor-flow-structuring-agent" when stack == mvc
   description   = f"Flow-structure EP {ep.id} ({persona}): {ep.title}",
   prompt        = <rendered per-call inputs from Step 2>
 )
 ```
 
-Both agents take the **same** per-call input block (Step 2) and honour the **same** output contract (schema, self-validate, write, upsert) — they differ only in how they read the stack (SPA components + `fetch`/`axios` vs `.aspx` markup + code-behind + SOAP service-proxy). The full methodology lives in `agents/spa-flow-structuring-agent.md` / `agents/aspx-flow-structuring-agent.md` respectively — installed by the breezeai-plugins plugin. The `prompt` argument here is **only** the short variable input block from Step 2; the agent's system prompt does the rest.
+Both agents take the **same** per-call input block (Step 2) and honour the **same** output contract (schema, self-validate, write, upsert) — they differ only in how they read the stack (SPA components + `fetch`/`axios` vs Razor `.cshtml` views + controllers/PageModels, joining on the action-route URL). The full methodology lives in `agents/spa-flow-structuring-agent.md` / `agents/aspnet-razor-flow-structuring-agent.md` respectively — installed by the breezeai-plugins plugin. The `prompt` argument here is **only** the short variable input block from Step 2; the agent's system prompt does the rest.
 
 Tool scoping is enforced by the agent definition's `tools:` frontmatter
 (Read, Glob, Grep, Bash, `mcp__plugin_breeze_breeze-mcp__Code_Graph_Search`).

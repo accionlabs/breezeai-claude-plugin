@@ -70,7 +70,13 @@ First word of a System action in `verbs.json → side_effect_verbs` ⇒ either:
 1. a **non-empty `apis[]`**, **OR**
 2. a **data-store identifier in the `description`** — a `Repository`/`table`/`entity`/`index`/`bucket`/`collection`, an `s3://`/`sqs://`/`kafka://`/`rabbit://` URI, or an `->`/`→` transform (`verbs.json → identifier_patterns`).
 
-This apis-OR-identifier fallback is **system-only** (the human half requires `apis[]` outright). It is what lets aspx **Case-B** (a side effect with no URL) pass: name the repository/table/stored-proc in the description instead of inventing a URL. If neither is present, add the source detail or rename the action to drop the verb. Refuse to upsert until it passes.
+This apis-OR-identifier fallback is **system-only** (the human half requires `apis[]` outright). If neither is present, add the source detail or rename the action to drop the verb. Refuse to upsert until it passes.
+
+> **A nameable stored procedure or SQL statement MUST be modeled as an `apis[]` entry — NOT left to the description-only fallback.** The fallback (option 2) is reserved for effects with *no* nameable proc/statement (e.g. a repository method issuing dynamic SQL, or a `->`/`→` transform). Whenever the code calls a named stored proc or executes an identifiable statement, emit:
+> - **Stored procedure** → `{ "type": "StoredProcedure", "method": "EXEC", "url": "<procName>", "request": "<inputs>", "response": "<output/void>" }` (e.g. `spACCOUNTS_Delete`, `spACCOUNTS_MassUpdate`).
+> - **Inline SQL** → `{ "type": "SQL", "method": "SELECT|INSERT|UPDATE|DELETE", "url": "<table/view>", "request": "<filter/columns>", "response": "<rows/affected>" }` (e.g. a `SELECT … FROM vwACCOUNTS WHERE @ID`).
+>
+> The proc/table stays named in the `description` too, but the structured `apis[]` node is what makes the side effect first-class and joinable — the same way the reference `Persist an account record` scenario models `spACCOUNTS_Update`/`spTRACKER_Update`. Naming a proc only in prose while leaving `apis[]` empty is a defect, not a pass.
 
 ### Side-effect coverage (advisory)
 Where the adapter supplies `audit.sideEffects[]`, ≥90% should be matched to an action (`coverage`). Log/metric emission may go in `trivialSideEffects[]` with a one-line justification. Actions starting with Receive/Publish/Consume/Send/Submit/Fetch/Query/Upload/Download/Forward/Invoke must have `apis[]` **or** a DB/ES/S3 identifier in the description.

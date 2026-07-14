@@ -16,6 +16,17 @@ description: >
 argument-hint: "[root-path]"
 ---
 
+> ### ⚠️ Is this the right functional-generation skill?
+> | Repo shape | Use |
+> |---|---|
+> | SPA frontend (React / Vue / Angular / Next) | `/breeze:generate-functional-from-ui` |
+> | Headless backend API — REST / GraphQL / queue (incl. **ASP.NET Core**, Node, Java, Python) | `/breeze:generate-functional-from-backend` |
+> | ASP.NET **Web Forms** monolith (`.aspx`/`.ascx` + in-process backend, one repo) | `/breeze:generate-functional-from-aspnet-webforms` (single unified pass) |
+> | ASP.NET **MVC / Razor Pages** full-stack (Razor views + controllers, one repo) | run **BOTH** `-from-ui` (views) **and** `-from-backend` (controllers) — join by the action-route URL *(no unified skill yet)* |
+> | **◀ P3 / Vert.x metadata-driven app (MAPL / MSCR / MFID JSON) — THIS SKILL** | `/breeze:generate-functional-from-metadata` |
+>
+> This skill is ONLY for **P3 / Vert.x metadata-driven** codebases (features declared in MAPL/MSCR/MFID/MFLT/CRUD JSON). If the repo is imperative code (any of the rows above), stop and use that row.
+
 ## Project
 
 Project-bound — needs a `projectUuid`. Resolve per `CLAUDE.md` at the plugin root: a
