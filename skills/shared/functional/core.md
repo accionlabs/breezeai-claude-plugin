@@ -92,8 +92,8 @@ Because the upsert merges by name, both halves attach to the **same Outcome** wh
 | Cron / scheduled | `Event` | `trigger` | `cron:<expression>` |
 | ASP.NET / WCF / ASMX façade | `SOAP` | operation name | service endpoint + SOAPAction |
 | **aspx Case-B** (side effect with no URL) | — | — | **no `apis[]`** — name the repository/table/SP in `description` instead (system-overlay rule-a fallback) |
-| P3 internal Vert.x bus / `DoFilter` / `WriteData` | `Event` | the verb / address | filter id / handler name |
-| P3 custom-HTML `$.ajax` | `REST` | HTTP verb | the endpoint path (`/apy-common-screen/...`) |
+| Vert.x internal event bus / `DoFilter` / `WriteData` | `Event` | the verb / address | filter id / handler name |
+| Vert.x-app custom-HTML `$.ajax` | `REST` | HTTP verb | the endpoint path (`/apy-common-screen/...`) |
 
 > **Resolve template literals to LITERAL values** before recording a `url` — never leave `${QUEUE_URL}` / `${TOPIC}` / route-prefix tokens unresolved (read the config module).
 
@@ -112,9 +112,14 @@ If `rule-a` fails: open the source file and add the `apis[]`/identifier, **or** 
 
 ## 6. Enumeration & source-fidelity discipline
 
-- **Read the actual source file.** The code graph / `Code_Graph_Search` / `Get_Code_File_Details` are **accelerators to locate** code; literal strings (routes, URLs, field codes, decorators) must be confirmed by `Read`ing the real file. Never trust a graph summary for a literal string.
+- **The local source checkout is the SOURCE OF TRUTH; the code graph is an OPTIONAL accelerator, never required.** `Read` + `Grep` on disk are the backbone — a run that uses **zero** graph calls is completely valid. The code graph (`Code_Graph_Search` / `Get_Code_Nodes_By_Label`) earns its keep in only two situations: (a) resolving the concrete **next-hop** of a cross-file call (interface / DI / overload) that `Grep` can't disambiguate, and (b) **repo-wide inventories** (all routes / DB calls, via `Get_Code_Nodes_By_Label(label="Statement", …)`) — mostly a discovery-agent concern. Reach for it only then; otherwise `Grep`+`Read` is faster and always current.
+- **⚠️ The code graph does NOT capture every statement — so it is NEVER the source of step/action detail.** It locates code; it does not define behaviour. **Every literal (route, URL, stored proc, table, field code, decorator, guard) and every Step/Action MUST be derived from `Read`ing the real file** — never from a graph summary. At **step/action granularity the local file is the ONLY source of truth.** A graph hit that lacks a statement you expect means "go Read the file," not "the statement doesn't exist."
+- **⚠️ Scope EVERY graph query to THIS repo's `codeOntologyId`.** A Breeze project holds **multiple repos** (frontend + N backends), so an unscoped query bleeds across repos. Functional generation runs for **one repo at a time**: the skill resolves that repo's `codeOntologyId` **once at Bootstrap** via `Call_List_Repositories_(projectUuid)` (matching the on-disk repo to an indexed one) and passes it to the agent as `CODE_ONTOLOGY_ID`. Then:
+  - `Code_Graph_Search(..., code_ontology_id=<id>)` — pass it as the param (fallback `repository_name=<INDEXED_REPO_NAME>` + a `cgs_unscoped` warning).
+  - `Get_Code_Nodes_By_Label(..., filters={"codeOntologyId": <id>, …})` — pass it **inside `filters`**; `repositoryName` is **rejected** as a filter (mutable display name).
+  A bad/missing `codeOntologyId` **fails loud** (`No repository with codeOntologyId … Available: …`), never a silent cross-repo or empty result — so never issue an unscoped graph query.
 - **Enumerate, do not sample.** Every declared field / widget / injected dependency / side effect that the adapter discovers must be accounted for — either as its own action or folded into a `Review …` description (human) / the operation's payload (system). The adapter records what it found in `audit.declaredFields[]`, `audit.filesRead[]`, and (where relevant) `audit.sideEffects[]`; the validators check the graph against that audit.
-- **Drill-down rule:** every dependency the adapter flags as significant (an imported stateful component for UI; a constructor-injected service/repository/client for backend; a referenced `MFLT`/`CRUD`/`.java` handler for P3) **must be `Read`** before scenarios are drafted, and **cited**. If skipped, justify it in the audit's `skipped*` list.
+- **Drill-down rule:** every dependency the adapter flags as significant (an imported stateful component for UI; a constructor-injected service/repository/client for backend; a referenced `MFLT`/`CRUD`/`.java` handler for a metadata app) **must be `Read`** before scenarios are drafted, and **cited**. If skipped, justify it in the audit's `skipped*` list.
 
 ---
 

@@ -5,7 +5,7 @@
     "consumers": [
       "skills/shared/functional/validate.py",
       "skills/validate-functional-graph/scripts/validate-graph.py",
-      "skills/generate-functional-from-{ui,backend,p3}/validators/validate.py (to be replaced by an import)"
+      "skills/generate-functional-from-{ui,backend,metadata}/validators/validate.py (to be replaced by an import)"
     ],
     "provenance": "Unioned from the three generator validators + validate-graph.py. Where the same list diverged, the SUPERSET was taken and the divergence is noted in _notes so nothing is silently dropped."
   },
@@ -76,10 +76,10 @@
 
   "_notes": {
     "forbidden_ui_words": "23 canonical members (click..icon) + 2 ASP.NET-specific (postback, gridview) folded in from the aspx agent = 25. Match with WORD-BOUNDARY regex (\\bword\\b), never plain substring — substring over-matches ('tab' inside 'table'). Applies to HUMAN-persona actions only; system-persona actions are skipped (see human-overlay.md).",
-    "side_effect_verbs": "29 distinct = union of backend's 26 + P3's {execute, write, generate}. Backend's validator was MISSING execute/write/generate; this superset closes that gap. Triggers rule-a on the SYSTEM half (apis[] OR identifier-in-description required).",
+    "side_effect_verbs": "29 distinct = union of backend's 26 + the metadata pass's {execute, write, generate}. Backend's validator was MISSING execute/write/generate; this superset closes that gap. Triggers rule-a on the SYSTEM half (apis[] OR identifier-in-description required).",
     "network_verbs": "21 members, UI-only originally. Triggers rule-a on the HUMAN half (non-empty apis[] required — no identifier fallback). 'generate' appears in BOTH network_verbs and side_effect_verbs by design.",
     "input_verbs": "Used by the advisory atomicity check (human half) to find data-entry actions. 'filter' added so MFLT-style filter actions are recognised.",
-    "forbidden_persona_names": "15 from validate-graph.py + P3 engine/tech names {devops, verticle, filter, webappengine, engine}. A human persona name must contain NONE of these as a standalone word.",
+    "forbidden_persona_names": "15 from validate-graph.py + metadata-engine/tech names {devops, verticle, filter, webappengine, engine}. A human persona name must contain NONE of these as a standalone word.",
     "identifier_patterns": "Backend rule-a fallback: a side-effect action with empty apis[] is still OK if its description names a Repository/table/entity/index/bucket/collection or an s3://|sqs://|kafka://|rabbit:// URI or an -> / → transform arrow.",
     "api_types": "apis[].type is FREE TEXT server-side (no enum enforced — PersonaDto uses @IsString). REST/GraphQL/gRPC/WebSocket/Event are the schema-validated set; SOAP is the recommended extension for ASP.NET/WCF/ASMX. See core.md § apis[] join models for the per-stack mapping.",
     "overlap_keywords": "PROJECT-SPECIFIC (these are a finance project's domain terms). validate-graph.py's cross-persona-overlap check should read these from project config, not hard-code them. Kept here as the legacy default so behaviour does not change; tune per project."

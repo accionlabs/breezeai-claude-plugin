@@ -22,7 +22,7 @@ argument-hint: "[repo-path]"
 > | **◀ Headless backend API — REST / GraphQL / queue (incl. ASP.NET Core, Node, Java, Python) — THIS SKILL** | `/breeze:generate-functional-from-backend` |
 > | ASP.NET **Web Forms** monolith (`.aspx`/`.ascx` + in-process backend, one repo) | `/breeze:generate-functional-from-aspnet-webforms` (single unified pass) |
 > | ASP.NET **MVC / Razor Pages** full-stack (Razor views + controllers, one repo) | run **BOTH** `-from-ui` (views) **and** this skill (controllers) — they join by the action-route URL *(no unified skill yet)* |
-> | P3 / Vert.x metadata (MAPL / MSCR) | `/breeze:generate-functional-from-metadata` |
+> | Vert.x metadata-driven (MAPL / MSCR) | `/breeze:generate-functional-from-metadata` |
 >
 > This skill produces the **System / External System** half. For a headless API (like a .NET Core GraphQL/REST service) that's the whole graph from this repo; the **human** half comes from the consuming frontend's `-from-ui` run, joined by URL/operation. **Web Forms is the exception** — its in-process seam has no URL, so it uses the single unified `-from-aspnet-webforms` skill instead of this + `-from-ui`.
 
@@ -206,34 +206,16 @@ Read the `entryPoints[]` summary (group by `category` and `type`) from `entrypoi
 
 EPs are independent — each is its own upsert — so process `remaining[]` in **batches of up to 3**. For each batch:
 
-1. Run **Step 1** (dedup pre-query) and **Step 2** (render prompt) for every EP in the batch — these are cheap parent-side MCP calls and string substitution.
+1. Run **Step 2** (render prompt) for every EP in the batch — cheap parent-side string substitution (dedup is agent-side now).
 2. **Spawn the whole batch concurrently** — emit all 3 `Agent(...)` calls in a SINGLE message (Step 3). They run in parallel; the Agent tool supports concurrent sub-agents.
 3. As each returns, run **Step 4** (verify) and **Step 5** (checkpoint) for that EP.
 4. Only start the next batch once the current batch's sub-agents have all returned (so `remaining[]` mutates atomically per batch and a mid-run stop leaves a clean checkpoint).
 
 Tune the batch size down to 1 if you are near your context budget or hitting rate limits. The steps below describe the procedure for a single EP; apply them across the batch.
 
-## Step 1 — Dedup pre-query
+## Step 1 — (removed) dedup is now agent-side
 
-```
-Functional_Graph_Search(
-  uuid  = projectUuid,
-  query = f"{ep.title} {likely outcome name}",
-  limit = 10
-)
-```
-(Use `parameters3_Value` for the project UUID slot.)
-
-Group results into `EXISTING_NEIGHBORHOOD`:
-```json
-{
-  "outcomes": [
-    { "name": "<outcome>", "id": "...", "score": 0.78,
-      "scenarios": [{ "name": "<scenario>", "id": "...", "score": 0.83 }] }
-  ]
-}
-```
-If empty, pass `{"outcomes": []}` — the sub-agent proceeds fresh.
+The parent no longer runs a dedup pre-query and does **not** pass `EXISTING_NEIGHBORHOOD`. The sub-agent builds its own dedup context from the **live** graph (`Functional_Graph_Search` + a persona-scoped `Get_all_personas`→`Get_all_outcomes_for_a_persona_id`→`Get_all_scenarios_for_a_outcome_id` read-back) right before writing — fresher and race-safe under parallel batches. Proceed to Step 2.
 
 ## Step 2 — Pre-compute OUTPUT_PATH and render the sub-agent prompt
 
@@ -272,7 +254,7 @@ Load `references/backend-flow-structuring-agent.prompt.md` and substitute the `{
 | `{{indexed_repo_name}}` | `backendRepoName` resolved in Bootstrap step 7 |
 | `{{shared_functional_path}}` | absolute path to the **shared functional SSOT** dir — `<pluginRoot>/skills/shared/functional` (sibling of this skill, i.e. `<this skill dir>/../shared/functional`). The agent reads `core.md` + `system-overlay.md` from here for the canonical rules (ADR 0001). Mirrors the UI pass's `{{shared_functional_path}}`. |
 | `{{validators_path}}` | absolute path to **this skill's `validators/` directory** (e.g. `<pluginRoot>/skills/generate-functional-from-backend/validators`). The agent runs `validate.py` from here in Phase 6. |
-| `{{existing_neighborhood_json}}` | `json.dumps(EXISTING_NEIGHBORHOOD)` |
+
 
 ## Step 3 — Spawn the batch (concurrently)
 
@@ -289,7 +271,7 @@ Agent( ... next ep in batch ... )
 Agent( ... next ep in batch ... )
 ```
 
-The agent's full methodology lives in `agents/backend-flow-structuring-agent.md`. The `prompt` argument is ONLY the short variable input block from Step 2; the agent's system prompt does the rest. Tool scoping (Read, Glob, Grep, Bash, `Code_Graph_Search`, `Get_Code_File_Details`), `model: sonnet`, and `maxTurns` are enforced by the agent definition. Anthropic prompt caching reuses the fixed system prompt across calls, so subsequent EPs pay only for the small variable input block.
+The agent's full methodology lives in `agents/backend-flow-structuring-agent.md`. The `prompt` argument is ONLY the short variable input block from Step 2; the agent's system prompt does the rest. Tool scoping (Read, Glob, Grep, Bash, `Code_Graph_Search`, `Get_Code_Nodes_By_Label`), `model: sonnet`, and `maxTurns` are enforced by the agent definition. Anthropic prompt caching reuses the fixed system prompt across calls, so subsequent EPs pay only for the small variable input block.
 
 **Sub-agent returns ONLY a short summary line.** It self-validates (Phase 6), writes to OUTPUT_PATH (Phase 7), POSTs the upsert (Phase 8), and reports HTTP status + functionalId:
 
@@ -376,7 +358,7 @@ When context budget hits ~75%, flush the current checkpoint and stop. Resume wit
 
 `entrypoints.failed[]` holds per-EP failures mapped to the agent's summary-line prefixes (`FAIL_VALIDATE`, `FAIL_WRITE`, `FAIL_UPSERT`). For each:
 
-- **`FAIL_UPSERT` only** — the payload is sound but the POST failed. Re-curl the same OUTPUT_PATH directly via `<apiBase>/functional-graph/v2/upsert?llmPlatform=<LLM_PLATFORM>` with the `api-key:` header. No re-spawn needed.
+- **`FAIL_UPSERT` only** — the payload is sound but the POST failed. Re-curl the same OUTPUT_PATH directly via `<apiBase>/functional-graph/v2/upsert?embedding=true&llmPlatform=<LLM_PLATFORM>` with the `api-key:` header. No re-spawn needed.
 - **`FAIL_VALIDATE` / `FAIL_WRITE`** — re-spawn the sub-agent with the same input block. If the same failure repeats, inspect the OUTPUT_PATH on disk to understand the defect class, then patch the agent prompt.
 - **Recovery loop**: clear matching entries from `failed[]`, re-add `epId` to `remaining[]`, resume the skill.
 

@@ -85,7 +85,7 @@ Where the adapter supplies `audit.sideEffects[]`, ≥90% should be matched to an
 
 ## 5. `apis[]` typing (system surfaces)
 
-See `core.md §4` for the full join-model table. System-relevant rows: backend REST routes → `REST`; GraphQL ops → `GraphQL`; queue/event consumers → `Event` (`sqs://`/`kafka://`/`rabbit://`); cron → `Event` (`cron:<expr>`); SOAP/WCF/ASMX → `SOAP`; P3 internal Vert.x bus / `DoFilter` / `WriteData` → `Event`. **Resolve all template literals to literal queue/topic/route values before recording.**
+See `core.md §4` for the full join-model table. System-relevant rows: backend REST routes → `REST`; GraphQL ops → `GraphQL`; queue/event consumers → `Event` (`sqs://`/`kafka://`/`rabbit://`); cron → `Event` (`cron:<expr>`); SOAP/WCF/ASMX → `SOAP`; Vert.x internal event bus / `DoFilter` / `WriteData` → `Event`. **Resolve all template literals to literal queue/topic/route values before recording.**
 
 ---
 

@@ -16,13 +16,13 @@ Decision aids:
 - Merge similar roles (`Admin User` ≡ `Administrator` → one).
 
 ### Extraction discipline
-- **Extract literal role names from the source only — never invent.** For UI: prefer `/breeze:detect-personas` output (it does per-variable usage counting and drops dead-code roles) over manual grep. For P3: map `MAPLD03` role codes to business-domain names; if the mapping is unknown, **surface the raw code to the confirmation gate** — do not guess.
+- **Extract literal role names from the source only — never invent.** For UI: prefer `/breeze:detect-personas` output (it does per-variable usage counting and drops dead-code roles) over manual grep. For Vert.x-metadata apps: map `MAPLD03` role codes to business-domain names; if the mapping is unknown, **surface the raw code to the confirmation gate** — do not guess.
 - **Verify actual usage:** a role constant defined but with **0 usages** outside its definition/import lines is dead code and MUST NOT become a persona. Grep each role variable **individually** (never combined with `|`).
 - **Subscription tiers / feature flags are NOT personas** — list them separately under "feature flags — not personas".
 - The confirmed persona set is a **closed set**: if the per-EP loop needs a persona not in the set, **STOP and ask the user**.
 
 ### Forbidden persona names — NEVER use
-Any of `verbs.json → forbidden_persona_names` (Developer, Engineer, Programmer, Architect, DevOps, API, Service, Component, Module, Worker, Backend, Frontend, Database, Controller, Handler, Repository, plus P3 engine names Verticle/Filter/WebAppEngine/Engine). If you catch yourself writing one, STOP and re-resolve by the priority order. The `persona --kind human` gate fails these.
+Any of `verbs.json → forbidden_persona_names` (Developer, Engineer, Programmer, Architect, DevOps, API, Service, Component, Module, Worker, Backend, Frontend, Database, Controller, Handler, Repository, plus Vert.x engine names Verticle/Filter/WebAppEngine/Engine). If you catch yourself writing one, STOP and re-resolve by the priority order. The `persona --kind human` gate fails these.
 
 > **Boundary:** the human/UI pass writes **only** human personas — never `System`. It never reads backend repos, never cites backend paths, never claims anything about controllers/routes/handlers.
 
@@ -43,8 +43,8 @@ Human actions describe what the user **PROVIDES, DECIDES, or OBSERVES** — they
 Field coverage alone can be gamed by clubbing every field into one description, which destroys granularity. So the **preferred shape is atomic**:
 
 1. **Classify every declared field** by its input widget and record it in `audit.declaredFields[]` as `{ source, code, label, editable: <bool>, widget }`:
-   - **Editable** — text/numeric/date entry, dropdown/pulldown, radio, checkbox, file upload (the fields a user fills or chooses). For P3: the `E`-type and picker widgets.
-   - **Read-only** — headers, labels, formatted/result holders, grid/list display columns, navigation buttons. For P3: `H` / `L` / `R` / `I` / `P` / `B`.
+   - **Editable** — text/numeric/date entry, dropdown/pulldown, radio, checkbox, file upload (the fields a user fills or chooses). For this metadata model: the `E`-type and picker widgets.
+   - **Read-only** — headers, labels, formatted/result holders, grid/list display columns, navigation buttons. For this metadata model: `H` / `L` / `R` / `I` / `P` / `B`.
 2. **One atomic action per editable field** — `Enter <field>` for text/number/date, `Select <field>` for dropdown/radio/checkbox, `Filter by <field>` for search criteria. The action references exactly that one field; do not list multiple editable fields in one action.
 3. **Read-only fields** — distinguish incidental chrome from substantive record data:
    - **Incidental chrome** (headers, section labels, nav buttons, formatting holders) → fold into the relevant `Review …` action's description; no per-field action.

@@ -10,7 +10,7 @@ tools:
   - Grep
   - Bash
   - mcp__plugin_breeze_breeze-mcp__Code_Graph_Search
-  - mcp__plugin_breeze_breeze-mcp__Get_Code_File_Details
+  - mcp__plugin_breeze_breeze-mcp__Get_Code_Nodes_By_Label
 ---
 
 # Backend Entry-Point Discovery Agent

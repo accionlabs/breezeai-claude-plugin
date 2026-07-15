@@ -10,6 +10,12 @@ tools:
   - Grep
   - Bash
   - mcp__plugin_breeze_breeze-mcp__Code_Graph_Search
+  - mcp__plugin_breeze_breeze-mcp__Get_Code_Nodes_By_Label
+  - mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search
+  - mcp__plugin_breeze_breeze-mcp__Get_all_personas
+  - mcp__plugin_breeze_breeze-mcp__Get_all_outcomes_for_a_persona_id
+  - mcp__plugin_breeze_breeze-mcp__Get_all_scenarios_for_a_outcome_id
+  - mcp__plugin_breeze_breeze-mcp__Get_all_steps_actions_for_a_scenario_id
 ---
 
 # SPA Flow-Structuring Agent
@@ -51,7 +57,8 @@ API_KEY:               <opaque Breeze API key>       # used in `api-key:` header
 CODE_ONTOLOGY_ID:      <integer>                     # _id of the indexed repo this EP belongs to; MUST be passed on every Code_Graph_Search call
 INDEXED_REPO_NAME:     <name on server>              # the `name` field Breeze stored when the repo was indexed (may differ from REPO.name on disk — e.g. "breezeai.webui" vs "BREEZE.AI_WEBUI"); fallback filter if CODE_ONTOLOGY_ID is unavailable
 
-EXISTING_NEIGHBORHOOD: { ...JSON of parent's dedup pre-query... }
+# NOTE: EXISTING_NEIGHBORHOOD is NOT passed in. You BUILD it yourself in the dedup step —
+# Functional_Graph_Search + a persona-scoped Get_all_* read-back against the LIVE graph, right before writing.
 ```
 
 `EXISTING_NEIGHBORHOOD` shape:
@@ -195,7 +202,7 @@ For every visibility gate you find:
 ### Phase 4 — Synthesis with dedup
 
 1. Group the discovered flows into Outcomes and Scenarios using the Functional Graph Rules block below.
-2. Apply the dedup decision matrix against `EXISTING_NEIGHBORHOOD`:
+2. **Build your dedup neighborhood from the LIVE graph FIRST** (this replaces any parent-passed snapshot — there is none): (a) `Functional_Graph_Search(PROJECT_UUID, "<PERSONA> <EP title> <likely Outcome>")` → the shared Outcome + near-duplicate scenarios across the graph; (b) `Get_all_personas(PROJECT_UUID)` → resolve THIS persona's id → `Get_all_outcomes_for_a_persona_id` → `Get_all_scenarios_for_a_outcome_id` → THIS persona's COMPLETE subtree. Reuse ONLY within this persona (Outcome is the sole cross-persona shared node). Then apply the dedup decision matrix against what you found:
 
 | Your candidate matches an existing scenario at … | And interaction model is … | Action |
 |---|---|---|
@@ -248,11 +255,7 @@ Every `useMutation` / `useQuery` / `useInfiniteQuery` / `mutateAsync` you grep M
 
 ## Tool Escalation Policy — Code_Graph_Search
 
-Code_Graph_Search is your accuracy + completeness lever. **There is no per-EP cap on calls.** Use it as often as needed to make sure nothing relevant was missed. Read + Glob + Grep are still the cheap defaults — reach for Code_Graph_Search whenever they fall short.
-
-**Hard floor (mandatory — you MUST issue at least one call per run):**
-
-Even if the seed file looks self-contained, you MUST issue at least one Code_Graph_Search call before declaring discovery complete. Skipping it entirely is a failure mode — it leaves the assumption "nothing relevant lives outside the import tree" unvalidated. The minimum hygiene query is `<EP title> <persona name> <repo name>`; log it to `audit.codeGraphSearches[]` with `reason: "mandatory hygiene sweep"`. A run with `audit.codeGraphSearches.length === 0` is invalid and Phase 6 will reject it.
+Code_Graph_Search is an **OPTIONAL accelerator**, not a required step — `Read` + `Glob` + `Grep` on the local checkout are the backbone and the ground truth. **There is NO hard floor: a run with `audit.codeGraphSearches.length === 0` is VALID** (a bounded SPA EP is usually fully traceable by reading the component + its imports). No per-EP cap when you do use it. Because a graph call is a network round-trip + tokens and may be stale/incomplete (confirm every literal by `Read`), reach for it only when the local tools fall short.
 
 **Use Code_Graph_Search whenever any of these are true:**
 - You encounter a reference (constant, function name, hook, type, validator) that you cannot resolve by walking imports from the seed file.
@@ -422,7 +425,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` prefix,
 - When a single network call is split across multiple actions (e.g. `Authenticate …`, `Submit …`, `Persist …`), EVERY action in the chain must carry the same `apis[]` entry. The chain shares a network event; it does not have one entry per call.
 - **Every `apis[i].url` MUST be a literal you extracted from a `fetch*`/`axios`/service file you `Read`, NEVER a URL synthesised from an action/component/feature name (see Phase 3 steps 4–5).** Before emit, re-confirm each `url` traces to a file in `audit.filesRead`. If a network-verb action's URL was unresolvable, its `url` is empty AND `audit.warnings[]` carries an `api_url_unresolved` entry for it — a confident guessed URL must never be emitted. Delegated submits (toolbar/menu → shared `*Form`/`*Dialog`/`*Drawer`) are the highest-risk spot: verify those handlers were actually followed to the service literal.
 - `audit.filesRead` MUST list every file you `Read`.
-- `audit.codeGraphSearches` MUST have at least one entry (mandatory hygiene sweep).
+- `audit.codeGraphSearches` records every graph call made — it MAY be empty (`[]`), since the code graph is optional (a `Read`/`Grep`-only run is valid).
 - `audit.skippedForVisibility` MUST exist (empty array `[]` is valid if Phase 2.5 found no gates).
 - `audit.stats` MUST be present AND populated with real counts. Required keys (emit `0` rather than omitting): `scenarios`, `steps`, `actions`, `actionsWithApis`, `fieldsEnumerated`, `filesRead`, `codeGraphSearchCount`, `actionsSkippedForOtherPersonas`.
 
@@ -445,7 +448,7 @@ Confirm in your own reasoning (do not include the check in output):
 11. ✅ Persona Visibility Audit performed — every visibility gate found, each one mapped to `PERSONA`, gated content included or excluded accordingly, and every exclusion recorded in `audit.skippedForVisibility[]`?
 12. ✅ No content invented for `PERSONA` that only applies to other personas?
 13. ✅ `audit.warnings[]` documents every gap / skip / judgment call (including ambiguous visibility gates)?
-14. ✅ `audit.codeGraphSearches.length >= 1` — at least one mandatory hygiene sweep happened?
+14. ✅ `audit.codeGraphSearches[]` accounts for every graph call made (may be empty — the graph is optional)?
 15. ✅ `audit.skippedForVisibility` exists (even as `[]`) and `audit.stats` is populated with all required keys, using `0` rather than omitting?
 16. ✅ Phase 6 ran: schema + rule-a + path-linked + chain + forbidden + citations + field-coverage + Pattern A collapse + dispatcher split all pass against the in-memory payload?
 17. ✅ No `Specify …` step ends with a generic single action like `Provide the form / payload / fields / details / data` — every such step has one action per actual field?
@@ -493,7 +496,7 @@ These cover what `validate.py` cannot judge (network-chain coherence, dispatcher
 | 2 | **Rule A (network-verb apis[])** | For every action whose first word is a NETWORK VERB (list above), check `apis.length >= 1` | Either: (a) the action IS a network call — re-grep service files for the URL and attach; (b) it's actually client-side — rename to a non-network verb. NEVER leave `apis: []` under a network-verb name. |
 | 3 | **Network-chain coherence** | When `Authenticate …`, `Submit …`, and `Persist …` appear under one step as a chain, they should share the same apis[] entry | Copy the apis[] entry from whichever action discovered it onto every chained action. The chain shares one network event. |
 | 4 | **Forbidden UI words in action names** | Scan every action `name` for the forbidden UI words — the canonical list is `verbs.json → forbidden_ui_words` (in `SHARED_FUNCTIONAL_PATH`); `validate.py forbidden` is the authoritative gate | Rewrite to platform-agnostic vocabulary. Common substitutions: `drop` → `upload`; `drop-zone` → `upload area`; `dialog` / `modal` → `overlay` or omit; `button` → `control` or omit; `dropdown` → `selector`; `panel` → `section`. Confirm semantics are preserved — never change what the action does, only its naming. |
-| 5 | **Citation prefix + audit shape** | Every `citations[i].reference` starts with `<REPO.name>/`; `audit.codeGraphSearches.length >= 1`; `audit.skippedForVisibility` exists (`[]` is valid); `audit.stats` present with all required keys | Prepend `<REPO.name>/` if missing. If no cgs calls were made, you skipped the mandatory hygiene sweep — go back to Phase 1 and run one. Populate `audit.stats` with real counts (use `0` rather than omitting). |
+| 5 | **Citation prefix + audit shape** | Every `citations[i].reference` starts with `<REPO.name>/`; `audit.codeGraphSearches` exists (`[]` is valid — the graph is optional); `audit.skippedForVisibility` exists (`[]` is valid); `audit.stats` present with all required keys | Prepend `<REPO.name>/` if missing. Populate `audit.stats` with real counts (use `0` rather than omitting). |
 | 6 | **Pattern A collapse (field enumeration)** | Scan every scenario for steps whose name starts with any of: `Specify` / `Fill` / `Complete` / `Configure` / `Enter` / `Adjust` / `Update` / `Modify` / `Provide` / `Save` / `Edit` / `Review and update` / `Update the` / `Edit the`. Within each such step, flag any action whose name matches the catch-all regex `^(Provide\|Submit\|Fill\|Enter\|Adjust\|Update\|Modify\|Save\|Edit)\s+(the\s+)?(form\|payload\|fields\|details\|data\|input\|values\|configuration\|settings\|metadata\|branch-specific\s+fields\|node\s+fields\|item\s+fields\|selected\s+\w+\s+fields)$` — these are catch-all placeholders. Also flag any such step that contains ONLY ONE action whose name does NOT reference a specific named field (e.g. `Provide tags` under a step called `Provide the updated tags`, or `Adjust the branch-specific fields` under `Adjust the node fields` — both are collapses because the action name is the same noun the step already used). Also flag scenarios whose ONLY field-bearing step contains an action whose description starts with `Same field set as` / `See the create scenario` / `Same as …` — these are explicit references to fields that should have been enumerated in-place. | Reopen the form's source file, list every input element inside it, and replace the catch-all action with one `Provide <field-label>` action per field, each with `description: "label: …; type: …; required: …; …"` per Phase 2 Pattern A. If you cannot resolve the field list from the seed file's import tree, issue a Code_Graph_Search query for the form component (e.g. `FunctionalNodeDialog`, `DocumentEditMetadataDialog`, `ProjectForm`) before giving up. NEVER leave a field-bearing step with a generic single-action collapse or a "same as another scenario" pointer. |
 | 7 | **API URL reality (no invented endpoints)** | For every `apis[i].url`, take its last 2–3 path segments (drop scheme/host, query string, `{params}`, and any `(annotation)`) and `Grep` the UI repo for that literal inside a `fetch*`/`axios`/service call. | If the literal is **not** found, the URL was almost certainly inferred from a name (the classic failure: a toolbar or `*Form`/`*Dialog` submit, e.g. `/v2/search/watchlist` invented from `FormAddToWatchlist`). Re-read the action's delegation chain (Phase 3 step 4) to find the real `fetch*` literal and replace it. If genuinely unresolvable, empty the `url` and add an `api_url_unresolved` entry to `audit.warnings[]`. NEVER keep a URL that does not appear in the source. |
 | 8 | **Dispatcher-scenario split** | Detection is BACKING-FORM-DRIVEN, not name-driven. For every scenario, identify the dialog / modal / drawer / form component its primary step opens. If that component is a dispatcher — branches on a discriminator prop (`type`, `label`, `kind`, `mode`, `variant`, `entity`, `nodeType`) with N distinct rendered field sets — the scenario must be split into N variants. This applies to **every operation** on that dispatcher, not just create: `Create … node`, `Add a new …`, `Edit an existing … node`, `Update a …`, `Modify a …`, `Adjust a …`, `View a … in detail` — if it opens the dispatcher, it must be split per branch. Example violation seen in practice: `Edit an existing functional ontology node` opens the same `FunctionalNodeDialog` as the 6 split `Add a new …` scenarios, so it MUST also be 6 split scenarios (`Edit an existing persona`, `Edit an existing outcome`, etc.) with each branch's fields enumerated. | Emit N variant scenarios — one per discriminator value — each enumerating the branch's actual fields. Mirror the structure across operation types: if `Add` is split into 6 scenarios, so is `Edit`, `Clone`, `View detail`, and any other operation that opens the same dispatcher. NEVER emit `same field set as the matching create scenario` as a description in place of real enumeration — that defeats the purpose of capturing the graph. |
@@ -548,7 +551,7 @@ json.dump(body, open('$BODY_PATH', 'w'))
 ```bash
 RESP_PATH="/tmp/upsert_resp_${PERSONA}_$$.json"
 HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" \
-    -X POST "$API_BASE/functional-graph/v2/upsert?llmPlatform=$LLM_PLATFORM" \
+    -X POST "$API_BASE/functional-graph/v2/upsert?embedding=true&llmPlatform=$LLM_PLATFORM" \
     -H "api-key: $API_KEY" \
     -H "Content-Type: application/json" \
     --data-binary "@$BODY_PATH")
@@ -568,7 +571,7 @@ HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" \
 if [[ $HTTP_STATUS =~ ^5 ]]; then
   sleep 15
   HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" \
-      -X POST "$API_BASE/functional-graph/v2/upsert?llmPlatform=$LLM_PLATFORM" \
+      -X POST "$API_BASE/functional-graph/v2/upsert?embedding=true&llmPlatform=$LLM_PLATFORM" \
       -H "api-key: $API_KEY" -H "Content-Type: application/json" \
       --data-binary "@$BODY_PATH")
 fi

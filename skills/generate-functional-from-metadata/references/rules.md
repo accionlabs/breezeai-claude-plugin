@@ -1,16 +1,16 @@
-# P3 (Vert.x metadata-driven) → Functional Graph mapping rules — adapter
+# Vert.x metadata-driven → Functional Graph mapping rules — adapter
 
 > **Read the single source of truth FIRST** (ADR 0001): `../../shared/functional/core.md`
 > + `human-overlay.md` (human half) + `system-overlay.md` (System/External half). This
-> file is the **P3 source-extraction adapter** — record types, MAPLQ verb mapping, P3
+> file is the **metadata source-extraction adapter** — record types, MAPLQ verb mapping, metadata
 > persona resolutions, apis[] typing, the field-capture gate. It refines, never overrides,
 > the shared rules; hard gates are enforced by the shared `validate.py` (shimmed in this
 > skill's `validators/`).
 
-P3 is a Japanese payroll / HR / social-insurance platform: ~hundreds of Vert.x/Java
+This targets a Vert.x metadata-driven platform: ~hundreds of Vert.x/Java
 Gradle modules sharing a `webapp-engine`. Behaviour is **declared in JSON metadata**,
 not imperative code. The functional flow for every feature is already written down in
-a `MAPL` record. This file is the canonical mapping; it is embedded in both P3 agents'
+a `MAPL` record. This file is the canonical mapping; it is embedded in both metadata agents'
 system prompts.
 
 ---
@@ -49,7 +49,7 @@ system prompts.
 
 ---
 
-## The two linked subtrees (the P3 advantage)
+## The two linked subtrees (the metadata-app advantage)
 
 A single `MAPL` yields BOTH halves of the functional graph, joined by the **app id**:
 
@@ -61,14 +61,14 @@ A single `MAPL` yields BOTH halves of the functional graph, joined by the **app 
 
 **Link rule:** both subtrees use the **same Outcome name** (derived from `MAPLD01` /
 business capability). The upsert merges by name, so the human "what" and the System
-"how" attach to one Outcome. Use the dedup pre-query neighborhood to reuse existing
+"how" attach to one Outcome. Use the agent's own persona-scoped dedup read-back (live graph) to reuse existing
 Outcomes/Scenarios — never create a second Outcome that means the same thing.
 
 ---
 
-## apis[] typing (P3)
+## apis[] typing (metadata)
 
-`apis[].type ∈ {REST, GraphQL, gRPC, WebSocket, Event}`. For P3:
+`apis[].type ∈ {REST, GraphQL, gRPC, WebSocket, Event}`. For this metadata model:
 
 - **`Event`** — internal Vert.x EventBus calls, `DoFilter` (Data-API filter), custom-filter
   EventBus addresses, `WriteData` handlers. `method` = verb (`DoFilter`/`WriteData`/address),
@@ -99,7 +99,7 @@ defeats granularity. So **prefer atomic actions: one user-editable field = one a
 Classify every declared field by its screen widget (from the `MSCR` layout + `MFID` type):
 
 - **Editable** — text entry, numeric, date, dropdown / pulldown, radio, checkbox, file upload
-  (the input + selection widgets; in P3 codes these are the `E`-type and picker widgets).
+  (the input + selection widgets; in these metadata widget codes these are the `E`-type and picker widgets).
   These are the fields a user actually fills or chooses.
 - **Read-only** — headers (`H`), labels (`L`), formatted / result holders (`R`), grid / list
   display columns (`I` / `P`), and navigation buttons (`B`).
@@ -136,11 +136,11 @@ the System action description (thresholds/field names are required there).
 
 ---
 
-## Persona rules (P3-specific)
+## Persona rules (metadata-app-specific)
 
 Follow the single source of truth — `../../shared/functional/core.md` plus
 `../../shared/functional/human-overlay.md` (human half) and
-`../../shared/functional/system-overlay.md` (System / External half) — with these P3 resolutions:
+`../../shared/functional/system-overlay.md` (System / External half) — with these metadata resolutions:
 
 - **Human persona** — from `MAPLD03` role code. Map known role codes to business-domain names
   (e.g. an HR/payroll back-office approver → "Payroll Administrator"). If the role library /

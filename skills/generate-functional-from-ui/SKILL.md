@@ -18,7 +18,7 @@ argument-hint: "[repo-path]"
 > | Headless backend API — REST / GraphQL / queue (incl. **ASP.NET Core**, Node, Java, Python) | `/breeze:generate-functional-from-backend` |
 > | ASP.NET **Web Forms** monolith (`.aspx`/`.ascx` + in-process backend, one repo) | `/breeze:generate-functional-from-aspnet-webforms` (single unified pass) |
 > | ASP.NET **MVC / Razor Pages** full-stack (Razor views + controllers, one repo) | run **BOTH** this skill (views) **and** `-from-backend` (controllers) — they join by the action-route URL *(no unified skill yet; Razor `.cshtml` support here is limited — SPA is the primary target)* |
-> | P3 / Vert.x metadata (MAPL / MSCR) | `/breeze:generate-functional-from-metadata` |
+> | Vert.x metadata-driven (MAPL / MSCR) | `/breeze:generate-functional-from-metadata` |
 >
 > **Why Web Forms is one skill but MVC is two:** Web Forms' UI→backend seam is an *in-process method call* (no URL) → a single unified pass is required. MVC/Core expose the backend as a *URL* (the action/endpoint route) → the standard `-from-ui` + `-from-backend` passes join on that URL, same as a SPA + REST API.
 
@@ -42,7 +42,7 @@ structurally in `action.apis[]`.
 | Persona-conditional visibility | **Mandatory Phase 2.5** — RBAC / role / permission / feature-flag / tier gate hunt inside the sub-agent, with explicit field-level scope |
 | Multi-persona EPs | **One sub-agent run per persona** that can reach the EP |
 | Field enumeration | **Mandatory Phase 2 inside sub-agent** with `{label, type, required, default, validation, options, visibleTo}` per field |
-| Code_Graph_Search | **Hard floor: ≥1 mandatory hygiene sweep per run; no budget cap thereafter** |
+| Code_Graph_Search | **OPTIONAL / conditional** — `Read`+`Grep` on local source is the backbone; use the graph only for a hard cross-file next-hop or a repo-wide inventory. Zero graph calls is a valid run. No cap when used. |
 | Step / Action quantity | **Guidance, not caps** — enumeration overrides |
 | Output validation | **Self-validation inside the sub-agent** (Phase 6: schema / rule-a / chain / forbidden / citations) with in-place repair — parent runs NO validators |
 | Upsert | **Sub-agent POSTs directly** to `/functional-graph/v2/upsert` (queue-backed embedding, no inline CPU spike) with `api-key:` header — no parent-side curl |
@@ -314,27 +314,9 @@ Group routes by domain category (e.g. Search, Pipeline, Notifications, Insights,
 
 For each entry point `ep` in `remaining[]`, **and for each `persona` in `ep.personas[]`**:
 
-## Step 1 — Dedup pre-query
+## Step 1 — (removed) dedup is now agent-side
 
-```
-Functional_Graph_Search(
-  uuid  = projectUuid,
-  query = f"{persona} {ep.title} {likely outcome name}",
-  limit = 10
-)
-```
-
-Group results into `EXISTING_NEIGHBORHOOD`:
-```json
-{
-  "outcomes": [
-    { "name": "<outcome>", "id": "...", "score": 0.78,
-      "scenarios": [{ "name": "<scenario>", "id": "...", "score": 0.83 }] }
-  ]
-}
-```
-
-If empty, pass `{"outcomes": []}` — sub-agent will proceed fresh.
+The parent no longer runs a dedup pre-query and does **not** pass `EXISTING_NEIGHBORHOOD`. The sub-agent builds its own dedup context from the **live** graph (`Functional_Graph_Search` + a persona-scoped `Get_all_personas`→`Get_all_outcomes_for_a_persona_id`→`Get_all_scenarios_for_a_outcome_id` read-back) right before writing — fresher and race-safe under parallel batches. Proceed to Step 2.
 
 ## Step 2 — Pre-compute OUTPUT_PATH and render the sub-agent prompt
 
@@ -366,7 +348,7 @@ Then load `references/spa-flow-structuring-agent.prompt.md` and substitute the `
 | `{{api_key}}` | `apiKey` from `.breeze.json` (NEVER echo, NEVER log) |
 | `{{code_ontology_id}}` | `frontendCodeOntologyId` resolved in Bootstrap step 5 |
 | `{{indexed_repo_name}}` | `frontendRepoName` resolved in Bootstrap step 5 (server-side name, may differ from on-disk basename) |
-| `{{existing_neighborhood_json}}` | `json.dumps(EXISTING_NEIGHBORHOOD)` |
+
 
 ## Step 3 — Spawn sub-agent
 
@@ -483,7 +465,7 @@ Recommend the user resume with:
 
 `entrypoints.failed[]` holds per-(EP, persona) failures with reasons mapped to the agent's summary-line prefixes (`FAIL_VALIDATE`, `FAIL_WRITE`, `FAIL_UPSERT`). For each:
 
-- **`FAIL_UPSERT` only** — the payload is sound but the POST failed. Re-curl the same OUTPUT_PATH directly via `<API_BASE>/functional-graph/v2/upsert?llmPlatform=<LLM_PLATFORM>` with `api-key:` header. No re-spawn needed.
+- **`FAIL_UPSERT` only** — the payload is sound but the POST failed. Re-curl the same OUTPUT_PATH directly via `<API_BASE>/functional-graph/v2/upsert?embedding=true&llmPlatform=<LLM_PLATFORM>` with `api-key:` header. No re-spawn needed.
 - **`FAIL_VALIDATE` / `FAIL_WRITE`** — re-spawn the sub-agent with the same input block; the agent will regenerate from scratch. If the same failure repeats, inspect the OUTPUT_PATH on disk to understand the defect class, then patch the agent prompt.
 - **Recovery loop**: clear matching entries from `failed[]`, re-add `(epId, persona)` to `remaining[]` (or pass explicitly via continue prompt), resume the skill.
 

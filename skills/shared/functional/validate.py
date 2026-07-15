@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unified functional-graph validator — the ONE engine for ui / backend / p3 / aspx.
+"""Unified functional-graph validator — the ONE engine for ui / backend / metadata / aspx.
 
 Reads a {payload, audit} object (or a bare payload) from STDIN and runs ONE check,
 returning {"ok": bool, "errors": [...], "warnings": [...]} on STDOUT.

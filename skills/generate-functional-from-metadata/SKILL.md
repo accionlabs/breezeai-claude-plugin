@@ -2,7 +2,7 @@
 name: generate-functional-from-metadata
 description: >
   Generate the full functional graph (Persona → Outcome → Scenario → Step →
-  Action → apis[]) from a P3 / Vert.x metadata-driven codebase (the kind where
+  Action → apis[]) from a Vert.x metadata-driven codebase (the kind where
   features are declared in MAPL/MSCR/MFID/MFLT/CRUD JSON, not imperative code).
   One run at the tree root discovers every application by parsing MAPL records,
   then a rooted per-application sub-agent reads each app's MAPL + referenced
@@ -11,7 +11,7 @@ description: >
   ShowScreen steps) and a System/External-persona half (from DoFilter/WriteData
   steps) joined by a shared Outcome name (the app id is the deterministic
   UI↔backend link). Checkpoints to applications.json for safe resume. Use when:
-  generate functional from P3, Vert.x webapp-engine, MAPL metadata, payroll
+  generate functional from a Vert.x webapp-engine, MAPL/MSCR metadata-driven
   metadata app, "generate functional from this metadata-driven codebase".
 argument-hint: "[root-path]"
 ---
@@ -23,9 +23,9 @@ argument-hint: "[root-path]"
 > | Headless backend API — REST / GraphQL / queue (incl. **ASP.NET Core**, Node, Java, Python) | `/breeze:generate-functional-from-backend` |
 > | ASP.NET **Web Forms** monolith (`.aspx`/`.ascx` + in-process backend, one repo) | `/breeze:generate-functional-from-aspnet-webforms` (single unified pass) |
 > | ASP.NET **MVC / Razor Pages** full-stack (Razor views + controllers, one repo) | run **BOTH** `-from-ui` (views) **and** `-from-backend` (controllers) — join by the action-route URL *(no unified skill yet)* |
-> | **◀ P3 / Vert.x metadata-driven app (MAPL / MSCR / MFID JSON) — THIS SKILL** | `/breeze:generate-functional-from-metadata` |
+> | **◀ Vert.x metadata-driven app (MAPL / MSCR / MFID JSON) — THIS SKILL** | `/breeze:generate-functional-from-metadata` |
 >
-> This skill is ONLY for **P3 / Vert.x metadata-driven** codebases (features declared in MAPL/MSCR/MFID/MFLT/CRUD JSON). If the repo is imperative code (any of the rows above), stop and use that row.
+> This skill is ONLY for **Vert.x metadata-driven** codebases (features declared in MAPL/MSCR/MFID/MFLT/CRUD JSON). If the repo is imperative code (any of the rows above), stop and use that row.
 
 ## Project
 
@@ -39,7 +39,7 @@ the user to pick (or run `/breeze:project setup`). Announce the active project o
 
 ## What this skill does
 
-P3 features are declared in JSON metadata interpreted by a shared `webapp-engine`; the functional
+Features are declared in JSON metadata interpreted by a shared `webapp-engine`; the functional
 flow is already written down in a `MAPL` record. So this skill **parses metadata** instead of
 inferring from code — far higher fidelity, and the app id deterministically links the human and
 system halves. See `references/rules.md` for the full record-type → functional mapping.
@@ -64,24 +64,24 @@ line per sub-agent.
 - `references/metadata-application-discovery-agent.prompt.md` — discovery input renderer.
 - **Per-app agent** `agents/metadata-flow-structuring-agent.md` → `breeze:metadata-flow-structuring-agent`. Per-app depth, dual subtree, field-coverage gate, dual upsert.
 - `references/metadata-flow-structuring-agent.prompt.md` — per-app input renderer.
-- `references/rules.md` — P3 record types, MAPLQ verb mapping, apis[] typing, persona rules, field-capture gate.
+- `references/rules.md` — metadata record types, MAPLQ verb mapping, apis[] typing, persona rules, field-capture gate.
 - Schema + word lists live in the **single source of truth** `../shared/functional/{upsert.schema.json, verbs.json}` (ADR 0001). Persona = any string, one persona per payload.
 - `validators/validate.py` — a thin **shim** that delegates to `../shared/functional/validate.py` (the one validator engine). Subcommands unchanged: `schema | rule-a | forbidden | persona --kind | citations --repo-name | field-coverage | citation-completeness | atomicity`. The sub-agent runs these in Phase 6; `field-coverage` is the 100%-field hard gate. `atomicity` is ADVISORY (human half only, skips System personas) — warns on clubbed input actions / input actions carrying apis[] / editable fields without a dedicated action; never blocks. (`rule-a`/`coverage` auto-detect human vs system from the half's single persona; the shim adds no static `--kind`.)
 - `validators/requirements.txt` — `jsonschema`.
 
 ## Inputs / Outputs
 
-- **Input:** P3 tree root (argument or `.breeze.json` `targetRepos.p3Root`), `.breeze.json` (`projectUuid`, `apiKey`).
+- **Input:** metadata tree root (argument or `.breeze.json` `targetRepos.metadataRoot`), `.breeze.json` (`projectUuid`, `apiKey`).
 - **Output:** functional graph updated (human + System halves, idempotent merge by name).
-  All generated artifacts go to a SINGLE dedicated output base **`{p3Root}/.breeze-p3-output/`**
+  All generated artifacts go to a SINGLE dedicated output base **`{metadataRoot}/.breeze-metadata-output/`**
   — NEVER inside the individual source repos (that pollutes ~340 module folders / their git
   status). Layout:
-  - `{p3Root}/.breeze-p3-output/applications.json` — inventory + resume checkpoint.
-  - `{p3Root}/.breeze-p3-output/{repo_name}/p3_app{APP_ID}_{persona}.json` — per-app payload
+  - `{metadataRoot}/.breeze-metadata-output/applications.json` — inventory + resume checkpoint.
+  - `{metadataRoot}/.breeze-metadata-output/{repo_name}/metadata_app{APP_ID}_{persona}.json` — per-app payload
     files (audit + replay), under a subfolder mirroring the source repo's name.
 
-  Add `.breeze-p3-output/` to the tree's `.gitignore` (or it lives outside any repo anyway). The
-  source repos must stay clean — do NOT write `p3_app*.json` into a module directory.
+  Add `.breeze-metadata-output/` to the tree's `.gitignore` (or it lives outside any repo anyway). The
+  source repos must stay clean — do NOT write `metadata_app*.json` into a module directory.
 
 ---
 
@@ -102,20 +102,20 @@ line per sub-agent.
    `HUMAN_UPSERT_PATH = SYSTEM_UPSERT_PATH = /functional-graph/v2/upsert` with `embedding=true`.
    (v2 queues embeddings to the SQS worker fleet = scalable; v1 `/functional-graph/upsert` embeds
    in-process on the API node = slow. v2 puts no enum restriction on the persona name.)
-   (Code-graph onboarding is OPTIONAL for P3 —
+   (Code-graph onboarding is OPTIONAL for metadata apps —
    the agent reads files directly; `Code_Graph_Search`/`Functional_Graph_Search` are used only as
    available. Skip `/breeze:onboard-repository` unless you want code-graph search.)
 
-## Phase -1 — Resolve the P3 root
+## Phase -1 — Resolve the metadata tree root
 
-1. `$ARGUMENTS` → 2. `.breeze.json` `targetRepos.p3Root` → 3. cwd if it holds `**/json/MAPL(*).json`
-→ 4. ask the user for the absolute path to the P3 tree root. Persist to `.breeze.json`
-`targetRepos.p3Root`. Validate by globbing for at least one `MAPL(*)` record; if none, this is not
-a P3 tree — suggest `/breeze:generate-functional-from-ui` or `-backend`.
+1. `$ARGUMENTS` → 2. `.breeze.json` `targetRepos.metadataRoot` → 3. cwd if it holds `**/json/MAPL(*).json`
+→ 4. ask the user for the absolute path to the metadata tree root. Persist to `.breeze.json`
+`targetRepos.metadataRoot`. Validate by globbing for at least one `MAPL(*)` record; if none, this is not
+a metadata (Vert.x/MAPL) tree — suggest `/breeze:generate-functional-from-ui` or `-backend`.
 
 ## Phase 0 — Discover applications (delegated; ONCE)
 
-`OUTPUT_BASE = f"{p3Root}/.breeze-p3-output"` (create it; all artifacts live here, never in a
+`OUTPUT_BASE = f"{metadataRoot}/.breeze-metadata-output"` (create it; all artifacts live here, never in a
 source repo). `OUTPUT_PATH = f"{OUTPUT_BASE}/applications.json"`. **If it already exists, read it
 and skip to the per-app loop (resume) — do NOT re-discover.** Otherwise:
 
@@ -125,7 +125,7 @@ and skip to the per-app loop (resume) — do NOT re-discover.** Otherwise:
    `references/rules.md` absolute path, `{{existing_personas_json}}`) and spawn:
    ```
    Agent(subagent_type="breeze:metadata-application-discovery-agent",
-         description="Discover P3 applications", prompt=<rendered>)
+         description="Discover metadata applications", prompt=<rendered>)
    ```
 3. The agent writes `applications.json` and returns ONE line
    (`OK · apps: N · flavorA … humanRawRole: N · path: …`). On `FAIL_DISCOVERY`, stop.
@@ -147,21 +147,16 @@ own pair of upserts. For each batch: run Step 1–2 per app (cheap, parent-side)
 concurrently (Step 3), then Step 4–5 per app as each returns. Finish a batch before starting the
 next so the checkpoint mutates atomically. Drop batch size to 1 near context budget.
 
-## Step 1 — Dedup pre-query (the no-duplicates gate)
+## Step 1 — (removed) dedup is now agent-side
 
-```
-Functional_Graph_Search(uuid=projectUuid, query=f"{app.title} {likely outcome}", limit=10)
-```
-Group hits into `EXISTING_NEIGHBORHOOD = {"outcomes":[{name,id,score,scenarios:[…]}]}` (pass
-`{"outcomes":[]}` if empty). The sub-agent reuses these instead of creating duplicates. The
-shared-Outcome-name link between the two halves is also reinforced here.
+The parent no longer runs a dedup pre-query and does **not** pass `EXISTING_NEIGHBORHOOD`. The sub-agent builds its own dedup context from the **live** graph (`Functional_Graph_Search` + a persona-scoped `Get_all_personas`→`Get_all_outcomes_for_a_persona_id`→`Get_all_scenarios_for_a_outcome_id` read-back) right before writing — fresher and race-safe under parallel batches. Proceed to Step 2.
 
 ## Step 2 — Pre-compute output paths + render the prompt
 
 ```
-OUTPUT_DIR         = f"{p3Root}/.breeze-p3-output/{repo_name}"   # mirrors the source repo name; NOT inside the repo
-OUTPUT_PATH_HUMAN  = f"{OUTPUT_DIR}/p3_app{APP_ID}_{personaHuman_slug}.json"   # omit if personaHuman is null
-OUTPUT_PATH_SYSTEM = f"{OUTPUT_DIR}/p3_app{APP_ID}_System.json"
+OUTPUT_DIR         = f"{metadataRoot}/.breeze-metadata-output/{repo_name}"   # mirrors the source repo name; NOT inside the repo
+OUTPUT_PATH_HUMAN  = f"{OUTPUT_DIR}/metadata_app{APP_ID}_{personaHuman_slug}.json"   # omit if personaHuman is null
+OUTPUT_PATH_SYSTEM = f"{OUTPUT_DIR}/metadata_app{APP_ID}_System.json"
 ```
 The agent's Phase 7 `mkdir -p`s the parent dir before writing, so `OUTPUT_DIR` is created on demand.
 **Never** set these under `{repo_path}` — that writes into the source module and pollutes it.
@@ -172,7 +167,7 @@ Render `references/metadata-flow-structuring-agent.prompt.md`, substituting the 
 `system_upsert_path`), the two output paths, `validators_path` (this skill's `validators/` absolute
 dir), `shared_functional_path` (the shared SSOT dir `<pluginRoot>/skills/shared/functional` — the agent
 reads `core.md` + `human-overlay.md` + `system-overlay.md` from here, same as the UI/backend passes),
-`rules_path` (this skill's `references/rules.md` absolute path = the metadata MAPL overlay), and `existing_neighborhood_json`.
+and `rules_path` (this skill's `references/rules.md` absolute path = the metadata MAPL overlay). (No `existing_neighborhood_json` — the agent self-dedups against the live graph.)
 
 ## Step 3 — Spawn the batch (concurrently)
 
@@ -213,14 +208,14 @@ custom Java): ~150k+ / ~180s+. Plan multi-session for large trees (hundreds of a
 ## Multi-session resume
 When context hits ~75%, finish the current batch (checkpoints flushed) and stop. Resume with:
 ```
-/breeze:generate-functional-from-metadata continue from applications.json in <p3Root>
+/breeze:generate-functional-from-metadata continue from applications.json in <metadataRoot>
 ```
-The skill reads `{p3Root}/.breeze-p3-output/applications.json`, skips `completed[]`, and continues
+The skill reads `{metadataRoot}/.breeze-metadata-output/applications.json`, skips `completed[]`, and continues
 `remaining[]`. Discovery is never re-run while that checkpoint exists.
 
 ## Failure recovery
 `applications.failed[]` maps to the agent prefixes. `FAIL_UPSERT` only → re-curl the saved
-`p3_app*_*.json` `payload` to the right path with the `api-key:` header (no re-spawn).
+`metadata_app*_*.json` `payload` to the right path with the `api-key:` header (no re-spawn).
 `FAIL_VALIDATE` (incl. field-coverage) / `FAIL_WRITE` → re-spawn with the same input; if it repeats,
 inspect the payload file on disk, then patch the agent prompt. Recovery loop: clear from `failed[]`,
 re-add the app id to `remaining[]`, resume.

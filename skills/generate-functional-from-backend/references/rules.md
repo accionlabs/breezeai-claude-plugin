@@ -23,7 +23,7 @@
 |---|---|---|
 | `Glob` / `Read` / `Grep` on the backend folder | **Primary** — controllers, resolvers, services, DTOs, decorators | Filesystem has literal `@Post(...)` strings, `@Resolver`, full handler body, injection chain |
 | `Code_Graph_Search` on the backend repo | **Optional accelerator** — locate controllers or trace call chains | Faster than blind globbing, but always confirm by `Read`ing the actual file |
-| `Get_Code_File_Details` | **Allowed for backend** — extracting decorator strings + class structure | Backend route extraction is what this tool was designed for |
+| `Get_Code_Nodes_By_Label` | **Allowed for backend** — precise single Function/Class fetch by `{name,path,codeOntologyId}` + `Statement` route/DB inventories (scope by `codeOntologyId`) | Deterministic complement to `Code_Graph_Search`; supersedes the old whole-file `Get_Code_File_Details` |
 | `Functional_Graph_Search` | **Dedup check only** — never as a source of code knowledge | See Step 1 |
 
 ---

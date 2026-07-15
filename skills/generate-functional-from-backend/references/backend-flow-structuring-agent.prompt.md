@@ -43,7 +43,6 @@ INDEXED_REPO_NAME:     {{indexed_repo_name}}
 SHARED_FUNCTIONAL_PATH: {{shared_functional_path}}
 VALIDATORS_PATH:       {{validators_path}}
 
-EXISTING_NEIGHBORHOOD:
-{{existing_neighborhood_json}}
+# (no EXISTING_NEIGHBORHOOD — the agent builds its own persona-scoped dedup read-back from the live graph)
 
 Begin Phase 1. Discover, enumerate, run the branch & error-path audit, self-validate (Phase 6), write to OUTPUT_PATH (Phase 7), POST the upsert with the `api-key:` header (Phase 8), and return ONLY the `OK · …` / `FAIL_…` summary line per the agent's Phase 8 Step 4 spec.

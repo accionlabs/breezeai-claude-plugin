@@ -1,7 +1,7 @@
 {
   "name": "breeze",
   "displayName": "Breeze AI",
-  "version": "3.6.0",
+  "version": "3.6.1",
   "description": "Breeze AI — functional graph, code graph, design analysis, and requirement tracing skills via MCP",
   "author": {
     "name": "Accion Breeze",

@@ -20,6 +20,7 @@ tools:
   - Grep
   - Bash
   - mcp__plugin_breeze_breeze-mcp__Code_Graph_Search
+  - mcp__plugin_breeze_breeze-mcp__Get_Code_Nodes_By_Label
   - mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search
   - mcp__plugin_breeze_breeze-mcp__Get_all_personas
   - mcp__plugin_breeze_breeze-mcp__Get_all_outcomes_for_a_persona_id
@@ -122,13 +123,13 @@ Query the live functional graph so you neither duplicate nor borrow across perso
 > Guard: never let a scenario/step/action from another persona appear under `<PERSONA>` (or under System). Cross-persona sharing is limited to the **Outcome** node only.
 
 ## Phase 6 — Self-validate & repair (both payloads)
-Run `SHARED_FUNCTIONAL_PATH/validate.py` (or the skill's `VALIDATORS_PATH`) on each payload: `schema`, `rule-a`, `forbidden` (human half — no `postback`/`gridview`/UI words in action names), `citations` (`<repo>/<relative path>` at scenario/step/action, never persona/outcome), `persona` (User payload personas[0] == `<PERSONA>`; System payload personas[0] ∈ {System, External System}), and SOAP-url reality (every SOAP `url` traces to a real WCF/ASMX operation in code). Fix in place until clean. A run with zero `Code_Graph_Search`/functional reads is invalid.
+Run `SHARED_FUNCTIONAL_PATH/validate.py` (or the skill's `VALIDATORS_PATH`) on each payload: `schema`, `rule-a`, `forbidden` (human half — no `postback`/`gridview`/UI words in action names), `citations` (`<repo>/<relative path>` at scenario/step/action, never persona/outcome), `persona` (User payload personas[0] == `<PERSONA>`; System payload personas[0] ∈ {System, External System}), and SOAP-url reality (every SOAP `url` traces to a real WCF/ASMX operation in code). Fix in place until clean. (`Code_Graph_Search` is an OPTIONAL accelerator — a run with zero graph calls is valid as long as the chain was traced by `Read`/`Grep` on the local source; the **functional read tools** for persona-scoped dedup in Phase 5 are the ones that matter here, not the code graph.)
 
 ## Phase 7 — Write
 Write the User payload to `OUTPUT_PATH_HUMAN` and the System payload to `OUTPUT_PATH_SYSTEM` (each `{payload, audit}`). Both use the identical shared Outcome name.
 
 ## Phase 8 — Upsert
-POST each payload to `<API_BASE>/functional-graph/v2/upsert?llmPlatform=<LLM_PLATFORM>` with header `api-key: <API_KEY>` via `curl --data-binary @<file>` (payload never crosses a tool-arg limit). Upsert the **User** payload first (so the Outcome exists), then the **System** payload (attaches to the same Outcome by name). Capture each HTTP status + functionalId.
+POST each payload to `<API_BASE>/functional-graph/v2/upsert?embedding=true&llmPlatform=<LLM_PLATFORM>` with header `api-key: <API_KEY>` via `curl --data-binary @<file>` (payload never crosses a tool-arg limit). Upsert the **User** payload first (so the Outcome exists), then the **System** payload (attaches to the same Outcome by name). Capture each HTTP status + functionalId.
 
 ## Phase 9 — Return ONE summary line
 `EP "<title>" [<PERSONA>]: human <status>/fn_… (S scenarios, A actions) + system <status>/fn_… (S scenarios) | Outcome "<name>" | join=<Class>.<Method>|SOAP | dedup: <reused/created>`

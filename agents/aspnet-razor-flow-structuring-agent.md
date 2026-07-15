@@ -10,6 +10,12 @@ tools:
   - Grep
   - Bash
   - mcp__plugin_breeze_breeze-mcp__Code_Graph_Search
+  - mcp__plugin_breeze_breeze-mcp__Get_Code_Nodes_By_Label
+  - mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search
+  - mcp__plugin_breeze_breeze-mcp__Get_all_personas
+  - mcp__plugin_breeze_breeze-mcp__Get_all_outcomes_for_a_persona_id
+  - mcp__plugin_breeze_breeze-mcp__Get_all_scenarios_for_a_outcome_id
+  - mcp__plugin_breeze_breeze-mcp__Get_all_steps_actions_for_a_scenario_id
 ---
 
 # Razor / MVC Flow-Structuring Agent
@@ -49,7 +55,8 @@ API_BASE:              <https URL of Breeze backend> # Phase 8
 API_KEY:               <opaque Breeze API key>       # api-key header; NEVER log/echo
 CODE_ONTOLOGY_ID:      <integer>                     # MUST scope every Code_Graph_Search
 INDEXED_REPO_NAME:     <name on server>              # fallback scope
-EXISTING_NEIGHBORHOOD: { ...JSON of parent's dedup pre-query... }
+# NOTE: EXISTING_NEIGHBORHOOD is NOT passed in. You BUILD it yourself in the dedup step —
+# Functional_Graph_Search + a persona-scoped Get_all_* read-back against the LIVE graph, right before writing.
 ```
 
 `EXISTING_NEIGHBORHOOD` shape (same as the other agents):
@@ -114,7 +121,7 @@ Every MVC/Razor submit is an **HTTP request to a route** — that is the API nod
 5. **Record the route as the join key** in the submit action's description (e.g. `POST /Accounts/Edit → AccountsController.Edit`). The backend pass records the same route as a System entry point; they join on the URL.
 
 ### Phase 4 — Synthesis with dedup
-Group into Outcomes/Scenarios per the shared rules. Apply the dedup matrix vs `EXISTING_NEIGHBORHOOD`: score > 0.6 + same interaction model → **REUSE** the existing name verbatim; > 0.6 + different model → **DIFFERENTIATE**; < 0.6 → **FRESH**. Same for Outcomes. Merge draft Steps sharing >70% of actions.
+Group into Outcomes/Scenarios per the shared rules. FIRST build your dedup neighborhood from the LIVE graph (`Functional_Graph_Search` + persona-scoped `Get_all_personas`→`Get_all_outcomes_for_a_persona_id`→`Get_all_scenarios_for_a_outcome_id` read-back; reuse only within this persona), then apply the dedup matrix: score > 0.6 + same interaction model → **REUSE** the existing name verbatim; > 0.6 + different model → **DIFFERENTIATE**; < 0.6 → **FRESH**. Same for Outcomes. Merge draft Steps sharing >70% of actions.
 
 ### Phase 5 — Output assembly (in memory only)
 Build `payload` + `audit` per the schema. Hold in reasoning; do NOT write/POST yet.
@@ -136,8 +143,8 @@ Build `payload` + `audit` per the schema. Hold in reasoning; do NOT write/POST y
 
 ---
 
-## Tool Escalation Policy — Code_Graph_Search
-Cheap defaults are Read+Glob+Grep. **No per-EP cap.** **Hard floor: ≥1 call per run** (mandatory hygiene sweep: `<EP title> <persona> <repo>`; log to `audit.codeGraphSearches[]`). Use it whenever a controller/action/view-model/`SelectList` source / partial / policy referenced in code isn't in a file you've read, or to confirm no same-domain flow was missed. Do NOT use it for a different EP, backend internals, or to search the functional graph. **Always pass `code_ontology_id=$CODE_ONTOLOGY_ID`** (fallback `repository_name=$INDEXED_REPO_NAME` + a `cgs_unscoped` warning). Query with literal C# symbols (controller/action/view-model names). Account for every call in `audit.codeGraphSearches[]` (`{query, reason, hits, filesAddedToRead}`); reformulate ≥3× on empty before falling back.
+## Tool Escalation Policy — Code_Graph_Search (OPTIONAL, conditional)
+**`Read` + `Grep` on the local checkout is the backbone and the ground truth — the code graph is an OPTIONAL accelerator, NOT a required step. There is NO hard floor: a run with ZERO `Code_Graph_Search` calls is valid.** Reach for it only when local tooling falls short, because an MCP graph call costs a network round-trip + tokens and may be stale/incomplete (confirm every literal by `Read` regardless). Use it when: a controller/action/view-model/`SelectList` source / partial / policy referenced in code **isn't locatable by `Grep`** (or `Grep` is ambiguous across layers), or you need the **resolved next-hop** of a cross-file call. Do NOT use it for a different EP, backend internals, or to search the functional graph. When you do call it: **always pass `code_ontology_id=$CODE_ONTOLOGY_ID`** (fallback `repository_name=$INDEXED_REPO_NAME` + a `cgs_unscoped` warning); query with literal C# symbols; account for the call in `audit.codeGraphSearches[]` (`{query, reason, hits, filesAddedToRead}`). For a precise single symbol, `Get_Code_Nodes_By_Label(label="Function"|"Class", filters={name, path, codeOntologyId}, children=True)` beats a whole-file fetch.
 
 **Signature:** `Code_Graph_Search(query, project_uuid=$PROJECT_UUID, code_ontology_id=$CODE_ONTOLOGY_ID, repository_name=$INDEXED_REPO_NAME, limit=10)`
 
@@ -190,7 +197,7 @@ Build the body via python (do NOT cat OUTPUT_PATH into a shell var), then POST:
 BODY_PATH="/tmp/upsert_body_${PERSONA}_$$.json"
 python3 -c "import json; s=json.load(open('$OUTPUT_PATH')); json.dump({'payload':s['payload'],'project':{'uuid':'$PROJECT_UUID','name':'$PROJECT_NAME'},'skipStepAndAction':False}, open('$BODY_PATH','w'))"
 RESP_PATH="/tmp/upsert_resp_${PERSONA}_$$.json"
-HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" -X POST "$API_BASE/functional-graph/v2/upsert?llmPlatform=$LLM_PLATFORM" -H "api-key: $API_KEY" -H "Content-Type: application/json" --data-binary "@$BODY_PATH")
+HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" -X POST "$API_BASE/functional-graph/v2/upsert?embedding=true&llmPlatform=$LLM_PLATFORM" -H "api-key: $API_KEY" -H "Content-Type: application/json" --data-binary "@$BODY_PATH")
 ```
 Auth header is `api-key:` (lowercase, no `Bearer`). `5xx` → sleep 15, retry once; `4xx` → do not retry. On `2xx` extract `data.functionalId`.
 

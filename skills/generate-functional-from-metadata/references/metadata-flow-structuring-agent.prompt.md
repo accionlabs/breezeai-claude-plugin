@@ -1,4 +1,4 @@
-# Per-call inputs template — P3 flow-structuring agent
+# Per-call inputs template — metadata flow-structuring agent
 
 The skill renders this file (substitutes `{{...}}`) and passes the result as the `prompt`
 argument when invoking `subagent_type: "breeze:metadata-flow-structuring-agent"`, ONCE per application.
@@ -32,8 +32,7 @@ VALIDATORS_PATH:       {{validators_path}}
 SHARED_FUNCTIONAL_PATH: {{shared_functional_path}}
 RULES_PATH:            {{rules_path}}
 
-EXISTING_NEIGHBORHOOD:
-{{existing_neighborhood_json}}
+# (no EXISTING_NEIGHBORHOOD — the agent builds its own persona-scoped dedup read-back from the live graph)
 
 Begin Phase 1. Read the recipe + targets, enumerate 100% of declared fields (Phase 2), build the
 two linked subtrees (Phase 3), self-validate both incl. field-coverage==1.0 (Phase 6), write to

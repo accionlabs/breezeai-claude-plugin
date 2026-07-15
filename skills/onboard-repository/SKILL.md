@@ -219,7 +219,7 @@ The parser only handles its **supported source languages** — **C#** (+ ASP.NET
 
 ```
 # example <repo>/.repoignore
-.breeze-p3-output/      # generated functional-graph payloads (not source)
+.breeze-metadata-output/      # generated functional-graph payloads (not source)
 merge_plan/             # scratch / planning folder
 .breeze.json            # contains apiKey — never index
 ```

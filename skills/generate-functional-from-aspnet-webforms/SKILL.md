@@ -27,7 +27,7 @@ argument-hint: "[repo-path]"
 > | Headless backend API — REST / GraphQL / queue (incl. **ASP.NET Core**, Node, Java, Python) | `/breeze:generate-functional-from-backend` |
 > | **◀ ASP.NET Web Forms monolith (`.aspx`/`.ascx` + in-process backend, one repo) — THIS SKILL** | `/breeze:generate-functional-from-aspnet-webforms` (single unified pass) |
 > | ASP.NET **MVC / Razor Pages** full-stack (Razor views + controllers, one repo) | run **BOTH** `-from-ui` (views) **and** `-from-backend` (controllers) — join by the action-route URL *(no unified skill yet; Razor UI support is limited)* |
-> | P3 / Vert.x metadata (MAPL / MSCR) | `/breeze:generate-functional-from-metadata` |
+> | Vert.x metadata-driven (MAPL / MSCR) | `/breeze:generate-functional-from-metadata` |
 >
 > **Why Web Forms is one skill but MVC is two:** Web Forms' UI→backend seam is an *in-process method call* (no URL) → a single unified pass is required to join the halves. MVC/Core expose the backend as a *URL* (the action route) → the standard `-from-ui` + `-from-backend` passes join on that URL, same as a SPA + REST API.
 >
@@ -74,7 +74,7 @@ Human actions stay platform-agnostic and user-observable (the forbidden-UI-word 
 - **In-process (the common case here):** the human action records the **façade/service method** `<Class>.<Method>` it invokes (e.g. `BillingFacade.CreateInvoice`); the System half is anchored on that same method. There is no URL — the method name IS the seam. This skill passes the human-half Outcome to the System agent as `EXISTING_NEIGHBORHOOD` so it **attaches** (upsert merges by Outcome name).
 - **Network (rare in this app class):** if the action crosses a **SOAP** boundary (WCF `.svc` / ASMX `[WebMethod]`), the seam is the SOAP operation URL in `action.apis[]`.
 
-**Runs on the LOCAL checkout.** The agents read the actual source off disk (`Read`/`Glob`/`Grep` over `.aspx`/`.ascx`/code-behind/façade/service). The code-ontology **graph is only an accelerator** (`Code_Graph_Search`/`Get_Code_File_Details` for following the `control→façade→service→repository→SQL` chain) — not the input. Extraction is therefore robust to code-graph gaps; a clean graph just makes the chain-following faster/more complete.
+**Runs on the LOCAL checkout.** The agents read the actual source off disk (`Read`/`Glob`/`Grep` over `.aspx`/`.ascx`/code-behind/façade/service). The code-ontology **graph is only an accelerator** (`Code_Graph_Search`/`Get_Code_Nodes_By_Label` — scoped by `codeOntologyId` — for following the `control→façade→service→repository→SQL` chain) — not the input. Extraction is therefore robust to code-graph gaps; a clean graph just makes the chain-following faster/more complete.
 
 ## Resources
 
@@ -164,8 +164,7 @@ Record the chosen scope in `entrypoints.json`.
 
 For each UI EP in `remaining[]`, and for each `persona` in `ep.personas[]`, in parallel batches of up to 3:
 
-**1. Dedup pre-query.**
-`Functional_Graph_Search(uuid, query=f"{persona} {ep.title} <likely outcome>", limit=10)` → group into `EXISTING_NEIGHBORHOOD` (`{outcomes:[{name,id,score,scenarios:[…]}]}`; `{"outcomes":[]}` if none). This is a *seed* — the agent also does its own persona-scoped read-back (below) before writing.
+**1. (removed) dedup is agent-side.** The parent does not pre-query or pass `EXISTING_NEIGHBORHOOD`. The `aspnet-webforms` agent runs its own persona-scoped dedup read-back (Functional_Graph_Search + `Get_all_*`) against the live graph in its Phase 5, right before writing.
 
 **2. Spawn the end-to-end agent** — `breeze:aspnet-webforms-flow-structuring-agent`. ONE call per (EP, persona) produces **both** halves (User subtree + joined System subtree) in a single run — there is no separate System spawn and no cross-agent hand-off. Pre-compute `OUTPUT_PATH_HUMAN = <repo>/dm_ep{NN}_{persona}_{slug}.json` and `OUTPUT_PATH_SYSTEM = <repo>/dm_ep{NN}_system_{slug}.json`. Resolve the façade seam(s) this EP calls to `{seedFile, seedLine}` from the discovery agent's `Internal` `service-operation` entries in `entrypoints.json` (fallback `Grep`/`Code_Graph_Search`), and pass them as hints. Render its input block:
 ```
@@ -179,7 +178,7 @@ CODE_ONTOLOGY_ID / INDEXED_REPO_NAME   SHARED_FUNCTIONAL_PATH
 FACADE_SEAM_HINTS: [ { "op": "<Class>.<Method>", "seedFile": "...", "seedLine": N } ]
 MOUNTED_CONTROLS: [ { "file": "<abs .ascx>", "codeBehind": "<abs .ascx.cs>", "mountedVia": "detailview-relationship|dashlet|search|inline-newrecord|register", "role": "subpanel|search|inline-create" } ]
 SCOPE: <confirmed façade/service scope from Phase 0.5>
-EXISTING_NEIGHBORHOOD: <json from step 1>
+# (no EXISTING_NEIGHBORHOOD — the agent self-dedups against the live graph)
 ```
 `MOUNTED_CONTROLS` = the `foldedControls[]` this EP hosts (from 0.1 reachability), resolved for this EP: a DetailView's subpanels (via `DETAILVIEWS_RELATIONSHIPS`), its search control, its inline-create control. The agent **reads each mounted control's code-behind and folds its flows into THIS EP's scenario** (extra Steps/Actions under the same Outcome) — they are NOT separate runs. `sharedControls[]` are NOT passed here (they get their own one-time run and are reused via dedup); `orphans[]` are never passed.
 

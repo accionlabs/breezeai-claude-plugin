@@ -10,7 +10,12 @@ tools:
   - Grep
   - Bash
   - mcp__plugin_breeze_breeze-mcp__Code_Graph_Search
-  - mcp__plugin_breeze_breeze-mcp__Get_Code_File_Details
+  - mcp__plugin_breeze_breeze-mcp__Get_Code_Nodes_By_Label
+  - mcp__plugin_breeze_breeze-mcp__Functional_Graph_Search
+  - mcp__plugin_breeze_breeze-mcp__Get_all_personas
+  - mcp__plugin_breeze_breeze-mcp__Get_all_outcomes_for_a_persona_id
+  - mcp__plugin_breeze_breeze-mcp__Get_all_scenarios_for_a_outcome_id
+  - mcp__plugin_breeze_breeze-mcp__Get_all_steps_actions_for_a_scenario_id
 ---
 
 # Backend Flow-Structuring Agent
@@ -63,7 +68,8 @@ INDEXED_REPO_NAME:     <name on server>              # the `name` field Breeze s
 SHARED_FUNCTIONAL_PATH: <absolute path>              # directory holding the SSOT rules (core.md + system-overlay.md) — `Read` both FIRST (see Functional Graph Rules); degrade to training/EXISTING_NEIGHBORHOOD if absent
 VALIDATORS_PATH:       <absolute path>               # directory containing validate.py — run it as a deterministic gate in Phase 6 (may be absent on older invocations; degrade to prose-only if so)
 
-EXISTING_NEIGHBORHOOD: { ...JSON of parent's dedup pre-query... }
+# NOTE: EXISTING_NEIGHBORHOOD is NOT passed in. You BUILD it yourself in the dedup step —
+# Functional_Graph_Search + a persona-scoped Get_all_* read-back against the LIVE graph, right before writing.
 ```
 
 `EXISTING_NEIGHBORHOOD` shape:
@@ -112,7 +118,7 @@ If `EXISTING_NEIGHBORHOOD.outcomes` is empty, the graph has nothing similar yet 
 | `Read` | Primary. Read the seed file in full and every constructor-injected service / repository / client / DTO / decorator implementation. |
 | `Glob` | Locate imported files by pattern (e.g. `src/**/*.service.ts`, config modules). |
 | `Grep` | Find references inside files (literal route prefixes, env-var queue names, validator decorators, thrown exception types). |
-| `Get_Code_File_Details` | Allowed for backend — extracting decorator strings + class structure of a controller/resolver. |
+| `Get_Code_Nodes_By_Label` | Allowed for backend — the precise locator: fetch a single controller/resolver Function/Class by `{name, path, codeOntologyId}` (children=True) without whole-file overflow, or enumerate routes/DB calls via `label="Statement"` (`semanticType` route / db_method_call / query_statement). Scope by `codeOntologyId` in `filters`. |
 | `Code_Graph_Search` | Resolve references that import-walking can't surface, trace call chains. See Tool Escalation Policy. |
 | `Bash` | (a) Read-only `wc`/`find` during discovery. (b) `mkdir -p` + heredoc to write OUTPUT_PATH in Phase 7. (c) `curl` to POST the upsert in Phase 8. No other writes; no MCP write operations. |
 
@@ -217,7 +223,7 @@ For every branch you find:
 ### Phase 4 — Synthesis with dedup
 
 1. Group the discovered flows into Outcomes and Scenarios using the Functional Graph Rules block below. One Outcome per related EP cluster — outcomes are **business capabilities**, never `Handle ProjectsController` or `Process Database Queries`.
-2. Apply the dedup decision matrix against `EXISTING_NEIGHBORHOOD`:
+2. **Build your dedup neighborhood from the LIVE graph FIRST** (this replaces any parent-passed snapshot — there is none): (a) `Functional_Graph_Search(PROJECT_UUID, "<PERSONA> <EP title> <likely Outcome>")` → the shared Outcome + near-duplicate scenarios across the graph; (b) `Get_all_personas(PROJECT_UUID)` → resolve THIS persona's id → `Get_all_outcomes_for_a_persona_id` → `Get_all_scenarios_for_a_outcome_id` → THIS persona's COMPLETE subtree. Reuse ONLY within this persona (Outcome is the sole cross-persona shared node). Then apply the dedup decision matrix against what you found:
 
 | Your candidate matches an existing scenario at … | And the flow is … | Action |
 |---|---|---|
@@ -271,19 +277,13 @@ Every service / repository / client injected into the handler's constructor MUST
 
 ## Tool Escalation Policy — Code_Graph_Search
 
-Code_Graph_Search is your accuracy + completeness lever. **There is no per-EP cap on calls.** Read + Glob + Grep are the cheap defaults; reach for Code_Graph_Search whenever they fall short.
+Code_Graph_Search is an **OPTIONAL accelerator** — `Read` + `Glob` + `Grep` on the local checkout are the backbone and the **source of truth**. **There is NO hard floor: a run with zero graph calls is VALID.** No per-EP cap when you do use it.
 
-**Soft floor (default — issue at least one call per run *when the tool is available*):** even if the handler looks self-contained, issue at least one Code_Graph_Search call before declaring discovery complete — it validates the assumption "nothing relevant lives outside the import tree." The minimum hygiene query is `<EP title> <primary service names> <repo name>`; log it to `audit.codeGraphSearches[]` with `reason: "mandatory hygiene sweep"`.
+**When it helps (recommended for backend, still optional):** backend route/decorator extraction is the one place the graph earns its keep — reach for it to (a) resolve the concrete target of a cross-file call (through interface / DI / overload) that `Grep` can't disambiguate, or (b) enumerate routes/DB calls repo-wide (`Get_Code_Nodes_By_Label(label="Statement", filters={semanticType: route|db_method_call|…})`). Skip it when the handler + its import tree are fully traceable by `Read`/`Grep`.
 
-**Graceful degradation (tool unavailable):** if `Code_Graph_Search` is NOT in your tool set — or the very first call errors out (e.g. the breeze MCP server is not connected / returns an auth or transport error) — do NOT fail the run. Instead:
-1. Append a single entry to `audit.warnings[]`:
-   ```json
-   { "type": "code_graph_unavailable", "note": "Code_Graph_Search tool not available this run — proceeded on Read+Glob+Grep only" }
-   ```
-2. Set `audit.codeGraphSearchAvailable = false` and proceed with file-based discovery (Read + Glob + Grep) alone. Compensate by being more thorough with `Grep` across the repo for unresolved symbols.
-3. Phase 6 then accepts `audit.codeGraphSearches.length === 0` **only when** this `code_graph_unavailable` warning is present.
+> **⚠️ The code graph does NOT capture every statement.** It is an accelerator to *locate* code — never the source of statement / step / action detail. Every literal (route, URL, stored proc, table, field, guard) and every Step/Action MUST be confirmed by `Read`ing the actual source. **At step/action granularity the local file is the ONLY source of truth** — never derive a step or action from a graph summary alone.
 
-When the tool IS available, the soft floor applies: a run with zero calls and no `code_graph_unavailable` warning is invalid and Phase 6 will reject it. The distinction is "tool present but unused" (reject) vs "tool genuinely unavailable" (degrade and proceed).
+**If the tool is unavailable** (not in your tool set, or the first call errors — MCP not connected / auth / transport): do NOT fail. Append `audit.warnings[] { "type": "code_graph_unavailable", "note": "…proceeded on Read+Glob+Grep only" }` and set `audit.codeGraphSearchAvailable = false`, and be extra-thorough with `Grep` for unresolved symbols. Either way — used, unused-by-choice, or unavailable — an **empty `audit.codeGraphSearches` is accepted** (Phase 6 never rejects on it).
 
 **Use Code_Graph_Search whenever any of these are true:**
 - You hit a reference (constant, function, type, validator, DTO) you cannot resolve by walking imports from the seed file.
@@ -450,7 +450,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` (on-dis
 - Every action whose first word is a SIDE-EFFECT VERB MUST satisfy Rule A (apis[] OR DB/ES/S3 identifier in description).
 - When one network/queue event is split across multiple actions (e.g. `Persist …`, `Publish …`), every action in that chain that shares the event must carry the same `apis[]` entry.
 - `audit.filesRead` MUST list every file you `Read`.
-- `audit.codeGraphSearches` MUST have at least one entry (hygiene sweep) — UNLESS `Code_Graph_Search` was unavailable this run, in which case `audit.codeGraphSearches` may be empty AND `audit.warnings[]` MUST carry a `code_graph_unavailable` entry (and `audit.codeGraphSearchAvailable = false`).
+- `audit.codeGraphSearches` records every graph call made and MAY be empty (`[]`) — the code graph is optional; a `Read`/`Grep`-only run is valid. (If the tool errored/was unavailable, also add a `code_graph_unavailable` warning + `audit.codeGraphSearchAvailable = false`, but that's for observability, not a gate.)
 - `audit.sideEffects` MUST exist (empty array `[]` is valid).
 - `audit.stats` MUST be present AND populated with real counts. Required keys (emit `0` rather than omitting): `scenarios`, `steps`, `actions`, `actionsWithApis`, `fieldsEnumerated`, `sideEffectsLogged`, `sideEffectsMatched`, `filesRead`, `codeGraphSearchCount`.
 
@@ -469,7 +469,7 @@ Confirm in your own reasoning (do not include the check in output):
 7. ✅ Dedup decision matrix applied — scenarios/outcomes named to merge into `EXISTING_NEIGHBORHOOD` when score > 0.6; cross-pass outcome name reused verbatim?
 8. ✅ Every System action has a non-empty `description`?
 9. ✅ Every citation `reference` starts with `<REPO.name>/` and points to a backend file (no frontend paths)?
-10. ✅ `audit.codeGraphSearches.length >= 1` (hygiene sweep happened, every call traceable) — OR, if the tool was unavailable, `audit.warnings[]` carries a `code_graph_unavailable` entry and `audit.codeGraphSearchAvailable = false`?
+10. ✅ `audit.codeGraphSearches[]` accounts for every graph call made (may be empty — the graph is optional; zero calls is valid)?
 11. ✅ Side-effect coverage: ≥90% of `audit.sideEffects[]` matched to an action by repo/table/url/identifier (`matchedToAction: true`); unmatched trivial ones justified in `audit.warnings[]`?
 12. ✅ Polymorphic-handler split applied — if the handler dispatches on a discriminator (message `type` / `eventType` / `command` / `kind`), one scenario per branch with that branch's fields enumerated?
 13. ✅ `audit.sideEffects` and `audit.stats` populated with all required keys (use `0` rather than omitting)?
@@ -521,7 +521,7 @@ When the deterministic pass ran, set `audit.validatorsRun = true`. The `$REPO_NA
 | 2 | **Rule A (side-effect-verb)** | For every action whose first word is a SIDE-EFFECT VERB, check `apis.length >= 1` OR a repo+table / ES index / S3 bucket named in `description` | (a) network/queue call → attach apis[]; (b) pure DB/ES/S3 → name the identifier in description; (c) no side effect → rename to a non-side-effect verb. NEVER leave a bare side-effect verb with no apis and no identifier. |
 | 3 | **Network/queue-chain coherence** | When `Persist …` + `Publish …` (or `Authenticate …` + `Submit …`) appear under one step sharing one event | Copy the shared apis[] entry onto every chained action. |
 | 4 | **Persona constraint** | `personas[0].persona` ∈ {System, External System}; no human-role string; no action describes UI gestures | If a human role slipped in, the EP was mis-assigned — re-derive from the EP-type table and rewrite. Strip any UI-trigger language from System descriptions. |
-| 5 | **Citation prefix + audit shape** | Every `citations[i].reference` starts with `<REPO.name>/` and is a backend path; `audit.codeGraphSearches.length >= 1` **OR** a `code_graph_unavailable` warning is present; `audit.sideEffects` exists; `audit.stats` present with all required keys | Prepend `<REPO.name>/` if missing. If no cgs calls were made AND the tool was available, run the hygiene sweep; if the tool was genuinely unavailable, add the `code_graph_unavailable` warning + `audit.codeGraphSearchAvailable = false` instead. Populate `audit.stats` with real counts. |
+| 5 | **Citation prefix + audit shape** | Every `citations[i].reference` starts with `<REPO.name>/` and is a backend path; `audit.codeGraphSearches` exists (`[]` is valid — the graph is optional); `audit.sideEffects` exists; `audit.stats` present with all required keys | Prepend `<REPO.name>/` if missing. Populate `audit.stats` with real counts. (No graph-call requirement — a `Read`/`Grep`-only run is valid.) |
 | 6 | **Side-effect coverage** | Of `audit.sideEffects[]`, the fraction with `matchedToAction: true` (matched by repo/table, ES index, S3 bucket, outbound URL, or queue topic in some action's description/apis) | If <90%, either add the missing action(s) by re-reading the relevant service file, or mark a trivial side effect (log/metric) matched with a one-line justification in `audit.warnings[]`. |
 | 7 | **Polymorphic-handler split** | If the handler branches on a discriminator (`switch(message.type)`, `if (eventType === 'X')`, a `handlersByType[type]` map, a generic command bus) producing N distinct processing paths | Emit N scenarios — one per discriminator value — each enumerating that branch's fields and side effects. NEVER lump all branches into one umbrella scenario with a comma-separated description. |
 
@@ -577,7 +577,7 @@ This is the clipping-avoidance contract: the payload travels **disk → curl →
 ```bash
 RESP_PATH="/tmp/be_upsert_resp_$$.json"
 HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" \
-    -X POST "$API_BASE/functional-graph/v2/upsert?llmPlatform=$LLM_PLATFORM" \
+    -X POST "$API_BASE/functional-graph/v2/upsert?embedding=true&llmPlatform=$LLM_PLATFORM" \
     -H "api-key: $API_KEY" \
     -H "Content-Type: application/json" \
     --data-binary "@$BODY_PATH")
@@ -597,7 +597,7 @@ HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" \
 if [[ $HTTP_STATUS =~ ^5 ]]; then
   sleep 15
   HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" \
-      -X POST "$API_BASE/functional-graph/v2/upsert?llmPlatform=$LLM_PLATFORM" \
+      -X POST "$API_BASE/functional-graph/v2/upsert?embedding=true&llmPlatform=$LLM_PLATFORM" \
       -H "api-key: $API_KEY" -H "Content-Type: application/json" \
       --data-binary "@$BODY_PATH")
 fi
