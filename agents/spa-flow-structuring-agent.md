@@ -276,12 +276,11 @@ Code_Graph_Search(
   query:             str,              # natural-language; specific verbs/nouns/symbols beat generic phrases
   project_uuid:      str,              # use the PROJECT_UUID input
   code_ontology_id:  int,              # MANDATORY — use the CODE_ONTOLOGY_ID input to scope to this repo's index
-  repository_name:   str = None,       # optional fallback if CODE_ONTOLOGY_ID is missing — use INDEXED_REPO_NAME (the server-side name, not REPO.name on disk)
   limit:             int = 10          # raise for broader sweeps when needed
 )
 ```
 
-**Scoping is mandatory.** A Breeze project may contain multiple indexed repos (frontend, backend, mobile, services). Without `code_ontology_id`, your queries hit the entire project graph — slower, noisier, and may match files outside THIS EP's repo. Always pass `code_ontology_id=$CODE_ONTOLOGY_ID`. If the parent did not pass one (rare — only when `Call_List_Repositories_` could not match the on-disk REPO.name to any indexed repo), fall back to `repository_name=$INDEXED_REPO_NAME` and record a warning in `audit.warnings[]` with `type: "cgs_unscoped"`.
+**Scoping is mandatory.** A Breeze project may contain multiple indexed repos (frontend, backend, mobile, services). Without `code_ontology_id`, your queries hit the entire project graph — slower, noisier, and may match files outside THIS EP's repo. Always pass `code_ontology_id=$CODE_ONTOLOGY_ID` (the repo's immutable integer `_id`). If the parent did not pass one (rare — only when `Call_List_Repositories_` could not match the on-disk REPO.name to any indexed repo), run the query unscoped (project-wide) and record a warning in `audit.warnings[]` with `type: "cgs_unscoped"`. There is no `repository_name` fallback — that parameter was removed and the tool now rejects it.
 
 **Query wording rule of thumb.** The code graph indexes File / Function / Class nodes — semantic similarity over **identifier-shaped tokens** (camelCase names, function names, file names, import paths) beats business-vocabulary phrases. Effective queries blend the two: include the literal symbols you saw in the seed file (`generateOntology`, `FunctionalOntology`, `useFunctionalOntologyService`, `processAutomationWorkflow`) alongside a domain noun. Pure-business queries like `"functional ontology generate persona action-to-functional"` return weak hits even when the relevant code is indexed; the same intent expressed as `"FunctionalOntology page upload zip recordings generate"` (which carries the file's actual identifiers) returns rich hits with full call chains.
 

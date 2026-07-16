@@ -146,7 +146,7 @@ Update each inventory row with: `layer`, layer-specific fields, `citation`, and 
 
 Skip entirely in doc-only mode. For each node whose layer maps to code (UserExperience, ApiGateway, Services, Agents, EventQueue, DataLake):
 
-1. Run `Code_Graph_Search` with 1–3 queries derived from the node (name, domain, key technology). Optionally scope with `repository_name=` when the node clearly maps to one repo (get names from the Phase 2 inventory).
+1. Run `Code_Graph_Search` with 1–3 queries derived from the node (name, domain, key technology). Optionally scope with `code_ontology_id=` (the repo's integer `_id`) when the node clearly maps to one repo (get ids from the Phase 2 inventory).
 2. **Attach grounding:** from the top hits, set `code_ontology_id` (the returned `codeOntologyId`) and `repositoryName` on the node.
 3. **Verify:** if the code confirms the doc's technology/pattern → mark verified. If the code contradicts the doc (doc says Kafka, code shows SQS) → keep the doc value but record a `divergence` note for the Phase 6 gate; never silently overwrite.
 4. **Gap-fill:** if `Code_Graph_Search` surfaces a clear component the spec omitted (an un-documented service, queue, or data store), add it to the inventory as a new node flagged `source: "code-discovered"` so the user can accept or reject it in the gate.

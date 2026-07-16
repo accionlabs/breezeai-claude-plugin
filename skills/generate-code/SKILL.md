@@ -120,7 +120,7 @@ For generating code for a specific feature, scenario, or user story.
 ### A2. DISCOVER — Find existing code patterns
 
 - Call `Code_Graph_Search` with related terms
-- Call `Get_Code_Nodes_By_Label(label="File", filters={"path": <path>, "repositoryName": <repo>} OR {"id": <fileId>}, children=true)` on the most relevant files to inspect
+- Call `Get_Code_Nodes_By_Label(label="File", filters={"path": <path>, "codeOntologyId": <id>} OR {"id": <fileId>}, children=true)` on the most relevant files to inspect
   class structure, methods, and patterns
 - Find existing files, functions, patterns, utilities
 - This gives you the HOW: conventions, imports, patterns to follow

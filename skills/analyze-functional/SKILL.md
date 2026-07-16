@@ -33,7 +33,7 @@ If the input is text-based, accept it in any of the following formats:
 - Use `Documents` MCP to find related source material in the project
 
 **C. Source code** (file paths, code snippets, class/method references)
-- Use `Code_Graph_Search` and `Get_Code_Nodes_By_Label` (label `File`, filtered by `path` + `repositoryName` or `id`, `children=true`) to understand the code
+- Use `Code_Graph_Search` and `Get_Code_Nodes_By_Label` (label `File`, filtered by `path` + `codeOntologyId` or `id`, `children=true`) to understand the code
 - Translate code to functional language — extract WHAT the code does, not HOW
 - Map: classes → service boundaries, methods → processing phases,
   conditionals → business rules, queries → data operations

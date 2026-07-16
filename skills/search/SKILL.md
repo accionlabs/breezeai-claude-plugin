@@ -27,8 +27,8 @@ All tools below are read-only. Pass `projectUuid` (or `project_uuid` / `uuid`, p
 
 ### Code graph
 - `Call_List_Repositories_` — list every indexed repository in the project (name, id, file/class/function counts, language, repo URL, commit, branch). Use first for "which codebases are indexed" questions, and to enable per-repo scoping on subsequent `Code_Graph_Search` calls.
-- `Code_Graph_Search` — semantic search across File / Function / Class. Supports `repository_name=` to scope a search to one repo when the question clearly maps to a single subsystem (e.g., a frontend-only change → the `frontendweb_*` repo). When the touched code spans multiple repos, anchor each hit back to its parent repo from the inventory.
-- `Get_Code_Nodes_By_Label` — fetch code nodes by label (`File` / `Function` / `Class`), filtered on any field (`path`, `name`, `repositoryName`, `id`, `codeOntologyId`, `type`, …) with `children=true` to attach the full subtree. For a single file's full hierarchical structure (classes → methods → statements, functions → statements, file-level statements) call `Get_Code_Nodes_By_Label(label="File", filters={"id": <fileId>} OR {"path": <path>, "repositoryName": <repo>}, children=true)`. Always filter on a unique key (`id`, or `path` + `repositoryName`) — `data` is an array and a bare `path` can match the same file across repos. `children=false` (or a `fields` projection) returns a lean node list when you don't need the drill-down.
+- `Code_Graph_Search` — semantic search across File / Function / Class. Supports `code_ontology_id=` (the repo's immutable `_id` as an **integer**, from `Call_List_Repositories_`) to scope a search to one repo when the question clearly maps to a single subsystem (e.g., a frontend-only change → the `frontendweb_*` repo). When the touched code spans multiple repos, anchor each hit back to its parent repo from the inventory. (There is no `repository_name` filter — the mutable display name was removed; scope by `code_ontology_id`.)
+- `Get_Code_Nodes_By_Label` — fetch code nodes by label (`File` / `Function` / `Class`), filtered on any field (`path`, `name`, `id`, `codeOntologyId`, `type`, …) with `children=true` to attach the full subtree. For a single file's full hierarchical structure (classes → methods → statements, functions → statements, file-level statements) call `Get_Code_Nodes_By_Label(label="File", filters={"id": <fileId>} OR {"path": <path>, "codeOntologyId": <id>}, children=true)`. Always filter on a unique key (`id`, or `path` + `codeOntologyId`) — `data` is an array and a bare `path` can match the same file across repos. (`repositoryName` is **rejected** as a filter — the mutable display name fails loud; scope by `codeOntologyId`, the repo's integer `_id`.) `children=false` (or a `fields` projection) returns a lean node list when you don't need the drill-down.
 
 ### Design graph
 - `Design_Graph_Search` — semantic search across design nodes (journeys, flows, pages, components).
@@ -79,7 +79,7 @@ Stop at the first match:
 
 | Query shape | Route to |
 |---|---|
-| Pure code lookup — "where is X implemented", "find function/class/file Y", "show me the route handler for Z" | `Code_Graph_Search` → then `Get_Code_Nodes_By_Label(label="File", filters={path + repositoryName \| id}, children=true)` on top hits. If the query names or implies a single repo, list repos via `Call_List_Repositories_` first and scope the search via `repository_name=`. |
+| Pure code lookup — "where is X implemented", "find function/class/file Y", "show me the route handler for Z" | `Code_Graph_Search` → then `Get_Code_Nodes_By_Label(label="File", filters={path + codeOntologyId \| id}, children=true)` on top hits. If the query names or implies a single repo, list repos via `Call_List_Repositories_` first and scope the search via `code_ontology_id=` (the repo's integer `_id`). |
 | Repo inventory — "which codebases", "list the repos", "what languages does this project use", "what's the repo for X" | `Call_List_Repositories_` |
 | Pure UI — "what page shows X", "which component", "what does the settings screen look like" | `Design_Graph_Search` → optionally `Get_Design_Nodes_by_Ids` for detail |
 | Personas / roles only — "who manages X", "what roles exist" | `Get_all_personas` → drill down (see Phase 3) |
@@ -150,8 +150,8 @@ For "how does X work" questions, drill all the way to Steps/Actions. For "who do
 
 ### Code drill-down
 - **Always anchor hits to their parent repo** from the `Call_List_Repositories_` inventory. When the touched code spans multiple repos, prefix file paths with the repo name (e.g., `frontendweb_react_tnlm: src/utils/posthog.ts`) so cross-repo coordination is visible at a glance.
-- **Top hits are Files** → call `Get_Code_Nodes_By_Label(label="File", filters={"path": <path>, "repositoryName": <repo>} OR {"id": <fileId>}, children=true)` on each to see classes, methods, decorators, statements.
-- **Top hits are Functions or Classes** → their source and call chain are already in the search payload. To see the whole surrounding file, call `Get_Code_Nodes_By_Label(label="File", filters={"path": <hit.path>, "repositoryName": <hit.repositoryName>}, children=true)` — you can fetch the full file straight from the hit's `path` + `repositoryName`, no need to resolve the File id first.
+- **Top hits are Files** → call `Get_Code_Nodes_By_Label(label="File", filters={"path": <path>, "codeOntologyId": <id>} OR {"id": <fileId>}, children=true)` on each to see classes, methods, decorators, statements.
+- **Top hits are Functions or Classes** → their source and call chain are already in the search payload. To see the whole surrounding file, call `Get_Code_Nodes_By_Label(label="File", filters={"path": <hit.path>, "codeOntologyId": <hit.codeOntologyId>}, children=true)` — you can fetch the full file straight from the hit's `path` + `codeOntologyId`, no need to resolve the File id first.
 
 ### Design drill-down
 - **Top hits are design nodes** → if the search payload is thin, call `Get_Design_Nodes_by_Ids` on the top IDs for full detail, or `Get_all_Design_By_Label` to widen within a label type.
