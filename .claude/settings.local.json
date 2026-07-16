@@ -42,7 +42,5 @@
       "Bash(ls -1 skills/generate-design-from-ui/references/*.md)"
     ]
   },
-  "disabledMcpjsonServers": [
-    "breeze-mcp"
-  ]
+  "disabledMcpjsonServers": []
 }

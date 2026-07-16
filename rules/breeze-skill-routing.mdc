@@ -16,6 +16,7 @@ When the user asks about Breeze capabilities or wants to perform a Breeze task, 
 | Impact analysis, blast radius, "what breaks if X" | `/breeze:impact-analysis` |
 | Analyze a requirement, check coverage | `/breeze:analyze-functional` |
 | Check architecture impact | `/breeze:analyze-architecture` |
+| Generate architecture graph from a spec doc | `/breeze:generate-architecture` |
 | Analyze a Figma design | `/breeze:analyze-design` |
 | Generate functional graph from frontend | `/breeze:generate-functional-from-ui` |
 | Generate functional graph from backend | `/breeze:generate-functional-from-backend` |
