@@ -302,12 +302,11 @@ Code_Graph_Search(
   query:             str,              # natural-language; specific symbols/identifiers beat generic phrases
   project_uuid:      str,              # use the PROJECT_UUID input
   code_ontology_id:  int,              # MANDATORY — use the CODE_ONTOLOGY_ID input to scope to this repo's index
-  repository_name:   str = None,       # optional fallback if CODE_ONTOLOGY_ID is missing — use INDEXED_REPO_NAME
   limit:             int = 10
 )
 ```
 
-**Scoping is mandatory.** A Breeze project may contain multiple indexed repos (frontend, backend, mobile). Always pass `code_ontology_id=$CODE_ONTOLOGY_ID`. If the parent did not pass one, fall back to `repository_name=$INDEXED_REPO_NAME` and record a warning in `audit.warnings[]` with `type: "cgs_unscoped"`.
+**Scoping is mandatory.** A Breeze project may contain multiple indexed repos (frontend, backend, mobile). Always pass `code_ontology_id=$CODE_ONTOLOGY_ID` (the repo's immutable integer `_id`). If the parent did not pass one, run the query unscoped (project-wide) and record a warning in `audit.warnings[]` with `type: "cgs_unscoped"`. There is no `repository_name` fallback — that parameter was removed and the tool now rejects it.
 
 **Query wording rule of thumb.** The code graph indexes File / Function / Class nodes — semantic similarity over identifier-shaped tokens (camelCase names, class names, file names) beats business-vocabulary phrases. Effective queries blend the literal symbols you saw (`ProjectExportConsumer`, `handleExportMessage`, `projectsRepository`) with a domain noun.
 

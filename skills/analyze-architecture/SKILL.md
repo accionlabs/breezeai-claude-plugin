@@ -90,7 +90,7 @@ Run these in sequence. Their output becomes the analysis report written back in 
 
 For each area of concern in the requirement, run `Code_Graph_Search` with a targeted query (e.g., "invoice creation endpoint", "GST report generation", "user authentication"). Returned results include file paths, function signatures, line numbers, and the `calls` field — walk the call graph to find indirect impact. Cross-reference the returned `codeOntologyId` values against existing Architecture Graph nodes (each Service / UX / ApiGw node may already have a `code_ontology_id` pointing to its code cluster).
 
-For critical files, drill in with `Get_Code_Nodes_By_Label(label="File", filters={"path": <path>, "repositoryName": <repo>} OR {"id": <fileId>}, children=true)` to enumerate classes, methods, and decorators (useful for discovering API routes via Pyramid `@view_defaults`, Flask routes, Spring `@RequestMapping`, etc.).
+For critical files, drill in with `Get_Code_Nodes_By_Label(label="File", filters={"path": <path>, "codeOntologyId": <id>} OR {"id": <fileId>}, children=true)` to enumerate classes, methods, and decorators (useful for discovering API routes via Pyramid `@view_defaults`, Flask routes, Spring `@RequestMapping`, etc.).
 
 **Output:** list of affected files + affected architecture nodes + estimated blast radius (count of files + count of components).
 

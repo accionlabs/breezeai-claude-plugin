@@ -52,7 +52,7 @@ Then run these four calls simultaneously using queries derived from the user's p
    Search for related user journeys, flows, pages, and components.
 
 3. **Code Graph Search** (`Code_Graph_Search`)
-   Search for related code files, classes, methods, and modules. If the prompt strongly implies one or two repos from the inventory above (e.g., a frontend-only change → the `frontendweb_*` repo, a search-feature change → `backend_*_search_*`), issue parallel `repository_name=`-filtered searches per repo instead of one broad call. Otherwise do one broad call.
+   Search for related code files, classes, methods, and modules. If the prompt strongly implies one or two repos from the inventory above (e.g., a frontend-only change → the `frontendweb_*` repo, a search-feature change → `backend_*_search_*`), issue parallel `code_ontology_id=`-scoped searches per repo (the repo's integer `_id` from `Call_List_Repositories_`) instead of one broad call. Otherwise do one broad call.
 
 4. **Architecture Graph read — per label, in parallel** (`Get_Architecture_Nodes_By_Label`)
    Issue 8 parallel `Get_Architecture_Nodes_By_Label` calls, one per layer: `UserExperience`, `ApiGateway`, `ObservabilityMonitoring`, `Agents`, `Services`, `EventQueue`, `DataLake`, `Infrastructure`. **This tool is an enumeration, not a search** — it takes only `uuid` and `label` (no `query` parameter) and returns every node in that label. Step 2.2's intersection logic filters them down by relevance. Splitting per-label avoids the token-overflow that `Get_All_architecture_Graph` hits on populated projects (per-layer payloads can still be sizeable — e.g., DataLake with many DB schemas). Do NOT use `Architecture_Graph_Search` — that's similarity-filtered search and will silently drop anchors whose embedding doesn't match the prompt.
@@ -102,7 +102,7 @@ Intersect the functional + code results with the Architecture Graph to identify 
 
 ## Step 2.3 — Code Graph Deep-Dive
 
-For the top 3–5 `Code_Graph_Search` hits, call `Get_Code_Nodes_By_Label(label="File", filters={"path": <hit.path>, "repositoryName": <hit.repositoryName>} OR {"id": <fileId>}, children=true)` when any of the following holds:
+For the top 3–5 `Code_Graph_Search` hits, call `Get_Code_Nodes_By_Label(label="File", filters={"path": <hit.path>, "codeOntologyId": <hit.codeOntologyId>} OR {"id": <fileId>}, children=true)` when any of the following holds:
 
 - The hit is a `File` node and you need its method/class structure to pinpoint the actual touchpoint inside the file.
 - The prompt implies modifying or extending a specific function or route that the search returned only at file granularity.
