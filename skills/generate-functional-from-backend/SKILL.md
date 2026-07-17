@@ -82,13 +82,15 @@ inventory in context; it reads a single summary line back from each sub-agent.
 - **Backend repo path** — argument (`$ARGUMENTS`) or resolved in Phase -1
 - **`.breeze.json`** — for `projectUuid`, `targetRepos.backend`, `apiKey`, and backend code-ontology id
 - **Existing functional graph** — queried per EP for dedup AND cross-pass merge reference
-- **Optional: `entrypoints.json`** if resuming from a prior session (looked up inside the backend repo directory)
+- **Optional: `entrypoints.json`** if resuming from a prior session (under `OUTPUT_BASE = <backendRepo>/.breeze-output/`)
 
 ## Outputs
 
+> **All generated artifacts go under a SINGLE dedicated folder `OUTPUT_BASE = <backendRepo>/.breeze-output/`** — NEVER the repo root (that pollutes the target repo's git status). `mkdir -p` it on first write; add `.breeze-output/` to the **target repo's** `.gitignore`. `OUTPUT_BASE` (a folder) is distinct from `.breeze.json` (the config file).
+
 - **Functional graph** updated with System / External System scenarios + actions (idempotent merge by name)
-- **`entrypoints.json`** — inventory + per-EP checkpoint (written inside the backend repo directory)
-- **Per-EP payload files**: `<backendRepo>/be_ep{NN}_{slug}.json` (audit + replay)
+- **`OUTPUT_BASE/entrypoints.json`** — inventory + per-EP checkpoint
+- **Per-EP payload files**: `OUTPUT_BASE/be_ep{NN}_{slug}.json` (audit + replay)
 
 ---
 
@@ -142,19 +144,21 @@ inventory in context; it reads a single summary line back from each sub-agent.
 5. Persist the chosen path to `.breeze.json` under `targetRepos.backend`.
 6. If the path looks like a frontend repo, stop and suggest `/breeze:generate-functional-from-ui`.
 
+Then set **`OUTPUT_BASE = f"{backendRepo}/.breeze-output"`** and `mkdir -p` it — every artifact (`entrypoints.json` + per-EP payloads) goes under `OUTPUT_BASE`, never the repo root. Ensure `.breeze-output/` is in the target repo's `.gitignore` (append if missing; do not touch the plugin's).
+
 > **Rules:** see [rules.md](references/rules.md) → "Backend repo detection"
 
 ---
 
 ## Phase 0 — Discover entry points (delegated to the discovery sub-agent)
 
-If `entrypoints.json` already exists in the backend repo, read it and skip to the per-EP loop (resuming). Do not overwrite.
+If `OUTPUT_BASE/entrypoints.json` already exists, read it and skip to the per-EP loop (resuming). Do not overwrite. *(Also check the legacy repo-root path once for back-compat; if found there, move it into `OUTPUT_BASE`.)*
 
 Otherwise the parent spawns ONE discovery sub-agent to inventory the repo, then handles only the two user-facing gates. The token-heavy file reading happens inside the sub-agent — the parent never globs/reads controllers itself.
 
 ### Step 0.1 — Gather inputs
 
-- `OUTPUT_PATH = f"{backendRepo}/entrypoints.json"`.
+- `OUTPUT_PATH = f"{OUTPUT_BASE}/entrypoints.json"` (`OUTPUT_BASE = {backendRepo}/.breeze-output`).
 - Load existing personas: `Get_all_personas(projectUuid)` → keep the name list for `EXISTING_PERSONAS`.
 - A `framework_hint` is optional — pass `null` and let the agent detect it, or a quick guess from `package.json`/`pom.xml` if you already know it.
 
@@ -222,7 +226,7 @@ The parent no longer runs a dedup pre-query and does **not** pass `EXISTING_NEIG
 **Pre-compute the output path** before spawning. The sub-agent writes its `{payload, audit}` JSON here; the parent never holds the payload in context:
 
 ```
-OUTPUT_PATH = f"{backendRepo}/be_ep{ep.id:02d}_{slug}.json"
+OUTPUT_PATH = f"{OUTPUT_BASE}/be_ep{ep.id:02d}_{slug}.json"   # OUTPUT_BASE = {backendRepo}/.breeze-output
 ```
 where `slug` is a kebab-cased form of `ep.title` (e.g. `post-projects-export-email-xls`).
 
@@ -325,7 +329,7 @@ Mark `ep.status` → `done`, pop `ep.id` from `remaining[]`, and append to `entr
   "sideEffectsLogged": 5,
   "codeGraphSearchCount": 2,
   "verificationScores": { "process export job": 0.71 },
-  "payloadPath": "<backendRepo>/be_ep04_sqs-project-export-jobs-consumer.json",
+  "payloadPath": "<backendRepo>/.breeze-output/be_ep04_sqs-project-export-jobs-consumer.json",
   "completedAt": "<ISO>"
 }
 ```
@@ -346,6 +350,17 @@ Plan multi-session for >20 EPs.
 ## Parallelism
 
 The per-EP loop runs in **batches of up to 3** concurrent sub-agents (see the loop preamble). EPs are independent — each is its own upsert — so batching is safe; the only constraint is to finish a batch (all sub-agents returned, checkpoints written) before starting the next, so a mid-run stop leaves `remaining[]` consistent. Drop the batch size to 1 near your context budget or under rate limits. Discovery (Phase 0) is a separate single sub-agent that runs once before the loop.
+
+> ⚠️ **Parallel-dedup race.** Each sub-agent reads the live graph for dedup *before* siblings write, so concurrent siblings can mint slightly-different names for the same Outcome. With Outcome-only inline dedup (shared `core.md` §2) that is the only exposure; it is resolved by the mandatory reconciliation pass below (or by serializing EPs known to share an Outcome).
+
+## Reconciliation pass ⛔ (mandatory finalization — after ALL EPs complete)
+
+Per shared `core.md` §2, below-outcome nodes are emitted coverage-first and Outcome names may diverge under parallelism. The parallel race collides **only at the Outcome** (siblings share it by name); everything below an Outcome came from a *different* EP/persona and is distinct coverage, not a duplicate. So this pass is **Outcome-level only**:
+1. List all Outcomes (`Get_all_personas` → `Get_all_outcomes_for_a_persona_id`) and merge same-capability Outcomes to one canonical name via `Merge_Functional_Nodes` (System / External System scope; never across personas).
+2. **Never merge distinct capabilities** — remove duplicates, not coverage.
+3. Record merges under `reconciliation` in the checkpoint.
+
+**Do NOT merge below the Outcome level.** Scenario / Step / Action are coverage-first — merging near-duplicate scenarios (which came from different EPs) risks silently dropping distinct flows for no join benefit.
 
 ## Multi-session resume
 

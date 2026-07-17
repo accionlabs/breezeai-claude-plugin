@@ -144,15 +144,16 @@ Apply to any JSX block that renders MORE THAN ONE displayed field as part of a r
 
 **Never** collapse multiple fields into a single combined action with a comma-separated description (e.g. "Provide form details", "Observe each project summary"). Each field — whether input or displayed — gets its own action. If a form has 18 fields, the Specify step has 18 actions. If a card shows 5 fields, the Observe step has 5 actions. **Enumeration overrides action quantity guidance** — Phase 2 is the one place where a step legitimately has many actions.
 
-#### Dispatcher-component rule (one form, N field-sets by discriminator)
+#### Dispatcher-component rule (one component, N user-visible variants)
 
-A single form / dialog / modal component often renders **different field sets** based on a discriminator prop (`type`, `label`, `kind`, `mode`, `variant`, `entity`). Examples in the wild:
+A single form / dialog / modal / tab-panel component often serves **N distinct choices the user sees** — selected by a discriminator prop (`type`, `label`, `kind`, `mode`, `variant`, `entity`, `category`, active `tab`). Examples in the wild:
 
-- `FunctionalNodeDialog` renders persona / outcome / scenario / step / action / api forms based on `label` prop — 6 distinct field sets, 6 distinct submit payloads.
+- `FunctionalNodeDialog` renders persona / outcome / scenario / step / action / api forms based on `label` prop — 6 user-visible node types.
 - `DataSourceModal` renders document-upload / repository-link / url-import branches based on `sourceType`.
 - `SettingsPanel` renders general / billing / team / integrations sections based on the active `tab`.
+- An architecture editor rendering 8 category panels (e.g. User Experience / API Gateway / Services / Data Lake / …) from one component — **8 user-visible categories = 8 scenarios**, even though all 8 share the SAME field set.
 
-**Rule:** when you discover a dispatcher form during Phase 1, do NOT emit one umbrella scenario that lumps all branches. Emit **N scenarios — one per discriminator value** — and inside each scenario enumerate that branch's actual fields per Pattern A above. The umbrella name (`Create a node`, `Add a source`) becomes a generic that fails Phase 6 check #7; the correct names follow the discriminator (`Add a new persona`, `Add a new scenario under a task`, `Link an indexed repository as a source`, etc.).
+**Rule (split by user-visible variant, NOT by field-set difference):** when you discover a dispatcher during Phase 1, do NOT emit one umbrella scenario that lumps all branches. Emit **N scenarios — one per variant the user can see/select** — and inside each enumerate that variant's fields per Pattern A. **Split even when the N branches share an identical field set** — the user perceives N distinct choices (per `core.md` §6.0), and shared code is never a reason to collapse a functional distinction. The umbrella name (`Create a node`, `Add a source`, `Add an architecture component`) is a generic that fails Phase 6 check #7; the correct names follow the user-visible variant (`Add a new persona`, `Link an indexed repository as a source`, `Add a Services architecture component`, `Add a Data Lake architecture component`, …). This applies to **every operation** on the dispatcher (add / edit / clone / delete / view), not just create.
 
 **How to detect a dispatcher:** look inside the form component body for `switch (label) {` / `if (type === 'X')` / `{label === 'persona' && <PersonaFields />}` / a `fieldsByType[type]` map / multiple `<Fields*>` subcomponents conditionally rendered. Each distinct branch corresponds to one scenario in your output.
 
@@ -255,7 +256,16 @@ Every `useMutation` / `useQuery` / `useInfiniteQuery` / `mutateAsync` you grep M
 
 ## Tool Escalation Policy — Code_Graph_Search
 
-Code_Graph_Search is an **OPTIONAL accelerator**, not a required step — `Read` + `Glob` + `Grep` on the local checkout are the backbone and the ground truth. **There is NO hard floor: a run with `audit.codeGraphSearches.length === 0` is VALID** (a bounded SPA EP is usually fully traceable by reading the component + its imports). No per-EP cap when you do use it. Because a graph call is a network round-trip + tokens and may be stale/incomplete (confirm every literal by `Read`), reach for it only when the local tools fall short.
+`Read` + `Glob` + `Grep` on the local checkout are the backbone and the ground truth for fields. Code_Graph_Search + Get_Code_Nodes_By_Label are the discovery + contract-resolution layer on top; confirm every field by `Read` (a graph JSX blob may be flattened/partial).
+
+**Functional distinctness first (see `core.md` §6.0).** Every user-visible choice — tab, category, entity type, list/filter type, menu item, wizard branch — is its OWN scenario, even when one shared component/form/field-set/route backs them all. N panels the user sees = N scenarios. Never collapse distinct user-visible choices because the code reuses a component (that is under-coverage, not dedup). Detect the set from what the user sees (tab titles, category labels, option lists), not from the backing form's field map.
+
+**Hazard-family traversal (HARD GATE — see shared `core.md` §6.1 for the full three-step rule).** A pure import-walk misses editors/CRUD dialogs and child views mounted behind **tabs, lazy imports, menus, or dispatcher components** two hops below a container entry point — they never appear in the seed's import tree, so `Read`+`Grep` alone cannot find them. **SPA hazard signals:** the seed (or a file it reads) imports a family of `*-dialog`/`*-modal`/`*-drawer`/`*-sheet` components; a tab container (`Tabs`/`TabsContent`, `role="tab"`, `activeTab ===`); a lazily-mounted child (`lazy(() => import(...))`, dynamic import, `Suspense` subtree); a dispatcher (branches on a `type`/`label`/`kind`/`mode`/`variant` prop into N variants). When ANY is present you MUST, per `core.md` §6.1:
+1. **Discover** the family — `Code_Graph_Search(<container + the child kind you're looking for> , code_ontology_id=$CODE_ONTOLOGY_ID)` — to surface members you didn't know to name.
+2. **Inventory** it completely — `Get_Code_Nodes_By_Label(label="Function", filters={"codeOntologyId": $CODE_ONTOLOGY_ID, "path": {"$contains": "<the family's own naming pattern in THIS repo>"}}, children=True)` — the complete set + each member's mutation hook → API contract.
+3. **`Read` each discovered file for its JSX field set** (labels/types/required) — the graph captures this unreliably. Emit **one scenario per user-visible variant** (per §6.0), each field-enumerated.
+
+Log each call in `audit.codeGraphSearches[]` with `reason`. **A run with a hazard signal but zero graph calls is INVALID** (Phase 6 rejects). A genuinely leaf surface (self-contained form/page, no tabs/dispatchers/menus/lazy children, no component family) needs no graph call — `audit.codeGraphSearches: []` is valid. **Graceful degradation:** if Code_Graph_Search is unavailable (not in tool set / first call errors — MCP not connected / auth / transport), append `audit.warnings[] { "type": "code_graph_unavailable" }`, set `audit.codeGraphSearchAvailable = false`, be extra-thorough with `Grep`, and proceed.
 
 **Use Code_Graph_Search whenever any of these are true:**
 - You encounter a reference (constant, function name, hook, type, validator) that you cannot resolve by walking imports from the seed file.
@@ -268,14 +278,14 @@ Code_Graph_Search is an **OPTIONAL accelerator**, not a required step — `Read`
 **Do NOT use Code_Graph_Search to:**
 - Find more scenarios that belong to a DIFFERENT entry point — your scope is THIS EP only.
 - Claim backend behavior — the UI pass never describes what an endpoint does internally; it only records the call site, method, URL, payload shape.
-- Search the functional graph — that is the parent's job; `EXISTING_NEIGHBORHOOD` was already given to you.
+- Search the functional graph — for dedup you build your own neighborhood from the LIVE graph (Phase 4), and Outcome dedup is a deterministic list-all, not a code-graph call.
 
 **Signature:**
 ```
 Code_Graph_Search(
   query:             str,              # natural-language; specific verbs/nouns/symbols beat generic phrases
   project_uuid:      str,              # use the PROJECT_UUID input
-  code_ontology_id:  int,              # MANDATORY — use the CODE_ONTOLOGY_ID input to scope to this repo's index
+  code_ontology_id:  int,              # MANDATORY — the CODE_ONTOLOGY_ID input, passed as an UNQUOTED JSON integer (1743, never "1743" — a string silently fails to scope and hits the whole project)
   repository_name:   str = None,       # optional fallback if CODE_ONTOLOGY_ID is missing — use INDEXED_REPO_NAME (the server-side name, not REPO.name on disk)
   limit:             int = 10          # raise for broader sweeps when needed
 )
@@ -327,7 +337,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` prefix,
 - `actions[i].citations[]` — **preferred.** The file the action came from (the form/component/service for that field or call). This is the tightest link.
 - `steps[i].citations[]` — files that define that stage when no single action owns them.
 - `scenarios[i].citations[]` — files that span the whole flow (the page/route component).
-- **Never author a `citations[]` on `outcomes[]` or `personas[]` — omit the key entirely.** Citations live ONLY on scenario / step / action (cite at the action by default). Outcome/Persona are shared and merged by name across many EPs, so any file ref there pollutes the shared node. This is a HARD gate: `validate.py citations` now **fails (exit 2)** on a persona/outcome citation. Completeness is a union across the three allowed levels, so an action/step/scenario citation fully satisfies the gate — there is never a reason to cite a shared node.
+- **Every scenario / step / action MUST carry ≥1 citation (MANDATORY); `outcomes[]` / `personas[]` must carry NONE (forbidden — omit the key).** Cite the source file each scenario/step/action came from (cite at the action by default). HARD gate both ways: `validate.py citations` **fails (exit 2)** if any scenario/step/action has an empty `citations[]`, AND if any persona/outcome carries one. Outcome/Persona are shared+merged by name across many EPs, so a ref there pollutes the shared node. You may NOT satisfy a node's requirement by citing its parent — the citation goes on the node itself.
 
 ---
 
@@ -425,7 +435,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` prefix,
 - When a single network call is split across multiple actions (e.g. `Authenticate …`, `Submit …`, `Persist …`), EVERY action in the chain must carry the same `apis[]` entry. The chain shares a network event; it does not have one entry per call.
 - **Every `apis[i].url` MUST be a literal you extracted from a `fetch*`/`axios`/service file you `Read`, NEVER a URL synthesised from an action/component/feature name (see Phase 3 steps 4–5).** Before emit, re-confirm each `url` traces to a file in `audit.filesRead`. If a network-verb action's URL was unresolvable, its `url` is empty AND `audit.warnings[]` carries an `api_url_unresolved` entry for it — a confident guessed URL must never be emitted. Delegated submits (toolbar/menu → shared `*Form`/`*Dialog`/`*Drawer`) are the highest-risk spot: verify those handlers were actually followed to the service literal.
 - `audit.filesRead` MUST list every file you `Read`.
-- `audit.codeGraphSearches` records every graph call made — it MAY be empty (`[]`), since the code graph is optional (a `Read`/`Grep`-only run is valid).
+- `audit.codeGraphSearches` records every graph call made. It MAY be empty (`[]`) ONLY for a genuine leaf surface (no hazard family per core.md §6.1) or when `code_graph_unavailable` is recorded. If a hazard family was present (dialog/modal family, tab container, lazy child, dispatcher), it MUST have the discover + inventory calls, and every family member must be `Read` for fields — see the Tool Escalation Policy.
 - `audit.skippedForVisibility` MUST exist (empty array `[]` is valid if Phase 2.5 found no gates).
 - `audit.stats` MUST be present AND populated with real counts. Required keys (emit `0` rather than omitting): `scenarios`, `steps`, `actions`, `actionsWithApis`, `fieldsEnumerated`, `filesRead`, `codeGraphSearchCount`, `actionsSkippedForOtherPersonas`.
 
@@ -448,11 +458,11 @@ Confirm in your own reasoning (do not include the check in output):
 11. ✅ Persona Visibility Audit performed — every visibility gate found, each one mapped to `PERSONA`, gated content included or excluded accordingly, and every exclusion recorded in `audit.skippedForVisibility[]`?
 12. ✅ No content invented for `PERSONA` that only applies to other personas?
 13. ✅ `audit.warnings[]` documents every gap / skip / judgment call (including ambiguous visibility gates)?
-14. ✅ `audit.codeGraphSearches[]` accounts for every graph call made (may be empty — the graph is optional)?
+14. ✅ **Hazard-family gate (core.md §6.1):** if any file read imports a `*-dialog`/`*-modal`/`*-drawer` family, a tab container, a lazy-mounted child, or a dispatcher — was each member (a) discovered via `Code_Graph_Search`, (b) inventoried via `Get_Code_Nodes_By_Label`, AND (c) `Read` for its field set, with one field-enumerated scenario per dialog? A hazard signal with zero graph calls, or an imported dialog neither read nor graph-resolved, is INVALID (unless `code_graph_unavailable`). For a true leaf, `audit.codeGraphSearches: []` is fine.
 15. ✅ `audit.skippedForVisibility` exists (even as `[]`) and `audit.stats` is populated with all required keys, using `0` rather than omitting?
 16. ✅ Phase 6 ran: schema + rule-a + path-linked + chain + forbidden + citations + field-coverage + Pattern A collapse + dispatcher split all pass against the in-memory payload?
 17. ✅ No `Specify …` step ends with a generic single action like `Provide the form / payload / fields / details / data` — every such step has one action per actual field?
-18. ✅ For every dispatcher form discovered (a single component branching on `type` / `label` / `kind` / `mode`), one scenario per discriminator branch was emitted with that branch's fields enumerated separately?
+18. ✅ For every dispatcher discovered (a single component branching on `type` / `label` / `kind` / `mode` / `category` / active `tab`), one scenario per **user-visible variant** was emitted — INCLUDING when all branches share an identical field set (split by what the user sees, not by field-set difference; §6.0) — each with its fields enumerated?
 
 If any check fails, fix the output before emitting. The parent does NOT re-validate — you are the only line of defense.
 
@@ -460,9 +470,9 @@ If any check fails, fix the output before emitting. The parent does NOT re-valid
 
 ## Phase 6 — Self-validate + repair (mandatory, no parent backstop)
 
-Before writing anything to disk, validate your in-memory `{payload, audit}` in two layers. **You own both — the parent does not run validators.** Repair in-place and re-run until all pass, or until you've made 2 repair passes and still have errors (then emit `FAIL_VALIDATE`).
+Before writing anything to disk, validate your in-memory `{payload, audit}`. **You own this — the parent does not run validators.** There are two parts, and they are NOT sequential passes: **`validate.py` is the authoritative GATE** (run it — it decides pass/fail), and the **reasoning table is your REPAIR REFERENCE** (how to fix each failure) PLUS the handful of checks the script cannot judge (network-chain coherence, dispatcher split, field-collapse, URL reality). Workflow: think through the reasoning table as you build → run the gate → on any failure, look up the fix in the table, repair in-place, re-run. Max 2 repair passes, then emit `FAIL_VALIDATE`.
 
-### Step A — Deterministic validators (`validate.py`)
+### The GATE — `validate.py` (authoritative; decides pass/fail)
 
 `validate.py` lives in `SHARED_FUNCTIONAL_PATH` (your INPUTS). Materialize your candidate to a temp file and run each subcommand — these are the **authoritative hard gates**; run them every time `SHARED_FUNCTIONAL_PATH` is available:
 
@@ -483,12 +493,12 @@ run field-coverage                      # exit 2 if a declared field is uncovere
 ```
 
 Each subcommand prints `{ok, errors, warnings}` and exits **0** (pass) / **2** (fail) / **3** (bootstrap error). Handle:
-- **exit 2** → read `errors[]`, repair the offending nodes in-memory using the Step B table, rewrite `$CAND`, re-run that subcommand. Max **2 repair passes**; if still failing → `FAIL_VALIDATE` with `last_check` = the failing subcommand (`schema|rule-a|path-linked|descriptions|forbidden|citations|field-coverage`).
-- **exit 3** (the `jsonschema` dependency isn't installed) **OR `SHARED_FUNCTIONAL_PATH` is absent/unreadable** → do NOT fail the run. Append `audit.warnings[]` `{ "type": "validators_unavailable", "note": "validate.py or jsonschema not available — used reasoning checks only" }`, set `audit.validatorsRun = false`, and rely on Step B.
+- **exit 2** → read `errors[]` (each carries a `fix`), repair the offending nodes in-memory using the repair-reference table below, rewrite `$CAND`, re-run that subcommand. Max **2 repair passes**; if still failing → `FAIL_VALIDATE` with `last_check` = the failing subcommand (`schema|rule-a|path-linked|descriptions|forbidden|citations|field-coverage`).
+- **exit 3** (the `jsonschema` dependency isn't installed) **OR `SHARED_FUNCTIONAL_PATH` is absent/unreadable** → do NOT fail the run. Append `audit.warnings[]` `{ "type": "validators_unavailable", "note": "validate.py or jsonschema not available — used reasoning checks only" }`, set `audit.validatorsRun = false`, and rely on the reasoning table as your only check.
 
-### Step B — reasoning checks (what no script catches)
+### The REPAIR REFERENCE — reasoning table (how to fix each gate failure + the few checks the script can't judge)
 
-These cover what `validate.py` cannot judge (network-chain coherence, dispatcher splits, field-enumeration collapses, URL reality). Scan them every run; the table is also your repair guide for whatever Step A flags.
+These cover what `validate.py` cannot judge (network-chain coherence, dispatcher splits, field-enumeration collapses, URL reality). Scan them every run; the table is also your repair guide for whatever the gate flags.
 
 | # | Check | What you scan | How to repair |
 |---|---|---|---|
@@ -499,7 +509,7 @@ These cover what `validate.py` cannot judge (network-chain coherence, dispatcher
 | 5 | **Citation prefix + audit shape** | Every `citations[i].reference` starts with `<REPO.name>/`; `audit.codeGraphSearches` exists (`[]` is valid — the graph is optional); `audit.skippedForVisibility` exists (`[]` is valid); `audit.stats` present with all required keys | Prepend `<REPO.name>/` if missing. Populate `audit.stats` with real counts (use `0` rather than omitting). |
 | 6 | **Pattern A collapse (field enumeration)** | Scan every scenario for steps whose name starts with any of: `Specify` / `Fill` / `Complete` / `Configure` / `Enter` / `Adjust` / `Update` / `Modify` / `Provide` / `Save` / `Edit` / `Review and update` / `Update the` / `Edit the`. Within each such step, flag any action whose name matches the catch-all regex `^(Provide\|Submit\|Fill\|Enter\|Adjust\|Update\|Modify\|Save\|Edit)\s+(the\s+)?(form\|payload\|fields\|details\|data\|input\|values\|configuration\|settings\|metadata\|branch-specific\s+fields\|node\s+fields\|item\s+fields\|selected\s+\w+\s+fields)$` — these are catch-all placeholders. Also flag any such step that contains ONLY ONE action whose name does NOT reference a specific named field (e.g. `Provide tags` under a step called `Provide the updated tags`, or `Adjust the branch-specific fields` under `Adjust the node fields` — both are collapses because the action name is the same noun the step already used). Also flag scenarios whose ONLY field-bearing step contains an action whose description starts with `Same field set as` / `See the create scenario` / `Same as …` — these are explicit references to fields that should have been enumerated in-place. | Reopen the form's source file, list every input element inside it, and replace the catch-all action with one `Provide <field-label>` action per field, each with `description: "label: …; type: …; required: …; …"` per Phase 2 Pattern A. If you cannot resolve the field list from the seed file's import tree, issue a Code_Graph_Search query for the form component (e.g. `FunctionalNodeDialog`, `DocumentEditMetadataDialog`, `ProjectForm`) before giving up. NEVER leave a field-bearing step with a generic single-action collapse or a "same as another scenario" pointer. |
 | 7 | **API URL reality (no invented endpoints)** | For every `apis[i].url`, take its last 2–3 path segments (drop scheme/host, query string, `{params}`, and any `(annotation)`) and `Grep` the UI repo for that literal inside a `fetch*`/`axios`/service call. | If the literal is **not** found, the URL was almost certainly inferred from a name (the classic failure: a toolbar or `*Form`/`*Dialog` submit, e.g. `/v2/search/watchlist` invented from `FormAddToWatchlist`). Re-read the action's delegation chain (Phase 3 step 4) to find the real `fetch*` literal and replace it. If genuinely unresolvable, empty the `url` and add an `api_url_unresolved` entry to `audit.warnings[]`. NEVER keep a URL that does not appear in the source. |
-| 8 | **Dispatcher-scenario split** | Detection is BACKING-FORM-DRIVEN, not name-driven. For every scenario, identify the dialog / modal / drawer / form component its primary step opens. If that component is a dispatcher — branches on a discriminator prop (`type`, `label`, `kind`, `mode`, `variant`, `entity`, `nodeType`) with N distinct rendered field sets — the scenario must be split into N variants. This applies to **every operation** on that dispatcher, not just create: `Create … node`, `Add a new …`, `Edit an existing … node`, `Update a …`, `Modify a …`, `Adjust a …`, `View a … in detail` — if it opens the dispatcher, it must be split per branch. Example violation seen in practice: `Edit an existing functional ontology node` opens the same `FunctionalNodeDialog` as the 6 split `Add a new …` scenarios, so it MUST also be 6 split scenarios (`Edit an existing persona`, `Edit an existing outcome`, etc.) with each branch's fields enumerated. | Emit N variant scenarios — one per discriminator value — each enumerating the branch's actual fields. Mirror the structure across operation types: if `Add` is split into 6 scenarios, so is `Edit`, `Clone`, `View detail`, and any other operation that opens the same dispatcher. NEVER emit `same field set as the matching create scenario` as a description in place of real enumeration — that defeats the purpose of capturing the graph. |
+| 8 | **Dispatcher-scenario split** | Detection is BACKING-COMPONENT-DRIVEN, not name-driven. For every scenario, identify the dialog / modal / drawer / tab-panel / form component its primary step opens. If that component is a dispatcher — branches on a discriminator prop (`type`, `label`, `kind`, `mode`, `variant`, `entity`, `nodeType`, `category`, active `tab`) into N **user-visible variants** — the scenario must be split into N. **Split even if the N branches render the SAME field set** — the user sees N distinct choices (§6.0); identical fields/shared code is NOT grounds to collapse. This applies to **every operation** on that dispatcher, not just create: `Create … node`, `Add a new …`, `Edit an existing … node`, `Update a …`, `Modify a …`, `Adjust a …`, `View a … in detail` — if it opens the dispatcher, it must be split per branch. Example violation seen in practice: `Edit an existing functional ontology node` opens the same `FunctionalNodeDialog` as the 6 split `Add a new …` scenarios, so it MUST also be 6 split scenarios (`Edit an existing persona`, `Edit an existing outcome`, etc.) with each branch's fields enumerated. | Emit N variant scenarios — one per discriminator value — each enumerating the branch's actual fields. Mirror the structure across operation types: if `Add` is split into 6 scenarios, so is `Edit`, `Clone`, `View detail`, and any other operation that opens the same dispatcher. NEVER emit `same field set as the matching create scenario` as a description in place of real enumeration — that defeats the purpose of capturing the graph. |
 
 If a repair changes action wording, propagate the change everywhere (description fields, audit warnings that quoted the action, etc.).
 

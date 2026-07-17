@@ -70,9 +70,10 @@ NON-UI-triggered sweep ──→ breeze:backend-flow-structuring-agent   (System
 
 Human actions stay platform-agnostic and user-observable (the forbidden-UI-word + per-field-atomicity rules still apply); backend side-effects (validations, DB writes, external calls) live in the **System** scenario, joined by Outcome — never melted into human steps. This preserves the backend lens, reuse (one façade method hit by many UI actions = one System scenario), and coverage of non-UI behavior.
 
-**Join model (same as the agents already implement):**
-- **In-process (the common case here):** the human action records the **façade/service method** `<Class>.<Method>` it invokes (e.g. `BillingFacade.CreateInvoice`); the System half is anchored on that same method. There is no URL — the method name IS the seam. This skill passes the human-half Outcome to the System agent as `EXISTING_NEIGHBORHOOD` so it **attaches** (upsert merges by Outcome name).
-- **Network (rare in this app class):** if the action crosses a **SOAP** boundary (WCF `.svc` / ASMX `[WebMethod]`), the seam is the SOAP operation URL in `action.apis[]`.
+**Join model — classify each seam PER CALL, from disk (the agent decides A1 vs A2; see `shared/functional/core.md §4`):**
+- **A1 — In-process (the common case here):** the call resolves to a **direct instance** — `new Svc()`, a DI/Spring `GetObject("…Impl")`/container-resolved field, or a plain field holding the concrete impl on the same host. The human action records the **façade/service method** `<Class>.<Method>` it invokes (e.g. `BillingFacade.CreateInvoice`) with `apis[].type:"InProcess"`, `url:"<Class>.<Method>"`; the System half is anchored on that same method. There is no wire — the method name IS the seam, and the human↔System join stays the **shared Outcome name** (same run, verbatim name).
+- **A2 — WCF/ASMX wire:** the call resolves to a **client proxy** (`ClientBase<T>` / `ChannelFactory<T>` / a generated `*Client` / `ServiceReference` / `System.ServiceModel` client) **or** a `Web.config`/`App.config` `<system.serviceModel><client><endpoint>` names the contract. Then `apis[].type:"SOAP"`, `url` = the endpoint address + operation (the `.svc` `<%@ ServiceHost Service="…" %>` names the concrete impl).
+- **Do NOT decide this from `[ServiceContract]`/`[OperationContract]` attributes** — those prove a service is WCF-*capable*, never that a *call* crosses a wire. The deciding files (`.svc`, `Web.config <client>`, the field declaration/assignment) are **read off the local checkout at runtime**, so this classification does not depend on the code-ontology parser ingesting them (tracked separately in BREEZEAI-840/841 for graph-only consumers). One EP may have both an A1 save and an A2 lookup — classify each independently; unresolvable → default **A1 `InProcess`** + `audit.warnings[] seam_type_unverified` (never a guessed `SOAP`).
 
 **Runs on the LOCAL checkout.** The agents read the actual source off disk (`Read`/`Glob`/`Grep` over `.aspx`/`.ascx`/code-behind/façade/service). The code-ontology **graph is only an accelerator** (`Code_Graph_Search`/`Get_Code_Nodes_By_Label` — scoped by `codeOntologyId` — for following the `control→façade→service→repository→SQL` chain) — not the input. Extraction is therefore robust to code-graph gaps; a clean graph just makes the chain-following faster/more complete.
 
@@ -90,13 +91,15 @@ Human actions stay platform-agnostic and user-observable (the forbidden-UI-word 
 - **Repo path** — argument (`$ARGUMENTS`) or resolved in Phase -1. Must be an ASP.NET Web Forms monolith (see Phase -1 guard).
 - **`.breeze.json`** — `projectUuid`, `targetRepos.monolith` (this repo), `apiKey`, and the repo's code-ontology id.
 - **Existing functional graph** — queried per EP for dedup + the cross-half Outcome join.
-- **Optional: `entrypoints.json`** — resume checkpoint (written inside the repo dir).
+- **Optional: `entrypoints.json`** — resume checkpoint (under `OUTPUT_BASE = <repo>/.breeze-output/`).
 
 ## Outputs
 
+> **All generated artifacts go under a SINGLE dedicated folder `OUTPUT_BASE = <repo>/.breeze-output/`** — NEVER scattered in the repo root (that pollutes the target repo's git status). Create it on first write. `OUTPUT_BASE` is `.breeze-output/` (a folder), distinct from `.breeze.json` (the config file). Add `.breeze-output/` to the **target repo's** `.gitignore` (not the plugin's). Everything below lives here.
+
 - **Functional graph** updated with **both** User scenarios and joined System/External scenarios (idempotent merge by Outcome name).
-- **`entrypoints.json`** — the UI reachability buckets from 0.1: **`primaryEntryPoints[]`** (own subagent run), **`foldedControls[]`** (passed to their parent EP as `MOUNTED_CONTROLS`, no own run), **`sharedControls[]`** (one run, reused via dedup), **`orphans[]`** (flagged for human review, never generated) — plus the discovery agent's `entryPoints[]` (Internal `service-operation` = façade seam, SOAP, queue/cron/service), `personas[]`, and per-EP checkpoint. Each `foldedControls[]` entry records its `parentEntryPoint` + `mountedVia`; each `orphans[]` entry records `why` (no route / no static ref / no metadata mount / not a template).
-- **Per-EP payload files**: `<repo>/dm_ep{NN}_{persona}_{slug}.json` (human) and `<repo>/dm_sys_{Class}.{Method}.json` (System) — audit + replay.
+- **`OUTPUT_BASE/entrypoints.json`** — the UI reachability buckets from 0.1: **`primaryEntryPoints[]`** (own subagent run), **`foldedControls[]`** (passed to their parent EP as `MOUNTED_CONTROLS`, no own run), **`sharedControls[]`** (one run, reused via dedup), **`orphans[]`** (flagged for human review, never generated) — plus the discovery agent's `entryPoints[]` (Internal `service-operation` = façade seam, SOAP, queue/cron/service), `personas[]`, and per-EP checkpoint. Each `foldedControls[]` entry records its `parentEntryPoint` + `mountedVia`; each `orphans[]` entry records `why` (no route / no static ref / no metadata mount / not a template).
+- **Per-EP payload files**: `OUTPUT_BASE/dm_ep{NN}_{persona}_{slug}.json` (human) and `OUTPUT_BASE/dm_sys_{Class}.{Method}.json` (System) — audit + replay.
 
 ---
 
@@ -116,14 +119,14 @@ Human actions stay platform-agnostic and user-observable (the forbidden-UI-word 
 
 ## Phase -1 — Resolve the repo & confirm it's a Web Forms monolith
 
-Resolve the path (argument → `.breeze.json.targetRepos.monolith` → cwd → ask once; persist). Then **guard the stack** — this skill is only for the monolith shape:
+Resolve the path (argument → `.breeze.json.targetRepos.monolith` → cwd → ask once; persist). Set **`OUTPUT_BASE = f"{repo}/.breeze-output"`** and `mkdir -p` it — **every** artifact this skill or its agents write goes under `OUTPUT_BASE`, never the repo root. Ensure `.breeze-output/` is in the target repo's `.gitignore` (append it if missing; do not touch the plugin's `.gitignore`). Then **guard the stack** — this skill is only for the monolith shape:
 - **Confirm Web Forms:** `Glob '**/*.aspx'` and `'**/*.ascx'` return hits, and code-behind imports `System.Web.UI`.
 - **Confirm an in-process business tier:** classes named `*Facade`/`*Service`/`*Manager` (often `I*` interfaces with constructor-injected repositories).
 - **If instead** it's a modern split (a SPA router + a separate REST/GraphQL API repo, no `.aspx`): **stop** and redirect the user to `generate-functional-from-ui` (+ `generate-functional-from-backend`). Don't force the monolith flow onto a split app.
 
 ## Phase 0 — Discover entry points & personas
 
-If `entrypoints.json` already exists in the repo dir: read it, show a resume summary, and jump to the per-EP loop (do not overwrite).
+If `OUTPUT_BASE/entrypoints.json` already exists: read it, show a resume summary, and jump to the per-EP loop (do not overwrite). *(Also check the legacy repo-root location once for back-compat; if found there, move it into `OUTPUT_BASE`.)*
 
 ### 0.1 — UI entry points + REACHABILITY classification (4 buckets)
 `Glob '**/*.aspx'` **and** `'**/*.ascx'`, then **classify every control by how it is reached** — a control is a top-level EP only if it is independently reachable; otherwise it is *folded into the parent EP that mounts it*. Build the mount graph, then bucket:
@@ -142,11 +145,21 @@ If `entrypoints.json` already exists in the repo dir: read it, show a resume sum
 
 **Detect generic page hosts:** if a `.aspx` shell only `LoadControl(...)`s a control, the shell is a container and the mounted `.ascx` is the primary EP. Read `web.config` `<authorization>`/`<location>` and `.sitemap` `roles="…"` for per-EP persona reachability.
 
+> ⚠️ **Mount resolution is a `Grep`/`Read` job, NOT a code-graph lookup.** `LoadControl("X.ascx")`, `<%@ Register Src>`, and `DETAILVIEWS_RELATIONSHIPS`/metadata mounts are **string-keyed and runtime** — the code graph does NOT carry them as resolved call edges (a `Code_Graph_Search` for the mount will come back empty). Build the mount graph by `Grep`-ing the repo for `LoadControl`, `Register Src`, `AppendDetailViewRelationships`, and the metadata seed/tables — do not expect the ontology to have it.
+
+### 0.1b — Classification completeness cross-check ⛔ (mandatory — no `.ascx` left unclassified)
+
+Enumerating 100+ controls by hand WILL miss some, and a missed control = a silently dropped feature (the #1 aspx coverage failure). So **ground the classification against the complete file list**:
+1. Get the complete `.ascx` (and `.aspx`) inventory — `Get_Code_Nodes_By_Label(project_uuid, label="File", filters={"codeOntologyId": <id>, "path": {"$contains": ".ascx"}})` (dedup the `.cs`/`.designer.cs`/raw variants to distinct control basenames); fall back to `Glob '**/*.ascx'` if the graph is unavailable.
+2. **Diff** that complete set against the union of `primaryEntryPoints[] ∪ foldedControls[] ∪ sharedControls[] ∪ orphans[]`.
+3. **Every `.ascx` MUST land in exactly one bucket.** Any control in the inventory but in NO bucket is **unclassified** → resolve its mount (0.1 rules 1–4) and bucket it; never leave it out. A file in two buckets is also an error — pick one.
+4. Record the tally in `entrypoints.json` under `classification`: `{ totalControls, primary, folded, shared, orphan, unclassified: [] }`. **`unclassified` MUST be empty** before leaving Phase 0 — a non-empty `unclassified[]` means discovery is incomplete, not done.
+
 ### 0.2 — Personas ⛔ HARD GATE
 `Get_all_personas(projectUuid)`; if present, offer to reuse or re-detect. Otherwise run `/breeze:detect-personas` (analysis-only) against the repo. Present the candidate human personas + source locations, **wait for user confirmation**, record the closed set in `entrypoints.json.personas[]`. Do not proceed until confirmed. Per-EP `personas[]` from auth guards/roles/`web.config`; default to the full set where undeterminable (the per-(EP,persona) loop records `audit.skippedForVisibility[]`).
 
 ### 0.3 — Delegate backend + façade-seam discovery to the discovery agent  (context-lean)
-Do **NOT** inventory the backend inline in the parent — a monolith is thousands of files/methods and would blow the parent's context. Spawn **`breeze:backend-entrypoint-discovery-agent`** ONCE (pass the repo path, `CODE_ONTOLOGY_ID`, `INDEXED_REPO_NAME`, `OUTPUT_PATH = <repo>/entrypoints.json`, `EXISTING_PERSONAS`). It does the token-heavy globbing/reading and writes `entrypoints.json`; the parent reads only its summary line. On a .NET Web Forms monolith it returns:
+Do **NOT** inventory the backend inline in the parent — a monolith is thousands of files/methods and would blow the parent's context. Spawn **`breeze:backend-entrypoint-discovery-agent`** ONCE (pass the repo path, `CODE_ONTOLOGY_ID`, `INDEXED_REPO_NAME`, `OUTPUT_PATH = OUTPUT_BASE/entrypoints.json`, `EXISTING_PERSONAS`). It does the token-heavy globbing/reading and writes `entrypoints.json`; the parent reads only its summary line. On a .NET Web Forms monolith it returns:
 - **Internal façade/service methods (monolith mode)** — `*Facade`/`*Service`/`*Manager` public methods as `type:"Internal", subType:"service-operation", operation:"<Class>.<Method>", persona:"System"`, each with `{file,line,parameters,requestType,responseType}`. **This IS the façade seam** (the Phase-1 join targets) **and** the System side of the in-process join. It sets `internalEntryPointsNeedConfirmation: true`.
 - **WCF / ASMX SOAP operations** — `[ServiceContract]`/`[OperationContract]`, `[WebMethod]` (incl. `[ScriptService]`) as System entry points (`type:"SOAP"`).
 - **Queue / event / cron / Windows-service** handlers, and **webhook / partner** receivers → `External System`.
@@ -166,7 +179,7 @@ For each UI EP in `remaining[]`, and for each `persona` in `ep.personas[]`, in p
 
 **1. (removed) dedup is agent-side.** The parent does not pre-query or pass `EXISTING_NEIGHBORHOOD`. The `aspnet-webforms` agent runs its own persona-scoped dedup read-back (Functional_Graph_Search + `Get_all_*`) against the live graph in its Phase 5, right before writing.
 
-**2. Spawn the end-to-end agent** — `breeze:aspnet-webforms-flow-structuring-agent`. ONE call per (EP, persona) produces **both** halves (User subtree + joined System subtree) in a single run — there is no separate System spawn and no cross-agent hand-off. Pre-compute `OUTPUT_PATH_HUMAN = <repo>/dm_ep{NN}_{persona}_{slug}.json` and `OUTPUT_PATH_SYSTEM = <repo>/dm_ep{NN}_system_{slug}.json`. Resolve the façade seam(s) this EP calls to `{seedFile, seedLine}` from the discovery agent's `Internal` `service-operation` entries in `entrypoints.json` (fallback `Grep`/`Code_Graph_Search`), and pass them as hints. Render its input block:
+**2. Spawn the end-to-end agent** — `breeze:aspnet-webforms-flow-structuring-agent`. ONE call per (EP, persona) produces **both** halves (User subtree + joined System subtree) in a single run — there is no separate System spawn and no cross-agent hand-off. Pre-compute `OUTPUT_PATH_HUMAN = OUTPUT_BASE/dm_ep{NN}_{persona}_{slug}.json` and `OUTPUT_PATH_SYSTEM = OUTPUT_BASE/dm_ep{NN}_system_{slug}.json`. Resolve the façade seam(s) this EP calls to `{seedFile, seedLine}` from the discovery agent's `Internal` `service-operation` entries in `entrypoints.json` (fallback `Grep`/`Code_Graph_Search`), and pass them as hints. Render its input block:
 ```
 PERSONA: <persona>            ENTRY_POINT: { route, kind(page|control|master), title }
 SEED_FILE: <abs path to .aspx/.ascx markup>   CODE_BEHIND: <abs .aspx.cs/.ascx.cs>
@@ -220,3 +233,11 @@ Report: EPs processed, personas, human scenarios, System scenarios, join keys re
 - **No silent scope creep:** the monolith scope gate (0.5) bounds System work to UI-reached methods + background EPs; anything skipped is recorded, not dropped.
 - **Reuses, never forks, the agents:** if the aspx/backend agents improve, this skill inherits it. It adds orchestration + the join wiring only.
 - **VB Web Forms:** works the same once a `vb_webforms`-style human path exists; today the aspx agent targets C# code-behind.
+
+## Reconciliation pass ⛔ (mandatory finalization — after ALL UI EPs complete)
+Per shared `core.md` §2, dedup is Outcome-only inline (deterministic list-all) and below-outcome nodes are coverage-first; parallel batches can mint near-duplicate Outcome names. **This is especially load-bearing here** because the Human and System halves join by a shared Outcome *name* — if two runs name the same capability differently, the halves fail to join. This pass is **Outcome-level only** — it exists solely to repair that cross-half join race:
+1. List all Outcomes (`Get_all_personas` → `Get_all_outcomes_for_a_persona_id`) and merge same-capability Outcomes to one canonical name via `Merge_Functional_Nodes` — restoring any broken Human↔System joins.
+2. **Never merge distinct capabilities** — remove duplicates, not coverage.
+3. Record merges under `reconciliation` in `entrypoints.json`.
+
+**Do NOT merge below the Outcome level.** Scenario / Step / Action are coverage-first and persona-scoped; the join does not depend on them, and merging near-duplicate scenarios risks silently dropping distinct flows. Inline Phase-5 dedup already handles genuine within-persona duplicates at those levels — leave the rest as coverage.

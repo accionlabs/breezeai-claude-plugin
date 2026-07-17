@@ -220,6 +220,14 @@ The skill reads `{metadataRoot}/.breeze-metadata-output/applications.json`, skip
 inspect the payload file on disk, then patch the agent prompt. Recovery loop: clear from `failed[]`,
 re-add the app id to `remaining[]`, resume.
 
+## Reconciliation pass ⛔ (mandatory finalization — after ALL apps complete)
+Per shared `core.md` §2, dedup is Outcome-only inline (deterministic list-all) and below-outcome nodes are coverage-first; parallel per-app batches can also mint near-duplicate Outcome names (each app builds two halves — Human + System — joined by a shared Outcome *name*, so name drift breaks the join). The race collides **only at the Outcome**; everything below came from a *different* app/persona and is distinct coverage. So this pass is **Outcome-level only**:
+1. List all Outcomes and merge same-capability ones to a single canonical name via `Merge_Functional_Nodes` (this is what keeps the Human↔System join intact).
+2. **Never merge distinct capabilities** — remove duplicates, not coverage.
+3. Record merges under `reconciliation` in `applications.json`.
+
+**Do NOT merge below the Outcome level.** Scenario / Step / Action are coverage-first — merging near-duplicate scenarios (from different apps) risks silently dropping distinct flows for no join benefit.
+
 ## When NOT to use
 - Standard React/Vue/Angular UI repos → `/breeze:generate-functional-from-ui`
 - Standard REST/GraphQL/queue backends → `/breeze:generate-functional-from-backend`

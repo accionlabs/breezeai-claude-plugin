@@ -248,7 +248,7 @@ Build the `payload` and `audit` documents per the schema below. **Hold them in y
 > - `SHARED_FUNCTIONAL_PATH/core.md` — node model (Outcome → Scenario → Step → Action), reuse/dedup, `rule-a`, citations, write protocol, no-upper-cap-on-actions.
 > - `SHARED_FUNCTIONAL_PATH/system-overlay.md` — this is the **backend / System pass**: the mechanical EP→persona map (`System` / `External System`), `description` REQUIRED on every System action, one-operation-one-action (per-field atomicity exempt), the apis-OR-identifier `rule-a` fallback, and the **inbound-surface action** rule (the EP's own endpoint/queue is its own `Receive`/`Consume`/`Handle` action that owns the served `apis[]`).
 >
-> Do not keep a private copy of those definitions here. The shared `validate.py` enforces the hard gates (schema / rule-a / persona / citations / coverage) regardless. If `SHARED_FUNCTIONAL_PATH` is unset/unreadable, fall back to `EXISTING_NEIGHBORHOOD`/training and let the reasoning checks (Step B) cover it.
+> Do not keep a private copy of those definitions here. The shared `validate.py` enforces the hard gates (schema / rule-a / persona / citations / coverage) regardless. If `SHARED_FUNCTIONAL_PATH` is unset/unreadable, fall back to `EXISTING_NEIGHBORHOOD`/training and let the Phase-6 reasoning table cover it.
 
 **Backend-specific Outcome guidance (adapter — on top of core.md §2):** prefer broad business-capability Outcomes; >3-4 for one EP = over-segmenting. A System Scenario's `description` describes the **internal processing**, not the triggering UI.
 
@@ -277,13 +277,23 @@ Every service / repository / client injected into the handler's constructor MUST
 
 ## Tool Escalation Policy — Code_Graph_Search
 
-Code_Graph_Search is an **OPTIONAL accelerator** — `Read` + `Glob` + `Grep` on the local checkout are the backbone and the **source of truth**. **There is NO hard floor: a run with zero graph calls is VALID.** No per-EP cap when you do use it.
+`Read` + `Glob` + `Grep` on the local checkout are the backbone and the **source of truth**; Code_Graph_Search is the completeness lever on top. No per-EP cap when you use it.
 
-**When it helps (recommended for backend, still optional):** backend route/decorator extraction is the one place the graph earns its keep — reach for it to (a) resolve the concrete target of a cross-file call (through interface / DI / overload) that `Grep` can't disambiguate, or (b) enumerate routes/DB calls repo-wide (`Get_Code_Nodes_By_Label(label="Statement", filters={semanticType: route|db_method_call|…})`). Skip it when the handler + its import tree are fully traceable by `Read`/`Grep`.
+**Hazard-family traversal (HARD GATE — see shared `core.md` §6.1 for the full three-step rule).** Backend flows routinely cross a **traversal hazard** the import-walk can't follow: interface→implementation via DI, method overloads, decorator/annotation-driven routes, and side effects reachable only through an injected client. The three steps are complementary — graph to discover/resolve, `Read` for the leaf detail:
+
+- **If the handler exhibits ANY hazard signal — a constructor-injected/DI-resolved dependency whose concrete type isn't in a file you read, an interface/abstract method whose implementation `Grep` can't uniquely resolve, a decorator/annotation route, or a repo-wide enumeration need (all routes / all DB calls) — you MUST:**
+  1. **Discover/resolve** via `Code_Graph_Search` (find the concrete impl / related handlers) and/or **inventory** via `Get_Code_Nodes_By_Label(label="Statement", filters={semanticType: route|db_method_call|query_statement, codeOntologyId})` (complete route/DB-call set) — this gives the resolved next-hop + route/SQL-call contract reliably.
+  2. **`Read` the resolved implementation, DTO/enum, and validation source for the leaf detail the graph flattens** — DTO/enum field lists, validation rules, SQL column sets. The graph points you to the file and gives the call/route; the field-level enumeration comes from `Read`.
+  Log each call in `audit.codeGraphSearches[]` with `reason`. A run with a hazard signal but zero graph calls (and no `code_graph_unavailable`) is invalid — Phase 6 rejects it.
+- **If the handler + its import tree are fully traceable by `Read`/`Grep`** (no DI/interface indirection, no dynamic routes), a graph call is optional and `audit.codeGraphSearches: []` is valid.
 
 > **⚠️ The code graph does NOT capture every statement.** It is an accelerator to *locate* code — never the source of statement / step / action detail. Every literal (route, URL, stored proc, table, field, guard) and every Step/Action MUST be confirmed by `Read`ing the actual source. **At step/action granularity the local file is the ONLY source of truth** — never derive a step or action from a graph summary alone.
 
-**If the tool is unavailable** (not in your tool set, or the first call errors — MCP not connected / auth / transport): do NOT fail. Append `audit.warnings[] { "type": "code_graph_unavailable", "note": "…proceeded on Read+Glob+Grep only" }` and set `audit.codeGraphSearchAvailable = false`, and be extra-thorough with `Grep` for unresolved symbols. Either way — used, unused-by-choice, or unavailable — an **empty `audit.codeGraphSearches` is accepted** (Phase 6 never rejects on it).
+**Three states (distinguish them — they are NOT the same):**
+- **Used** — ≥1 call logged. Always valid.
+- **Present but unused, no hazard** — valid: `audit.codeGraphSearches: []` on a fully-traceable handler.
+- **Present but unused, hazard signal WAS present** — **invalid** (Phase 6 rejects). This is the guard: a DI/interface/dynamic-route hazard must be resolved, not skipped.
+- **Genuinely unavailable** (tool not in set, or first call errors — MCP not connected / auth / transport): do NOT fail — append `audit.warnings[] { "type": "code_graph_unavailable", "note": "…proceeded on Read+Glob+Grep only" }`, set `audit.codeGraphSearchAvailable = false`, be extra-thorough with `Grep`, and proceed. Empty is then accepted for observability, not as a quality pass.
 
 **Use Code_Graph_Search whenever any of these are true:**
 - You hit a reference (constant, function, type, validator, DTO) you cannot resolve by walking imports from the seed file.
@@ -294,7 +304,7 @@ Code_Graph_Search is an **OPTIONAL accelerator** — `Read` + `Glob` + `Grep` on
 **Do NOT use Code_Graph_Search to:**
 - Find scenarios for a DIFFERENT entry point — your scope is THIS EP only.
 - Describe frontend/UI behavior — the backend pass never reads frontend repos or cites frontend paths.
-- Search the functional graph — that is the parent's job; `EXISTING_NEIGHBORHOOD` was already given to you.
+- Search the functional graph — for dedup you build your own neighborhood from the LIVE graph (Phase 4); Outcome dedup is a deterministic list-all (shared `core.md` §2), not a code-graph call.
 
 **Signature:**
 ```
@@ -343,7 +353,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` (on-dis
 - `actions[i].citations[]` — **preferred.** The service/repository/handler file the action's operation came from — the tightest link.
 - `steps[i].citations[]` — files defining a processing stage when no single action owns them.
 - `scenarios[i].citations[]` — files spanning the whole flow (the controller/resolver/consumer entry file).
-- **Never author a `citations[]` on `outcomes[]` or `personas[]` — omit the key entirely.** Citations live ONLY on scenario / step / action (cite at the action by default). Outcome/Persona are shared/merged by name across many EPs, so any file ref there pollutes the shared node. This is a HARD gate: `validate.py citations` now **fails (exit 2)** on a persona/outcome citation. Completeness is a union across the three allowed levels, so an action/step/scenario citation satisfies the gate. **Never cite a frontend file path** — the backend pass reads backend code only.
+- **Every scenario / step / action MUST carry ≥1 citation (MANDATORY); `outcomes[]` / `personas[]` must carry NONE (forbidden — omit the key).** Cite the source file each scenario/step/action came from (cite at the action by default). HARD gate both ways: `validate.py citations` **fails (exit 2)** if any scenario/step/action has an empty `citations[]`, AND if any persona/outcome carries one. Outcome/Persona are shared/merged by name across many EPs, so a ref there pollutes the shared node. You may NOT satisfy a node by citing its parent. **Never cite a frontend file path** — the backend pass reads backend code only.
 
 ---
 
@@ -479,11 +489,11 @@ If any check fails, fix the output before emitting. The parent does NOT re-valid
 
 ---
 
-## Phase 6 — Self-validate + repair (deterministic gate + reasoning backstop)
+## Phase 6 — Self-validate + repair (deterministic gate + reasoning repair-reference)
 
-Validate against your in-memory `{payload, audit}` before writing/upserting. **The parent runs nothing — you own validation.** Two layers: a **deterministic validator pass** (`validate.py`) that machine-checks the structural rules, plus **reasoning checks** for what no script can judge. Repair in-place and re-run until clean, or after 2 repair passes still failing → emit `FAIL_VALIDATE`.
+Validate against your in-memory `{payload, audit}` before writing/upserting. **The parent runs nothing — you own validation.** These are NOT sequential passes: **`validate.py` is the authoritative GATE** (decides pass/fail) and the **reasoning table is the REPAIR REFERENCE** (how to fix each failure) PLUS the checks the script can't judge. Think through the table as you build → run the gate → repair via the table on any failure → re-run. Max 2 repair passes, then emit `FAIL_VALIDATE`.
 
-### Step A — Deterministic validators (`validate.py`)
+### The GATE — `validate.py` (authoritative; decides pass/fail)
 
 If `VALIDATORS_PATH` is set, materialize the candidate to a temp file and run each subcommand against it:
 
@@ -506,12 +516,12 @@ run coverage                            # warning-only (exit 0); reports side-ef
 Each subcommand prints `{ok, errors, warnings, ...}` and exits **0** (pass) / **2** (fail) / **3** (bootstrap error). Handle:
 
 - **exit 2** → read `errors[]`, repair the offending nodes in-memory using the table below, rewrite `$CAND`, re-run that subcommand. Max **2 repair passes**; if still failing → `FAIL_VALIDATE` with `last_check` = the failing subcommand (`schema|rule-a|path-linked|descriptions|persona|citations`).
-- **exit 3** (the `jsonschema` dependency isn't installed) **OR `VALIDATORS_PATH` is absent/empty** → do NOT fail the run. Append `audit.warnings[]` `{ "type": "validators_unavailable", "note": "validate.py or jsonschema not available — used reasoning checks only" }`, set `audit.validatorsRun = false`, and rely on Step B. (Same degrade-don't-die philosophy as the Code_Graph_Search soft floor.)
+- **exit 3** (the `jsonschema` dependency isn't installed) **OR `VALIDATORS_PATH` is absent/empty** → do NOT fail the run. Append `audit.warnings[]` `{ "type": "validators_unavailable", "note": "validate.py or jsonschema not available — used reasoning checks only" }`, set `audit.validatorsRun = false`, and rely on the reasoning table as your only check. (Same degrade-don't-die philosophy as the Code_Graph_Search soft floor.)
 - **coverage** is advisory: if it warns the ratio is `<90%`, act on it per check #6 before proceeding — but it never blocks on its own.
 
 When the deterministic pass ran, set `audit.validatorsRun = true`. The `$REPO_NAME` value is the `REPO.name` (indexed repo name) input.
 
-### Step B — Reasoning checks + repair guide
+### The REPAIR REFERENCE — reasoning checks + repair guide
 
 `validate.py` machine-verifies checks **#1, #2, #4, #5, #6** below; the table is your guide for *how to repair* whatever they flag. Checks **#3** (chain coherence) and **#7** (polymorphic split) are **reasoning-only** — no script catches them, so you must scan for them yourself every run. When validators were unavailable (exit 3 / no path), run **all** checks #1-7 by reasoning.
 

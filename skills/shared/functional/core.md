@@ -34,27 +34,38 @@ These definitions are **canonical and non-negotiable**. In particular:
 
 ---
 
-## 2. Reuse-first & dedup (every level)
+## 2. Reuse-first & dedup — OUTCOME-ONLY inline, coverage-first below
 
-**Always check the existing graph before creating a node.** The upsert merges by **name** at every level, so reuse is achieved by emitting the *exact existing name*.
+The upsert merges by **name** at every level, so reuse is achieved by emitting the *exact existing name*. Dedup effort is **concentrated at the Outcome level only** (the sole cross-persona shared node — see §3). Below the Outcome, **bias to coverage: never suppress a possibly-distinct flow**; below-outcome duplicates are cheap to merge later and a merge never loses data, whereas a false-positive dedup permanently drops a flow.
 
-- **Outcome:** prefer broader over narrower; capture variation as new Scenarios, not new Outcomes. Create a new Outcome ONLY if none can logically contain the intent without becoming misleading.
-  - Good: `Manage Fund Allocations`, `Monitor Compliance Status`, `Generate Reports`.
-  - Bad (anti-patterns): `Handle API Requests`, `Process Database Queries`, `Render Components`, one Outcome per endpoint, Outcome names matching a function/class/route/resolver, duplicate Outcomes with slightly different wording.
-  - Quality bar: understandable by a non-technical stakeholder; stable across implementation changes; broad enough to absorb future Scenarios.
-- **Scenario:** reuse if the flow is semantically similar; create new only for a genuinely distinct interaction path. If two Scenarios share **>70%** of their steps, consider merging.
-  - Good: `Filter Dashboard by Date Range`, `Submit Compliance Report`, `Import code repository`.
-  - Bad: `Use the System`, `Do Things with Data`.
-- **Dedup decision matrix** (run a `Functional_Graph_Search` dedup pre-query first — see §6):
+### 2.1 Outcome dedup — DETERMINISTIC list-all, NOT semantic search (mandatory)
 
-  | Similarity | Match type | Action |
-  |---|---|---|
-  | > 0.6 | Same outcome/scenario already in graph (same interaction model) | **Reuse** — emit the exact existing name. |
-  | > 0.6 | Different interaction model (single vs bulk, header vs row, modal vs inline) | **Differentiate** — sibling under the same Outcome, disambiguated name. |
-  | > 0.6 | Outcome created by another pass/EP | **Attach** — reuse the exact Outcome name; upsert merges. |
-  | < 0.6 | No match | **Proceed fresh.** |
+Do NOT rely on a `Functional_Graph_Search` similarity threshold to dedup Outcomes — near-duplicates routinely score **0.45–0.55**, below any usable cutoff, and slip through as false "fresh" outcomes, fragmenting the graph. Instead, **enumerate the complete existing outcome set and match on the normalized name**:
 
-> `Functional_Graph_Search` is a **dedup check only** — never a source of code knowledge. Pass the project UUID in `parameters3_Value` (wrong slot fails silently).
+1. `Get_all_personas(PROJECT_UUID)` → for each persona `Get_all_outcomes_for_a_persona_id` → collect **every** existing Outcome name across the whole graph (the set is small — tens of names — so a full list is cheap and *complete*).
+2. Normalize each candidate + existing name to a `nameKey` (lowercase, trim, collapse whitespace) and compare.
+3. **If the candidate is the SAME CAPABILITY as an existing Outcome → reuse that Outcome's exact name verbatim.** The Outcome is a cross-persona shared bucket; the upsert merges it.
+4. Only mint a new Outcome when no existing name denotes the same capability.
+
+### 2.2 Canonical outcome vocabulary (prefer before minting)
+
+Before creating a new Outcome name, **prefer an existing/canonical name for the same capability** so parallel passes and different personas converge on one bucket. Reuse the name whenever the capability matches; vary the *description and scenarios* to carry persona/context specifics.
+
+- **Capability-level floor (do NOT over-merge):** reuse only when it is genuinely the **same capability**. Never collapse *distinct* capabilities into one generic bucket to chase reuse (e.g. `Manage Code Ontologies` and `Manage Architecture Model` are distinct — keep them separate). Generic is good until it erases meaning.
+- Quality bar: understandable by a non-technical stakeholder; stable across implementation changes; broad enough to absorb future Scenarios.
+- Good: `Manage Fund Allocations`, `Monitor Compliance Status`, `Generate Reports`.
+- Bad (anti-patterns): `Handle API Requests`, `Process Database Queries`, `Render Components`, one Outcome per endpoint, Outcome names matching a function/class/route/resolver, **duplicate Outcomes with slightly different wording** (the exact failure list-all prevents).
+
+### 2.3 Below the Outcome — coverage-first (no inline suppression)
+
+- **Scenario / Step / Action:** emit freely. Do NOT drop or skip a candidate because it *might* duplicate an existing node. Capturing the flow is the priority; a genuine duplicate is reconciled in the merge pass (§2.4). Naming stays descriptive — Good: `Filter Dashboard by Date Range`, `Submit Compliance Report`; Bad: `Use the System`, `Do Things with Data`.
+- The only inline exception is a **within-your-own-payload** obvious duplicate (two identical scenarios you drafted this run) — collapse those before emitting.
+
+### 2.4 Reconciliation is mandatory, not "later"
+
+Because coverage-first (§2.3) and parallel passes will produce below-outcome duplicates, a **reconciliation/merge pass is a required finalization step, not optional cleanup.** The orchestrating skill MUST, after the fan-out completes, collapse below-outcome duplicates within each persona via `Merge_Functional_Nodes` (reuse within the same persona only; never merge across personas — Outcome is the sole shared node). A run that skips reconciliation is incomplete.
+
+> `Functional_Graph_Search` is now an **optional discovery aid only** (find a similar flow when you don't know where to start) — it is **NOT** the dedup engine. Outcome dedup is the deterministic list-all above; below-outcome dedup is the merge pass. Never treat a `Functional_Graph_Search` score as a source of code knowledge.
 
 ---
 
@@ -90,8 +101,11 @@ Because the upsert merges by name, both halves attach to the **same Outcome** wh
 | Backend REST route | `REST` | HTTP verb | route path (resolve prefixes/template literals to literals) |
 | Queue / event consumer | `Event` | `consume` / `publish` | `sqs://<q>` / `kafka://<topic>` / `rabbit://<exch>:<key>` |
 | Cron / scheduled | `Event` | `trigger` | `cron:<expression>` |
-| ASP.NET / WCF / ASMX façade | `SOAP` | operation name | service endpoint + SOAPAction |
+| **aspx Case-A1** — façade/service called **in-process** (direct `new`, DI/Spring `GetObject`, or field on the same host) | `InProcess` | operation name | `<Class>.<Method>` (e.g. `AttendanceService.SaveManualAttendance`) |
+| **aspx Case-A2** — service invoked **over a WCF/ASMX wire** (client proxy: `ClientBase<T>`/`ChannelFactory<T>`/generated `*Client`/service-reference, or a `<client><endpoint>` binding in `Web.config`) | `SOAP` | operation name | endpoint address + SOAPAction (from `.svc`/config, resolved to a literal) |
 | **aspx Case-B** (side effect with no URL) | — | — | **no `apis[]`** — name the repository/table/SP in `description` instead (system-overlay rule-a fallback) |
+
+> **In-process vs WCF-wire is classified PER SEAM from disk evidence, not per app, and NOT from `[ServiceContract]` attributes** (those only prove a service is WCF-*capable*, never that a *call* crosses a wire). A single page may do both — an in-process facade save AND a WCF autocomplete lookup — so decide each call independently by reading the source: **A2 (SOAP)** only when the call site resolves to a client proxy (`ClientBase`/`ChannelFactory`/generated `*Client`/`ServiceReference`/`System.ServiceModel`) **or** a `Web.config <client><endpoint>` names that contract; the `.svc` `<%@ ServiceHost Service="…" %>` directive names the concrete impl for the endpoint. Otherwise the call is **A1 (InProcess)** — join on `<Class>.<Method>`. When the deciding files are unreadable, default to **A1 `InProcess`** and record `audit.warnings[] {type:"seam_type_unverified"}` — never label a seam `SOAP` on a naming hunch. (`type` is free text server-side; `InProcess` is a recommended addition to the set alongside `SOAP`.)
 | Vert.x internal event bus / `DoFilter` / `WriteData` | `Event` | the verb / address | filter id / handler name |
 | Vert.x-app custom-HTML `$.ajax` | `REST` | HTTP verb | the endpoint path (`/apy-common-screen/...`) |
 
@@ -112,14 +126,41 @@ If `rule-a` fails: open the source file and add the `apis[]`/identifier, **or** 
 
 ## 6. Enumeration & source-fidelity discipline
 
-- **The local source checkout is the SOURCE OF TRUTH; the code graph is an OPTIONAL accelerator, never required.** `Read` + `Grep` on disk are the backbone — a run that uses **zero** graph calls is completely valid. The code graph (`Code_Graph_Search` / `Get_Code_Nodes_By_Label`) earns its keep in only two situations: (a) resolving the concrete **next-hop** of a cross-file call (interface / DI / overload) that `Grep` can't disambiguate, and (b) **repo-wide inventories** (all routes / DB calls, via `Get_Code_Nodes_By_Label(label="Statement", …)`) — mostly a discovery-agent concern. Reach for it only then; otherwise `Grep`+`Read` is faster and always current.
+- **The local source checkout is the SOURCE OF TRUTH for fields/markup/behaviour; the code graph is the discovery + contract-resolution layer.** `Read` + `Grep` on disk are the backbone. A run may use **zero** graph calls **only when the seed has no hazard family** (see §6.1) — a genuinely self-contained leaf surface fully traceable by reading it + its direct imports. When a hazard family IS present, the graph is **required** (§6.1 steps 1–2) to discover/inventory it, and `Read` is **still** required (§6.1 step 3) for the leaf detail. The graph (`Code_Graph_Search` / `Get_Code_Nodes_By_Label`) earns its keep by: (a) discovering reachable-but-not-imported members, (b) resolving the concrete **next-hop** of a cross-file call (interface / DI / overload) that `Grep` can't disambiguate, and (c) **repo-wide inventories** (all routes / DB calls). For a true leaf, `Grep`+`Read` alone is faster and always current.
 - **⚠️ The code graph does NOT capture every statement — so it is NEVER the source of step/action detail.** It locates code; it does not define behaviour. **Every literal (route, URL, stored proc, table, field code, decorator, guard) and every Step/Action MUST be derived from `Read`ing the real file** — never from a graph summary. At **step/action granularity the local file is the ONLY source of truth.** A graph hit that lacks a statement you expect means "go Read the file," not "the statement doesn't exist."
-- **⚠️ Scope EVERY graph query to THIS repo's `codeOntologyId`.** A Breeze project holds **multiple repos** (frontend + N backends), so an unscoped query bleeds across repos. Functional generation runs for **one repo at a time**: the skill resolves that repo's `codeOntologyId` **once at Bootstrap** via `Call_List_Repositories_(projectUuid)` (matching the on-disk repo to an indexed one) and passes it to the agent as `CODE_ONTOLOGY_ID`. Then:
-  - `Code_Graph_Search(..., code_ontology_id=<id>)` — pass it as the param (fallback `repository_name=<INDEXED_REPO_NAME>` + a `cgs_unscoped` warning).
-  - `Get_Code_Nodes_By_Label(..., filters={"codeOntologyId": <id>, …})` — pass it **inside `filters`**; `repositoryName` is **rejected** as a filter (mutable display name).
-  A bad/missing `codeOntologyId` **fails loud** (`No repository with codeOntologyId … Available: …`), never a silent cross-repo or empty result — so never issue an unscoped graph query.
+- **⚠️ Graph-scoping gotchas** (each agent states the base rule "scope every query to `CODE_ONTOLOGY_ID`, fall back to `repository_name` + a `cgs_unscoped` warning"; these two easy-to-miss details live here as the shared reference): (a) on `Get_Code_Nodes_By_Label` the id goes **inside `filters`** (`filters={"codeOntologyId": <id>, …}`) — `repositoryName` is **rejected** as a filter (mutable display name); (b) a bad/missing `codeOntologyId` **fails loud** (`No repository with codeOntologyId … Available: …`), never a silent cross-repo or empty result.
 - **Enumerate, do not sample.** Every declared field / widget / injected dependency / side effect that the adapter discovers must be accounted for — either as its own action or folded into a `Review …` description (human) / the operation's payload (system). The adapter records what it found in `audit.declaredFields[]`, `audit.filesRead[]`, and (where relevant) `audit.sideEffects[]`; the validators check the graph against that audit.
 - **Drill-down rule:** every dependency the adapter flags as significant (an imported stateful component for UI; a constructor-injected service/repository/client for backend; a referenced `MFLT`/`CRUD`/`.java` handler for a metadata app) **must be `Read`** before scenarios are drafted, and **cited**. If skipped, justify it in the audit's `skipped*` list.
+
+### 6.0 Functional distinctness — split by what the USER sees, never merge by shared code (HARD GATE)
+
+The functional graph captures **what a user perceives and does when they open the application**, not how the code is structured. Therefore:
+
+- **N user-visible choices = N scenarios.** When a surface presents the user a set of distinct options — tabs, categories, entity types, list/filter types, menu items, wizard branches, cards, sections — emit **one scenario per user-visible choice**, EVEN IF a single shared component / form / field-set / route renders all of them behind the scenes. The user sees 8 architecture-layer panels → that is **8 scenarios**, regardless of whether one dialog component with one field config backs all 8.
+- **Implementation reuse is NEVER a reason to collapse a functional distinction.** "Same fields", "same component", "same endpoint", "same handler with a `type` param" are technical facts the user never sees — they do not reduce scenario count. Detect the set of choices from what the user would see (tab titles, category labels, option lists, menu entries), not from the backing component's field map.
+- **Dedup (§2) still applies, but only to genuine duplicates of the SAME user action** — never to distinct things the user sees that happen to share code. Collapsing distinct user-visible choices is under-coverage, not dedup.
+- The only time a multi-choice surface is ONE scenario is when the user genuinely perceives a single undifferentiated action (no visible branching, no choice presented).
+
+This rule is stack-agnostic: it holds for SPA tabs/menus, Razor/aspx panels and grids, and metadata-driven screens alike.
+
+### 6.1 Hazard-family traversal (HARD GATE — the seed's import tree is NOT enough)
+
+> **Scope: code-sourced generation only.** This rule concerns import trees, `Code_Graph_Search`, and component/handler families — it applies to the code-based passes (SPA / backend / Razor / Web Forms / metadata). It is **N/A for design/visual sources** (`visual-to-text` and other non-code generators), which have no seed import tree — those passes derive scenarios from the design surface directly and rely on §6.0 (functional distinctness) instead.
+
+A pure import-walk of the seed misses functionality that is **reachable but not directly imported by the seed** — the recurring coverage failure. When the seed reaches a **hazard family** (definition per stack below), the graph and `Read` play **complementary** roles and BOTH are required — this is a three-step hybrid, not "graph instead of read" nor "read instead of graph":
+
+1. **Discover** the family with `Code_Graph_Search` (semantic — use when you don't know the exact member names, e.g. "the child views opened behind this tab/menu"). It ranks and surfaces members you didn't know to name.
+2. **Inventory** it completely with `Get_Code_Nodes_By_Label` (deterministic — scope every query with `filters={"codeOntologyId": <id>, …}`; filter by a `path`/`name` `$contains` on the family's own naming pattern in THIS repo, or `label="Statement"` for routes/DB calls). This is the *complete* set (no ranking, no misses) plus each member's **resolved contract/next-hop** (mutation/handler → API, route, `db_method_call`) — which the graph gives you **for free and more reliably than reading**.
+3. **`Read` each discovered member for the leaf detail the graph captures UNRELIABLY or not at all** — field labels/types/required flags, dynamically-built forms, and especially **markup templates** (`.aspx`/`.ascx`/`.cshtml`/`.html` and framework equivalents) which the parser **largely skips**. The graph tells you *which* files to read and hands you the contract; `Read` is the authoritative source for fields/markup. Never enumerate fields from a graph text-blob alone — it may be flattened or partial.
+
+**Hazard-family signals (per stack) — presence of ANY makes step 1–3 mandatory:**
+- **SPA (React/Vue/Angular/Next):** seed (or a file it reads) imports a family of `*-dialog` / `*-modal` / `*-drawer` / `*-sheet` components; tab containers (`Tabs`/`role="tab"`/`activeTab ===`); lazy-mounted children (`lazy(() => import())`, dynamic import, `Suspense` subtree); dispatcher components (branch on a `type`/`kind`/`mode`/`variant` prop into N field sets). → **Read for:** JSX field sets.
+- **Backend (REST/GraphQL/queue, any language):** interface→implementation via DI, method overloads, decorator/annotation-driven routes, an injected client whose concrete type isn't in a read file. → **Read for:** DTO/enum field lists, validation rules, SQL column sets (graph flattens these).
+- **ASP.NET Web Forms / monolith:** the in-process chain code-behind → façade → service → repository → SQL, runtime-mounted `.ascx` controls, and WCF/ASMX service-proxy hops. → **Read for:** `.aspx`/`.ascx` **markup** (fields, grids — parser skips markup) and stored-proc / SQL bodies.
+- **ASP.NET MVC / Razor:** `@await Component.InvokeAsync(...)` view-components, partials, editor/display templates, `SelectList`/policy referenced but not located. → **Read for:** `.cshtml` **markup** fields (Razor templates skipped like aspx).
+- **Metadata (MAPL/MSCR):** not applicable — fields are declared in MAPL and already enumerable; no hidden import tree.
+
+**Phase-6 hard gate (mechanical, not judgment):** if any file you read imports/references a hazard-family member (dialog/modal/drawer, DI'd service/interface impl, runtime-mounted `.ascx`, view-component/partial, decorator route) that was **neither `Read` nor graph-resolved**, the run is **INVALID** — resolve it (steps 1–3) or record an explicit `audit.warnings[]` justification for why it is out of this EP's scope. "I read the seed and its direct imports" is NOT sufficient when a hazard family is present.
 
 ---
 
@@ -132,11 +173,13 @@ This is a fixed contract, **not** a judgement call — decide once, at authoring
 
 | Node | `citations[]`? |
 |---|---|
-| **Action** | ✅ **author here by default** — the handler / field / widget the action came from (tightest, most useful link) |
-| **Step** | ✅ allowed — the file(s) that define that stage |
-| **Scenario** | ✅ allowed — a file that spans the whole flow (the route / page / `MAPL`), or the app-specific audit anchor |
+| **Action** | ✅ **REQUIRED** (≥1) — the handler / field / widget the action came from (tightest, most useful link) |
+| **Step** | ✅ **REQUIRED** (≥1) — the file(s) that define that stage |
+| **Scenario** | ✅ **REQUIRED** (≥1) — a file that spans the whole flow (the route / page / `MAPL`), or the app-specific audit anchor |
 | **Outcome** | ⛔ **forbidden — do NOT emit a `citations[]` key at all** |
 | **Persona** | ⛔ **forbidden — do NOT emit a `citations[]` key at all** |
+
+**Every scenario, step, AND action MUST carry at least one citation** — this is a HARD gate (`validate.py citations` exit 2 on any empty scenario/step/action `citations[]`). A missing citation is a defect, not an option: cite the source file the node was derived from. You may NOT satisfy a node's requirement by citing its parent — the citation goes on the node itself. (Outcome/Persona remain forbidden — never required, never allowed.)
 
 **Why Outcome/Persona are forbidden:** they are **shared and merged by name across many EPs**, so a file ref placed there accumulates on the shared node — hundreds of unrelated refs pile onto one Persona/Outcome = pollution. They are too high-level to carry file evidence. **Never author a `citations[]` on a persona or outcome node — omit the key entirely.** The `citations` validator **hard-fails (exit 2)** on any citation at outcome/persona level — cite the scenario/step/action it actually describes instead.
 

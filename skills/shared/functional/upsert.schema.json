@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://breeze.ai/schemas/functional/upsert.schema.json",
   "title": "Functional Graph Upsert Payload (v2) — unified",
-  "description": "ONE schema for every generator (ui / backend / metadata / aspx). Persona is a free string (C1: the backend enforces no enum — PersonaDto.persona is @IsString @IsNotEmpty; persona-KIND is gated by validate.py persona --kind, not by the schema). apis[].type is a free string (C5: free text server-side; recommended set REST / GraphQL / gRPC / WebSocket / Event / SOAP). The single persona per payload (minItems/maxItems 1) preserves the one-EP-one-upsert write protocol.",
+  "description": "ONE schema for every generator (ui / backend / metadata / aspx). Persona is a free string (C1: the backend enforces no enum — PersonaDto.persona is @IsString @IsNotEmpty; persona-KIND is gated by validate.py persona --kind, not by the schema). apis[].type is a free string (C5: free text server-side; recommended set REST / GraphQL / gRPC / WebSocket / Event / SOAP / InProcess — the last for an in-process method-call seam where url = <Class>.<Method>, e.g. an ASP.NET Web Forms facade called via DI/Spring rather than over a WCF wire). The single persona per payload (minItems/maxItems 1) preserves the one-EP-one-upsert write protocol.",
   "type": "object",
   "required": ["personas"],
   "additionalProperties": false,
@@ -69,7 +69,7 @@
                                       "required": ["type", "method", "url", "request", "response"],
                                       "additionalProperties": false,
                                       "properties": {
-                                        "type":     { "type": "string", "minLength": 1, "description": "Free text. Recommended: REST | GraphQL | gRPC | WebSocket | Event | SOAP." },
+                                        "type":     { "type": "string", "minLength": 1, "description": "Free text. Recommended: REST | GraphQL | gRPC | WebSocket | Event | SOAP | InProcess (in-process method-call seam, url = <Class>.<Method>) | StoredProcedure | SQL." },
                                         "method":   { "type": "string" },
                                         "url":      { "type": "string" },
                                         "request":  { "type": "string" },

@@ -62,13 +62,15 @@ structurally in `action.apis[]`.
 - **UI repo path** — argument (`$ARGUMENTS`) or resolved in Phase -1
 - **`.breeze.json`** — for `projectUuid` and `targetRepos.frontend`
 - **Existing functional graph** — queried per (EP, persona) for dedup
-- **Optional: `entrypoints.json`** if resuming from a prior session (looked up inside the UI repo directory)
+- **Optional: `entrypoints.json`** if resuming from a prior session (under `OUTPUT_BASE = <uiRepo>/.breeze-output/`)
 
 ## Outputs
 
+> **All generated artifacts go under a SINGLE dedicated folder `OUTPUT_BASE = <uiRepo>/.breeze-output/`** — NEVER the repo root (that pollutes the target repo's git status). `mkdir -p` it on first write; add `.breeze-output/` to the **target repo's** `.gitignore`. `OUTPUT_BASE` (a folder) is distinct from `.breeze.json` (the config file).
+
 - **Functional graph** updated with per-persona payloads (idempotent merge by name)
-- **`entrypoints.json`** — full inventory + per-(EP, persona) checkpoint
-- **Per-(EP, persona) payload files**: `<uiRepo>/ui_ep{NN}_{persona}_{slug}.json` (audit + replay)
+- **`OUTPUT_BASE/entrypoints.json`** — full inventory + per-(EP, persona) checkpoint
+- **Per-(EP, persona) payload files**: `OUTPUT_BASE/ui_ep{NN}_{persona}_{slug}.json` (audit + replay)
 
 ---
 
@@ -121,11 +123,13 @@ Resolve in this order:
 5. Persist to `.breeze.json` under `targetRepos.frontend`
 6. If path has no frontend router file, stop and suggest `/breeze:generate-functional-from-backend`
 
+Then set **`OUTPUT_BASE = f"{uiRepo}/.breeze-output"`** and `mkdir -p` it — every artifact (`entrypoints.json` + per-(EP,persona) payloads) goes under `OUTPUT_BASE`, never the repo root. Ensure `.breeze-output/` is in the target repo's `.gitignore` (append if missing; do not touch the plugin's).
+
 ---
 
 ## Phase 0 — Discover entry points
 
-If `entrypoints.json` already exists in the UI repo directory:
+If `OUTPUT_BASE/entrypoints.json` already exists (also check the legacy repo-root path once for back-compat; if found there, move it into `OUTPUT_BASE`):
 1. Read it and display a resume summary: completed EPs, remaining EPs, next EP to process
 2. If the user specified a specific EP (e.g., "start with EP 4"), jump to that EP
 3. Otherwise, pick the next EP from `remaining[]`
@@ -201,6 +205,19 @@ Do not overwrite an existing `entrypoints.json`.
 
 ---
 
+### Sub-step 0.3b — Route completeness cross-check ⛔ (ground-truth, mandatory when code graph is available)
+
+Reading the router by hand can miss routes (conditional/nested routers, lazily-registered routes, routes defined outside the main router file). The code graph has a **deterministic, complete** route inventory — use it to catch anything the hand-read missed:
+
+1. Call `Get_Code_Nodes_By_Label(project_uuid=<uuid>, label="Statement", filters={"codeOntologyId": <frontendCodeOntologyId>, "semanticType": "route"})` (pass `codeOntologyId` as an **integer**). If it returns empty, retry with `filters={"type": "route"}` (legacy parser).
+2. **Diff** the returned `endpoint` list against the routes you discovered by reading the router.
+3. Any route present in the graph but **missing** from your inventory → add it as an entry point (resolve its component via the `handler`/`path` fields or a follow-up `Code_Graph_Search`). Any route in your inventory but not in the graph → keep it (graph may be stale) but note it.
+4. Record the reconciliation under `orphans.routeCrosscheck` in `entrypoints.json`: `{ graphRouteCount, inventoryRouteCount, addedFromGraph: [...], onlyInInventory: [...] }`.
+
+If the code graph is unavailable (MCP down / repo not indexed), skip with a recorded note — do NOT block discovery.
+
+---
+
 ### Sub-step 0.4 — Extract route details (+ per-EP `personas[]`)
 
 For each route capture: `path`, `component`, `title`, `params`, `queryParams`, `auth` guards, `variants`.
@@ -249,7 +266,7 @@ Group routes by domain category (e.g. Search, Pipeline, Notifications, Insights,
 
 ### Sub-step 0.9 — Write `entrypoints.json`
 
-1. Write the full inventory to disk with this schema (note the per-EP `personas[]` field):
+1. Write the full inventory to `OUTPUT_BASE/entrypoints.json` with this schema (note the per-EP `personas[]` field):
 
 ```json
 {
@@ -323,7 +340,7 @@ The parent no longer runs a dedup pre-query and does **not** pass `EXISTING_NEIG
 **Pre-compute the output path** before spawning. The sub-agent writes its `{payload, audit}` JSON here; the parent reads from here for validators and upsert. This is how the parent avoids holding the full payload in its context:
 
 ```
-OUTPUT_PATH = f"{uiRepo}/ui_ep{ep.id:02d}_{persona}_{slug}.json"
+OUTPUT_PATH = f"{OUTPUT_BASE}/ui_ep{ep.id:02d}_{persona}_{slug}.json"   # OUTPUT_BASE = {uiRepo}/.breeze-output
 ```
 
 where `slug` is a kebab-cased form of `ep.title` (e.g. `code-ontology-list`).
@@ -427,7 +444,7 @@ Append to `entrypoints.completed[]`:
   "coverageRatio":   0.92,
   "skippedForVisibility": [...],
   "warnings":        [...],
-  "payloadPath":     "<uiRepo>/ui_ep12_Admin_project-settings.json",
+  "payloadPath":     "<uiRepo>/.breeze-output/ui_ep12_Admin_project-settings.json",
   "completedAt":     "<ISO>"
 }
 ```
@@ -452,6 +469,21 @@ For an EP with 3 personas, multiply by 3. Plan multi-session for >20 EPs.
 The Agent tool supports concurrent sub-agents in one message. Recommended:
 - Up to 3 sub-agents in flight at once
 - Group by EP — finish all personas of EP N before starting EP N+1 (so the EP's `remaining[]` entry is cleared atomically)
+
+> ⚠️ **Parallel-dedup race (known limitation).** Each sub-agent builds its dedup neighborhood by reading the LIVE graph *before* it writes. Concurrent siblings therefore read a pre-write snapshot and cannot see each other's about-to-be-created nodes. With the OUTCOME-ONLY inline dedup model (shared `core.md` §2), the only thing at risk is **Outcome-name convergence** — two siblings may mint slightly-different names for the same capability (e.g. "Monitor Project Progress" vs "Monitor Project Status"). Two mitigations, apply at least one:
+> 1. **Serialize shared-Outcome work** — when several personas of one EP (or several EPs) will land on the same capability/Outcome, run them sequentially rather than concurrently so the later ones read the earlier one's Outcome.
+> 2. **Rely on the mandatory reconciliation pass** (below) to merge near-duplicate Outcomes after the fan-out.
+> Below-outcome nodes are intentionally NOT deduped (coverage-first) — the parallel race collides only at the Outcome, so reconciliation is Outcome-level only and leaves below-outcome nodes as distinct coverage.
+
+## Reconciliation pass ⛔ (mandatory finalization — run after ALL EPs complete)
+
+Coverage-first generation (shared `core.md` §2.3) and parallelism intentionally allow near-duplicate Outcomes. The parallel race collides **only at the Outcome** (siblings share it by name); everything below an Outcome came from a *different* EP/persona and is distinct coverage, not a duplicate. So reconciliation is **Outcome-level only** — a run is not "done" until it runs:
+
+1. **Outcome convergence.** List every Outcome across all personas (`Get_all_personas` → `Get_all_outcomes_for_a_persona_id`). Within each persona, find Outcomes that denote the **same capability** under slightly different names; merge them with `Merge_Functional_Nodes` (keep the canonical/most-general name). Do NOT merge across personas — Outcome is shared by *name*, so once names converge the upsert already unifies them.
+2. **Never merge distinct capabilities** to reduce node count — reconciliation removes *duplicates*, not *coverage* (respect the capability-level floor in `core.md` §2.2).
+3. Record what was merged in `entrypoints.json` under `reconciliation: { outcomesMerged: [...] }`.
+
+**Do NOT merge below the Outcome level.** Scenario / Step / Action are coverage-first — merging near-duplicate scenarios (which came from different EPs/personas) risks silently dropping distinct flows for no join benefit.
 
 ## Multi-session resume
 

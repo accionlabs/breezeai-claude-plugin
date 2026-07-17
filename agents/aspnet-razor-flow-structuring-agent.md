@@ -94,7 +94,7 @@ Fields are Razor form controls bound to view-model properties. Two patterns, bot
 
 **Hard rule:** never collapse multiple fields into one action. 18 controls ⇒ 18 actions. Enumeration overrides action-quantity guidance.
 
-**Dispatcher rule:** one view/action that renders different field sets by mode (`?mode=`, an enum on the model, `@if` role branches, tabs) → emit **one scenario per branch**, each enumerating that branch's real controls.
+**Dispatcher rule (split by user-visible variant, per `core.md` §6.0):** one view/action that serves N distinct choices the user sees — modes (`?mode=`), enum branches on the model, `@if` role branches, tabs, category panels → emit **one scenario per user-visible variant**, each enumerating that variant's real controls. **Split even when the branches render the SAME field set** — N things the user sees = N scenarios; shared markup/model is never grounds to collapse a functional distinction.
 
 ### Phase 2.5 — Persona Visibility Audit (mandatory)
 You process this EP for persona `<PERSONA>` — output ONLY what `<PERSONA>` can see/do. Grep the view + handler + `_Layout` + `Startup`/`Program` for gates:
@@ -143,8 +143,10 @@ Build `payload` + `audit` per the schema. Hold in reasoning; do NOT write/POST y
 
 ---
 
-## Tool Escalation Policy — Code_Graph_Search (OPTIONAL, conditional)
-**`Read` + `Grep` on the local checkout is the backbone and the ground truth — the code graph is an OPTIONAL accelerator, NOT a required step. There is NO hard floor: a run with ZERO `Code_Graph_Search` calls is valid.** Reach for it only when local tooling falls short, because an MCP graph call costs a network round-trip + tokens and may be stale/incomplete (confirm every literal by `Read` regardless). Use it when: a controller/action/view-model/`SelectList` source / partial / policy referenced in code **isn't locatable by `Grep`** (or `Grep` is ambiguous across layers), or you need the **resolved next-hop** of a cross-file call. Do NOT use it for a different EP, backend internals, or to search the functional graph. When you do call it: **always pass `code_ontology_id=$CODE_ONTOLOGY_ID`** (fallback `repository_name=$INDEXED_REPO_NAME` + a `cgs_unscoped` warning); query with literal C# symbols; account for the call in `audit.codeGraphSearches[]` (`{query, reason, hits, filesAddedToRead}`). For a precise single symbol, `Get_Code_Nodes_By_Label(label="Function"|"Class", filters={name, path, codeOntologyId}, children=True)` beats a whole-file fetch.
+## Tool Escalation Policy — Code_Graph_Search (conditional floor)
+**`Read` + `Grep` on the local checkout is the backbone and the ground truth; the code graph is the completeness lever on top (confirm every literal by `Read` regardless — it may be stale/incomplete).**
+
+**Hazard-family traversal (HARD GATE — see shared `core.md` §6.1).** If the view/action exhibits a **traversal hazard** — a partial / view-component (`@await Component.InvokeAsync`) / editor-or-display-template whose source isn't in a file you read, a `SelectList`/policy referenced but not located, or a controller resolved through an interface/DI — you MUST: (1) **discover/resolve** it via `Code_Graph_Search` and/or `Get_Code_Nodes_By_Label` (log to `audit.codeGraphSearches[]` with `reason`); then (2) **`Read` the resolved `.cshtml` partial / view-component / template for its field set — Razor markup is captured UNRELIABLY by the parser (templates are largely skipped), so the field enumeration MUST come from reading the actual `.cshtml`, never from a graph blob.** For a genuinely self-contained view + action + view-model fully traceable by `Read`/`Grep`, a graph call is optional and zero is valid. If the tool is unavailable, record a `code_graph_unavailable` warning and proceed. Use it when: a controller/action/view-model/`SelectList` source / partial / policy referenced in code **isn't locatable by `Grep`** (or `Grep` is ambiguous across layers), or you need the **resolved next-hop** of a cross-file call. Do NOT use it for a different EP, backend internals, or to search the functional graph. When you do call it: **always pass `code_ontology_id=$CODE_ONTOLOGY_ID`** (fallback `repository_name=$INDEXED_REPO_NAME` + a `cgs_unscoped` warning); query with literal C# symbols; account for the call in `audit.codeGraphSearches[]` (`{query, reason, hits, filesAddedToRead}`). For a precise single symbol, `Get_Code_Nodes_By_Label(label="Function"|"Class", filters={name, path, codeOntologyId}, children=True)` beats a whole-file fetch.
 
 **Signature:** `Code_Graph_Search(query, project_uuid=$PROJECT_UUID, code_ontology_id=$CODE_ONTOLOGY_ID, repository_name=$INDEXED_REPO_NAME, limit=10)`
 
@@ -169,15 +171,34 @@ Same schema as the SPA/aspx agents — `{ "payload": { "personas": [ ONE persona
 ---
 
 ## Phase 6 — Self-validate + repair (mandatory, no parent backstop)
+
+### The GATE — `validate.py` (authoritative; decides pass/fail) — run EVERY time `SHARED_FUNCTIONAL_PATH` is available
+Materialize your candidate `{payload, audit}` to a temp file and run each subcommand (STDIN). These are the authoritative hard gates:
+```bash
+CAND="$(mktemp)"; cat > "$CAND" << '__CAND_END__'
+{ ...your in-memory {payload, audit}... }
+__CAND_END__
+run() { python3 "$SHARED_FUNCTIONAL_PATH/validate.py" "$@" < "$CAND"; }
+run schema                              # exit 2 on schema violations
+run rule-a --kind human                 # exit 2 if a network-verb action lacks apis[]
+run path-linked                         # exit 2 if a verb+route action has apis=[]
+run descriptions                        # exit 2 if any scenario/action description is blank
+run forbidden                           # exit 2 on a forbidden UI word in an action name
+run citations --repo-name "$INDEXED_REPO_NAME"   # exit 2 if a reference lacks the <repo>/ prefix, sits on persona/outcome, OR a scenario/step/action has NO citation (all three levels are MANDATORY)
+run field-coverage                      # exit 2 if a declared field is uncovered
+```
+Exit **2** → read `errors[]` (each carries a `fix`), repair in-place using the repair-reference table, re-run. Max **2 passes**, then `FAIL_VALIDATE` with `last_check`. Exit **3** or `SHARED_FUNCTIONAL_PATH` unreadable → append `audit.warnings[] {type:"validators_unavailable"}`, set `audit.validatorsRun=false`, rely on the reasoning table.
+
+### The REPAIR REFERENCE — reasoning checks + repair guide (what no script can judge)
 Run against your in-memory `{payload, audit}`; repair in-place until clean (max 2 passes, then emit `FAIL_VALIDATE`):
 1. **Schema shape** — personas length 1, persona matches, scenario descriptions non-empty, apis 5-field.
 2. **Rule A** — network-verb action ⇒ non-empty `apis[]` (route). Fix: attach the resolved route, or rename to a non-network verb. Never leave a submit action without its route.
 3. **Chain coherence** — a `Submit`/`Save` action and its confirm share the same route `apis[]`.
 4. **Forbidden UI words** — rewrite `razor/partial/viewbag/postback/dropdown/button/…` to platform-agnostic terms.
-5. **Citations + audit shape** — `reference` prefix; `codeGraphSearches ≥1`; `skippedForVisibility` exists; `stats` populated.
+5. **Citations + audit shape** — every scenario/step/action carries ≥1 citation (MANDATORY — `validate.py citations` fails on any empty one); `reference` starts with `<repo>/`; NONE on persona/outcome; `skippedForVisibility` exists; `stats` populated.
 6. **Pattern A collapse** — no catch-all `Provide the form/details`; one action per control (re-read the view/editor template; Code_Graph_Search the `SelectList` source if dynamic).
 7. **Route reality** — every `apis[i].url` grep-confirmed to an `asp-action`/`[Route]`/`[HttpPost]`/`Html.BeginForm`/`fetch` in the source; else empty + `api_url_unresolved`. NEVER keep a route not in the source (attribute routes override convention — verify, don't assume `/{controller}/{action}`).
-8. **Dispatcher split** — one scenario per mode/tab/role branch, each enumerating its real controls.
+8. **Dispatcher split** — one scenario per user-visible variant (mode/tab/role/category branch), each enumerating its real controls; split even if branches share the same field set (§6.0).
 
 ---
 

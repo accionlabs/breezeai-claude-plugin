@@ -185,12 +185,29 @@ def cmd_citations(full, args):
     # Persona are shared + merged by name across many EPs, so a citation there pollutes the
     # shared node — it is FORBIDDEN, not merely discouraged. Do not author a citations[] on
     # persona/outcome at all (omit the key). This is a HARD gate. (core.md §7.1.)
+    #
+    # Conversely, scenario / step / action MUST each carry at least one citation — the file
+    # that flow / stage / operation came from. A missing citations[] on any of these is a
+    # HARD failure (core.md §7.1 / §7.2). persona/outcome remain forbidden (never required).
     HIGH_LEVEL = {"persona", "outcome"}
+    REQUIRED   = {"scenario", "step", "action"}
+    # human-readable node name for the fix message
+    NAMEKEY = {"scenario": "scenario", "step": "step", "action": "action"}
     def check(node, level):
-        for c in node.get("citations", []) or []:
+        cites = node.get("citations", []) or []
+        # (1) mandatory-presence on the specific levels
+        if level in REQUIRED and len(cites) == 0:
+            nm = node.get(NAMEKEY.get(level, level)) or node.get("name") or "?"
+            errs.append({"level": level, "name": nm, "error": "missing_citation",
+                         "fix": f"{level} '{nm}' has no citations[] — add at least one citation to the {level}: "
+                                f"the source file (\"<repo>/<relative path>\") this {level} came from (core.md §7.1/§7.2). "
+                                f"Do NOT satisfy this by citing the parent outcome/persona (forbidden)."})
+        # (2) per-citation prefix + forbidden-placement checks
+        for c in cites:
             ref = c.get("reference", "")
             if not ref.startswith(prefix):
-                errs.append({"level": level, "reference": ref, "expected_prefix": prefix})
+                errs.append({"level": level, "reference": ref, "expected_prefix": prefix,
+                             "fix": f"citation reference must start with '{prefix}' (the repo name); got '{ref}'"})
             if level in HIGH_LEVEL:
                 errs.append({"level": level, "reference": ref,
                              "fix": "citations are forbidden on persona/outcome (shared nodes) — remove this citation; cite the scenario/step/action it describes instead (core.md §7.1)"})
