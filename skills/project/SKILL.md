@@ -26,7 +26,7 @@ Parse `$ARGUMENTS` and dispatch:
 | `$ARGUMENTS` shape | Mode |
 |---|---|
 | empty / whitespace | **show** — print active project + summary |
-| `list` (case-insensitive) | **list** — print all accessible projects |
+| `list` (case-insensitive), optionally `list all` / `list <N>` / `list page <N>` | **list** — print the latest 10 accessible projects (or the requested page/size) |
 | `use <value>` | **switch** — resolve `<value>` and update `.breeze.json` |
 | `auth` (case-insensitive) | **auth** — MCP authentication handshake |
 | `create <name> [--description "..."]` | **create** — create a new project and link |
@@ -38,7 +38,7 @@ Usage hint (for unknown args):
 
     Usage:
       /breeze:project                              show currently active project
-      /breeze:project list                         list all accessible projects
+      /breeze:project list                         list the latest 10 projects (add: all · <N> · page <N>)
       /breeze:project use <name|uuid>              switch and persist
       /breeze:project create <name> [--desc "..."] create a new project and link
       /breeze:project auth                         re-authenticate the MCP session
@@ -93,12 +93,18 @@ fresh).
 
 ## Mode: list
 
-1. Call `Call_List_Project_` (limit high enough to capture all — start with 50,
-   paginate if `total` exceeds).
+1. Call `Call_List_Project_(page=1, limit=10)` — show only the **latest 10** by
+   default (the API returns newest-first, so page 1 is the 10 most recent). Do
+   NOT try to fetch all: the workspace can hold thousands of projects (mostly
+   per-ticket scratch projects), so an unbounded list is noise. Capture `total`
+   for the footer.
+   - If the user asked for more (e.g. `list 25`, `list all`, `list page 2`),
+     honor it: raise `limit` or pass `page` accordingly. `list all` may page
+     through, but warn first if `total` is large (> 50).
 
 2. Read `.breeze.json` to get the current `projectUuid` (if any).
 
-3. Render as a monospace table:
+3. Render as a monospace table (the latest 10, newest first):
 
        UUID                                     Name                Status    Active
        ─────────────────────────────────────    ───────────────     ──────    ──────
@@ -110,8 +116,10 @@ fresh).
    arrow in the Active column. If `.breeze.json` is missing or empty, omit the
    Active column entirely and add a note: "No project currently linked."
 
-4. Footer:
+4. Footer (show the count and how to see more):
 
+       Showing latest 10 of <total> projects.
+       More:         /breeze:project list all   (or: list 25 · list page 2)
        Switch with:  /breeze:project use <name-or-uuid>
 
 ---
