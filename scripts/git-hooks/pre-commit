@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+#
+# Breeze plugin pre-commit hook: changelog gate.
+#
+# Rule: if this commit changes the "version" field in .claude-plugin/plugin.json,
+# then CHANGELOG.md MUST also be staged AND contain a heading for the new version.
+# Any other commit passes untouched.
+#
+# Install (once per clone):   git config core.hooksPath scripts/git-hooks
+# Bypass in an emergency:     git commit --no-verify   (discouraged)
+
+set -euo pipefail
+
+PLUGIN_JSON=".claude-plugin/plugin.json"
+CHANGELOG="CHANGELOG.md"
+
+# Names of files staged in this commit (against HEAD, or the empty tree on the first commit).
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    against=HEAD
+else
+    against=$(git hash-object -t tree /dev/null)
+fi
+staged=$(git diff --cached --name-only --diff-filter=ACM "$against")
+
+# Nothing to do unless plugin.json is part of this commit.
+echo "$staged" | grep -qx "$PLUGIN_JSON" || exit 0
+
+# Extract the "version" value from the STAGED plugin.json and from HEAD's plugin.json.
+extract_version() { grep -m1 '"version"' 2>/dev/null | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'; }
+
+new_version=$(git show ":$PLUGIN_JSON" | extract_version || true)
+if [ "$against" = "HEAD" ]; then
+    old_version=$(git show "HEAD:$PLUGIN_JSON" 2>/dev/null | extract_version || true)
+else
+    old_version=""
+fi
+
+# Version unchanged -> not a release commit -> nothing to enforce.
+if [ -n "$old_version" ] && [ "$new_version" = "$old_version" ]; then
+    exit 0
+fi
+
+fail() {
+    echo "" >&2
+    echo "✗ pre-commit: version bump ($old_version -> $new_version) requires a CHANGELOG.md entry." >&2
+    echo "  $*" >&2
+    echo "" >&2
+    echo "  Add a '## [$new_version]' section to CHANGELOG.md and stage it, then re-commit." >&2
+    echo "  (Emergency bypass: git commit --no-verify)" >&2
+    exit 1
+}
+
+# 1) CHANGELOG.md must be staged in the same commit.
+echo "$staged" | grep -qx "$CHANGELOG" || fail "CHANGELOG.md was not staged."
+
+# 2) The staged CHANGELOG.md must carry a heading for the new version.
+staged_changelog=$(git show ":$CHANGELOG" 2>/dev/null || true)
+if ! echo "$staged_changelog" | grep -qE "^##[[:space:]]+\[?${new_version//./\\.}\]?"; then
+    fail "No '## [$new_version]' heading found in the staged CHANGELOG.md."
+fi
+
+echo "✓ pre-commit: CHANGELOG.md updated for $new_version." >&2
+exit 0

@@ -100,6 +100,7 @@ Human actions stay platform-agnostic and user-observable (the forbidden-UI-word 
 - **Functional graph** updated with **both** User scenarios and joined System/External scenarios (idempotent merge by Outcome name).
 - **`OUTPUT_BASE/entrypoints.json`** — the UI reachability buckets from 0.1: **`primaryEntryPoints[]`** (own subagent run), **`foldedControls[]`** (passed to their parent EP as `MOUNTED_CONTROLS`, no own run), **`sharedControls[]`** (one run, reused via dedup), **`orphans[]`** (flagged for human review, never generated) — plus the discovery agent's `entryPoints[]` (Internal `service-operation` = façade seam, SOAP, queue/cron/service), `personas[]`, and per-EP checkpoint. Each `foldedControls[]` entry records its `parentEntryPoint` + `mountedVia`; each `orphans[]` entry records `why` (no route / no static ref / no metadata mount / not a template).
 - **Per-EP payload files**: `OUTPUT_BASE/dm_ep{NN}_{persona}_{slug}.json` (human) and `OUTPUT_BASE/dm_sys_{Class}.{Method}.json` (System) — audit + replay.
+- **`companionSurfaces` (in `entrypoints.json`)** — the Phase-3.1 coverage matrix: for a hybrid repo, the detected SPA frontend / REST-API backend surfaces that are out of scope here, each with the sibling skill + folder to run next (`{surface, folder, skill, status, sharedBusinessTier}`). Empty/explicitly-none for a pure Web Forms monolith.
 
 ---
 
@@ -173,6 +174,33 @@ The discovery agent flags `internalEntryPointsNeedConfirmation: true` because a 
 - Alternatives: whole façade layer (heavier), or a named module subset (e.g. `Billing*`/`Enrollment*`).
 Record the chosen scope in `entrypoints.json`.
 
+### 0.5 — UI entry-point review & exclusion gate ⛔ (mandatory — show the EP × persona plan before generating)
+
+Before the per-EP loop, present the concrete work plan and let the user trim it — the sibling passes both do this (`-from-ui` §0.9 "present the EP list… ask if any should be excluded"; `-from-backend` §0.4 exclusion gate), and the Web Forms pass must too. Do **NOT** fall straight from discovery/scope into Phase 1: the persona gate (0.2) confirmed *who*, the scope gate (0.4) confirmed *how much backend* — neither showed *which UI pages will actually be walked*. This gate closes that.
+
+Render a compact table — **one row per (EP, persona) that will get its own subagent run**, drawn from `primaryEntryPoints[] ∪ sharedControls[]` (the buckets that get runs) crossed with each EP's `personas[]`:
+
+    #   Entry point (route / control)     Kind     Personas          Mounts folded in
+    ─   ───────────────────────────       ─────    ─────────────     ────────────────────
+    1   /Accounts/edit.aspx               page     User              EditView, address subpanel
+    2   /Accounts/view.aspx               page     User, Admin       3 subpanels, activities list
+    …
+
+Then, **below the table, summarize the buckets that will NOT get their own run** so nothing looks silently dropped:
+- **`foldedControls[]`** — count; each is folded into its parent EP's pass (shown under "Mounts folded in"), not a separate run.
+- **`orphans[]`** — count + **list them** (a real orphan is a candidate missed feature); flagged for human review, never auto-generated.
+- **Phase-2 non-UI EPs** — count of scheduled/cron/queue/webhook flows queued for the Phase-2 sweep.
+
+**Ordering is mandatory and non-collapsible — do these in exactly this order, in this one turn:**
+1. **First, RENDER the full table + the "won't get a run" breakdown as plain markdown in your message.** This is a literal render, not a description. The user must see every (EP, persona) row and every bucket count *before* any confirmation prompt appears.
+2. **Only after the rendered plan, ask for confirmation/exclusions.** If you use `AskUserQuestion`, its options reference the already-rendered table ("approve the plan above / exclude rows"); the question text is NOT a substitute for the render.
+
+⛔ **Do NOT skip the render.** Naming a count inside a confirmation question (e.g. "Confirm the 13 EPs?") does **not** satisfy this gate — the model has historically collapsed 0.4 and 0.5 into a single bare question and jumped to Phase 1 without ever showing the table. That is a gate failure. The table render and the confirmation are two separate steps: render → then ask.
+
+⛔ **0.4 and 0.5 are distinct gates — never merge them.** 0.4 confirms *scope* (how much backend); 0.5 renders *which UI pages/personas get walked*. Even if you asked the scope question in the same turn, you must still render the 0.5 table before entering Phase 1.
+
+Then act on the answer: remove excluded EPs from the loop set but leave them in `entrypoints.json` with `status:"excluded"` (audit trail; never silently drop). Record the approved plan under `reviewGate: { approvedAt, planRendered: true, excluded: [...] }` in `entrypoints.json`. **HARD GATE — do not enter Phase 1 until (a) the table was rendered in-message AND (b) the user has confirmed.** If you find yourself about to spawn the first Phase-1 agent and `reviewGate.planRendered` is not set, stop — the gate was skipped.
+
 ## Phase 1 — Per-(UI EP, persona) UNIFIED pass  (human + joined System, one shot)
 
 For each UI EP in `remaining[]`, and for each `persona` in `ep.personas[]`, in parallel batches of up to 3:
@@ -223,6 +251,25 @@ For each entry point that qualifies (✅), spawn `breeze:backend-flow-structurin
 ## Phase 3 — Sign-off
 
 Report: EPs processed, personas, human scenarios, System scenarios, join keys resolved (and any unresolved — a join key with no matching seam is an `audit` warning, not a silent drop). Suggest the §3.3 end-to-end trace check: *"what happens when a user does &lt;X&gt;?"* should now traverse User action → `<Class>.<Method>` → System scenario → repository → DB across the shared Outcome.
+
+### 3.1 — Companion-surface analysis & next-step recommendation (mandatory — run after the Reconciliation pass)
+
+A classic ASP.NET Web Forms repo is frequently **hybrid**: alongside the `.aspx`/`.ascx` site this skill covers, the same checkout often ships a **second frontend** (an Angular/React/Vue SPA admin, e.g. `admin/app/**` + `admin/index.cshtml`) served by a **REST/Web API backend** (`ApiController`/`ControllerBase` classes, e.g. `AppCode/Api/*Controller.cs`, `[Route]`/`api/...`). Those surfaces are correctly **out of scope for this skill** (they have a URL seam, not the in-process façade seam — see the router block), but leaving them unmentioned makes a hybrid repo *look* fully covered when only the Web Forms half is. So after reconciliation, **detect the companion surfaces and tell the user exactly which folder to run which sibling skill on** — do not silently stop at the Web Forms half.
+
+This is a report-only recommendation (it does NOT auto-run the sibling passes). Derive it from what discovery already recorded — no re-globbing needed:
+1. **SPA frontend?** Any `entrypoints.json` entry or 0.1 orphan tagged as another frontend's chrome (`admin/menu.ascx`-style), plus an SPA shell (`ng-view`/`ng-app`, a `*.cshtml` host that only loads a JS bundle, an `app/**` module tree). If present → recommend **`/breeze:generate-functional-from-ui`** pointed at that **frontend folder**.
+2. **REST/Web API backend?** Any `entryPoints[]` with `type:"REST"`/`subType:"admin-api"` or `backendDisposition:"other-frontend"` (the Web API controllers the SPA calls). If present → recommend **`/breeze:generate-functional-from-backend`** pointed at that **controller folder**. Confirm they are real HTTP endpoints (`ApiController`/`ControllerBase`/`[Route]`), not just helpers.
+3. **Shared business tier note:** if the companion REST backend calls the **same** `BlogEngine.Core`-style façade/repositories this run already traced, tell the user its System scenarios will **dedup/attach to Outcomes this run created** (verbatim name) rather than all being new — the graph converges on shared capabilities by design.
+
+Render a compact **coverage matrix** so the whole repo's status is legible at a glance — one row per surface, with folder + skill + status (✅ done this run / ⬜ recommended next):
+
+    Surface                         Folder                         Skill                                   Status
+    ──────────────────────────────  ─────────────────────────────  ──────────────────────────────────────  ─────────────
+    Web Forms site + Account        *.aspx / Custom/Controls/**    generate-functional-from-aspnet-webforms  ✅ this run
+    Admin SPA (Angular/React/…)     admin/app/**                   generate-functional-from-ui               ⬜ recommended
+    Admin REST/Web API              AppCode/Api/*Controller.cs     generate-functional-from-backend          ⬜ recommended
+
+If **no** companion surface exists (a pure Web Forms monolith), say so explicitly — *"no SPA/REST companion surface detected; this run covers the repo end-to-end"* — so "done" means done. Record the matrix under `companionSurfaces` in `entrypoints.json` (each: `{surface, folder, skill, status, sharedBusinessTier: bool}`) and offer to launch the recommended sibling pass(es) on the same project now, or leave them for a separate run.
 
 ---
 
