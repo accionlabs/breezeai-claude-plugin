@@ -10,6 +10,27 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+## [3.8.0] — 2026-07-21
+
+### Added
+- `generate-architecture`: **DataLake schema ingestion** — the skill now populates the schema layer beneath a DataLake (`DDLTable → DDLColumn`, `DDLConstraint`, `DDLIndex`, `DDLView`, `DDLProcedure`, `DDLSequence`, and `ESIndex → ESField` / `ESAlias`). Previously it stopped at `DataLake` as a leaf and had no DDL/ES path at all. New reference `references/db-schema-ingestion.md` documents the write-path decision, preprocessing, batching, and verification.
+- `generate-architecture`: **multi-source input** — auto-detects and composes code, Terraform/IaC, `.sql` / ES mappings, spec docs, diagrams, and Confluence URLs. A repo containing `terraform/` and `db/*.sql` now runs all three passes with no flags. Previously the skill required a spec document and told users with only a codebase to go elsewhere. New reference `references/source-discovery.md` covers per-source extraction, the precedence table, and **per-layer probes** so a layer is never silently reported empty.
+- `generate-architecture`: new flags `--sql <path>` (force a schema pass) and `--no-schema` (topology only).
+- `references/architecture-ontology.md`: attribute-level definitions for all DDL/ES node types, the containment model with edge names, and the attribute traps (`dataType` decomposition, `parameters` array-in/JSON-string-out, `indexType` losing clustered/nonclustered).
+
+### Fixed
+- `generate-architecture` Bootstrap: previously asserted **"No API key is needed"**. That is false for schema ingest, which is REST (`/db-ontology/stream-ingest`) and requires `apiKey`. The key is now resolved **lazily** — prompted only when a schema pass will actually run, so topology-only runs still need no credential.
+
+### Changed
+- `generate-architecture`: added an **accuracy rules** section covering the failure modes that produce wrong graphs — verify before asserting, *empty must be proven* (with evidence shown in the gate), never silently overwrite across sources, a `202` parse receipt is not an ingest, and partial ingests leave derived fields (`columnCount`, `hasPrimaryKey`) permanently wrong until a full re-run.
+- `generate-architecture` confirmation gate now also renders the schema summary, layers proven empty with their evidence, and cross-source divergences for arbitration.
+- `db-schema-ingestion.md` §3 is written **dialect-neutrally** (test one file first; guard idioms tabulated for T-SQL / PostgreSQL / Oracle / MySQL) rather than as a T-SQL-only recipe, with an explicit requirement that the transforms be byte-identical no-ops on already-clean DDL.
+
+### Notes for implementers
+Two hazards are documented in `db-schema-ingestion.md` because both are silent and costly:
+- **Never loop `Create_DB_Schema_Column`.** Each per-object column write triggers a server-side `refreshTable` that re-embeds the table *and every column already attached* — O(n²). Measured: 3,029 columns ⇒ ~32,563 embedding operations (10.8×), which stalls the ingest.
+- **Foreign-key `REFERENCES` edges can only be created by the bulk path.** The per-object constraint endpoint accepts no target-table input, so an MCP-built schema yields tables with zero relationships.
+
 ## [3.7.3] — 2026-07-18
 
 ### Fixed
