@@ -96,6 +96,53 @@ values; passing them returns a generic **400**.
 ✗ label: "DataLakeLabel"  → 400 Bad Request
 ```
 
+## The schema layer beneath DataLake
+
+A `DataLake` is **one physical database or store** — not a schema, not a logical
+grouping. Two schema families hang beneath it, both first-class searchable nodes:
+
+```
+DataLake
+├── HAS_TABLE     → DDLTable
+│                   ├── HAS_COLUMN     → DDLColumn
+│                   ├── HAS_CONSTRAINT → DDLConstraint
+│                   ├── HAS_INDEX      → DDLIndex
+│                   └── REFERENCES     → DDLTable      (FK edge, cross-table)
+├── HAS_VIEW      → DDLView
+├── HAS_PROCEDURE → DDLProcedure                        (procedure|function|trigger)
+├── HAS_SEQUENCE  → DDLSequence
+└── HAS_ES_INDEX  → ESIndex
+                    ├── HAS_FIELD → ESField ──HAS_SUB_FIELD→ ESField
+                    └── HAS_ALIAS → ESAlias
+```
+
+Every schema node carries `projectUuid` + `dbOntologyId` (the owning DataLake id).
+Table children also carry `tableId`; ES children carry `indexId`.
+
+**R** required · *O* optional · ⚙ server-derived (never send)
+
+| Node | Attributes |
+|---|---|
+| `DDLTable` | `name` **R** · `schema` · `tableType` (`table`\|`view`\|`materialized_view`\|`temporary`) · `comment` · `ddlText` (capped 1000) · `columnCount` ⚙ · `hasPrimaryKey` ⚙ |
+| `DDLColumn` | `name` **R** · `tableId` **R** · `dataType` **R** (base type only) · `ordinalPosition` **R** · `nullable` **R** · `length` / `precision` / `scale` · `charSemantics` · `defaultValue` · `isPrimaryKey` · `isUnique` · `checkExpression` · `comment` · `isForeignKey` ⚙ · `isIndexed` ⚙ |
+| `DDLConstraint` | `constraintType` **R** (`PRIMARY_KEY`\|`FOREIGN_KEY`\|`UNIQUE`\|`CHECK`) · `columns[]` **R** · `tableId` **R** · `name` · `onDelete` (FK) · `checkExpression` (CHECK) · `enabled` · `validated` |
+| `DDLIndex` | `name` **R** · `tableId` **R** · `columns[]` **R** (order is semantic) · `isUnique` **R** · `indexType` **R** (`BTREE`\|`BITMAP`\|`FUNCTION_BASED`\|`DOMAIN`) · `whereClause` · `tablespace` |
+| `DDLView` | `name` **R** · `viewType` **R** (`view`\|`materialized_view`) · `definition` (capped 1000) · `columns[]` · `schema` · `comment` · `repositoryName` |
+| `DDLProcedure` | `name` **R** · `procedureType` **R** (`procedure`\|`function`\|`trigger`) · `parameters` (array in → JSON string stored) · `returnType` · `body` (capped 1000) · `schema` · `comment` · `repositoryName` |
+| `DDLSequence` | `name` **R** · `tableId` · `startWith` / `incrementBy` / `minValue` / `maxValue` / `cache` · `cycle` · `order` |
+| `ESIndex` | `name` **R** · `shards` · `replicas` · `defaultAnalyzer` · `aliasNames[]` · `sourcePath` · `fieldCount` ⚙ |
+| `ESField` | `name` **R** · `fullPath` **R** (dotted) · `parentPath` **R** · `indexId` **R** · `type` **R** · `analyzer` · `searchAnalyzer` · `format` · `copyTo[]` · `index` · `docValues` · `isNested` · `isObject` · `isMultiField` · `ignoreAbove` |
+| `ESAlias` | `name` **R** · `indexId` **R** · `filter` · `isWriteIndex` |
+
+**Attribute traps.** `dataType` is decomposed — `nvarchar(150)` → `dataType=NVARCHAR` +
+`length=150`. `parameters` is asymmetric — array in, JSON string out. `indexType` has no
+clustered/nonclustered, so SQL Server's physical-ordering distinction is lost.
+
+**How to populate it:** see `db-schema-ingestion.md`. In short — **bulk REST for
+tables/columns/indexes/views** (the only path that builds FK edges), **per-object REST for
+procedures** (the parser drops them), and **never** loop the per-object column endpoint
+(O(n²) re-embedding).
+
 ## MCP tools
 
 | Operation | Tool |
@@ -105,5 +152,8 @@ values; passing them returns a generic **400**.
 | Semantic search / dedup | `Architecture_Graph_Search` (`include_labels=[...]`) |
 | Create node | `Create_Architecture_Node` |
 | Update node | `Update_Architecture_Node` |
+| Read schema nodes | `Get_DB_Schema_Nodes_By_Label` (`with_children` / `with_parent` / `filters`) |
+| Read ES nodes | `Get_ES_Nodes_By_Label` |
+| Create schema nodes | `Create_DB_Schema_Table/Column/Constraint/Index/View/Procedure/Sequence` — ⚠ per-object; see the bulk caveat above |
 | Code grounding | `Code_Graph_Search`, `Call_List_Repositories_` |
 | Scenario anchoring (optional) | `Functional_Graph_Search` |
