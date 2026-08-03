@@ -111,9 +111,9 @@ If the query doesn't fit a single-graph fast-path, pick the layers it implies an
 
 ### 1c. Output structure — per-ontology (always)
 
-There is one output shape: the **per-ontology view** (Phase 4). Every synthesized answer is an exhaustive summary, then one native-hierarchy tree per graph, then cross-ontology checks. There is no separate "woven narrative" mode.
+There is one output shape: the **per-ontology view** (Phase 4). Every synthesized answer is an exhaustive summary, then one native-hierarchy tree per graph. There is no separate "woven narrative" mode, and no trailing comparison section.
 
-- Search **all five layers by default** — Functional, Design, Code, Architecture, and **Data (DDL)** — unless the query is explicitly scoped to a subset. Cross-ontology comparison is the whole point, so favor breadth. Always include the DDL fetch (`Architecture_Graph_Search` with DDL `include_labels` and/or `Get_DB_Schema_Nodes_By_Label` on the touched DataLake) so the Data layer renders when the schema is onboarded.
+- Search **all five layers by default** — Functional, Design, Code, Architecture, and **Data (DDL)** — unless the query is explicitly scoped to a subset. Covering every layer the question actually touches is the point, so favor breadth. Always include the DDL fetch (`Architecture_Graph_Search` with DDL `include_labels` and/or `Get_DB_Schema_Nodes_By_Label` on the touched DataLake) so the Data layer renders when the schema is onboarded.
 - The output shape does **not** change *which* graphs you search — Phase 1a/1b scoping and Phase 3 drill-down still apply; this only fixes how Phase 4 renders.
 - For an obviously single-layer lookup (e.g. "where is function X"), still use the per-ontology shape — just render the one relevant block; never pad with empty trees.
 
@@ -171,9 +171,25 @@ When drilling into a functional Outcome, check if the **same Outcome name exists
 
 Present every answer as the **per-ontology view**. Do NOT weave the layers into a single running narrative, and do NOT emit a flat per-graph ranked list — structure the answer in three fixed parts:
 
-**1. Answer summary (exhaustive prose).**
-- Write a thorough, self-contained answer — a reader who stops here should grasp the whole picture without reading the trees. Cover, as they apply: what triggers it and **who** can trigger it (personas + any role gates); **every distinct entry path or variant** (e.g. upload vs git vs recorded-session; blueprint vs image); the **request path** (UI → gateway → service) with the key endpoint(s) as `method` + `route`; the **backend processing** and any **external system** it delegates to (n8n webhook, S3, Bedrock); **sync vs async** behavior and how completion / polling / status works; the **data read vs written** and where (source-of-truth vs cache/index); **preconditions / guards**; and the notable **failure / error paths**. Favor depth over brevity — a few tight paragraphs or a dense bulleted brief, not 2–4 sentences. Name concrete entities (scenarios, files, endpoints, nodes) inline.
-- End the summary with a one-line **Coverage:** list naming only the layers that returned findings, e.g. `Coverage: Functional ✓ · Code ✓ · Architecture ✓`. Never list a layer that returned nothing (don't-surface-gaps rule).
+**1. Answer summary.** Four elements, in this order.
+
+**1a — `Direct Answer`.** ONE paragraph, first, before any structure. It must answer the question completely on its own: who triggers it, what the system does, where it ends up. A reader who stops after this paragraph should be able to repeat the answer back correctly. No preamble, no "this flow consists of…", just the answer.
+
+**1b — a structured walkthrough.** Pick the skeleton from the question's shape and use numbered headings — never undifferentiated prose:
+
+| question shape | skeleton |
+|---|---|
+| "what happens when…", "end to end", "walk me through" — a **pipeline** | **Phase 1…N**, one heading per stage, in execution order. Each phase names its trigger, what happens, and the concrete artefacts (endpoint, table, code entry point). |
+| "what is the process for…", "how does X work" — a **capability** | **numbered layers**: 1 Behaviour (Functional) · 2 Design · 3 Implementation (Code) · 4 Deployed System + Data. Omit a layer that returned nothing. |
+| a lookup or comparison | no skeleton — a short brief is fine. |
+
+Cover, as they apply: who can trigger it and any role gates; every distinct entry path or variant; the request path with key endpoints as `method` + `route`; backend processing and any external system it delegates to; sync vs async and how completion/polling works; data read vs written and where; preconditions and guards; and the notable failure paths. Name concrete entities inline — scenario names, file:line, endpoints, node names, stored procedures.
+
+**1c — tabulate anything with 3+ parallel items.** Status/route codes and their meanings, field groups and their validation rules, stored procedures in call order, business rules with their code locations, repos touched with their `codeOntologyId`. A table beats a paragraph and beats a bullet list for anything that shares a shape. When **two or more tables are written**, add a consolidated **data-touch map**: `table · READ/WRITE · phase · what is stored`.
+
+**1d — one flow-at-a-glance.** A single fenced ASCII diagram of the whole path, with branches drawn (blocked paths, validation failures, sync vs async forks) — not one diagram per layer. Place it after the walkthrough.
+
+End the summary with a one-line **Coverage:** list naming only the layers that returned findings, e.g. `Coverage: Functional ✓ · Code ✓ · Architecture ✓`. Never list a layer that returned nothing (don't-surface-gaps rule).
 
 **2. Per-ontology hierarchy blocks.** One block per layer that returned findings, each rendered in that graph's **native hierarchy** as a fenced monospace tree. Omit any empty layer silently. Fixed order: Functional → Design → Code → Architecture → Data.
 
@@ -184,6 +200,12 @@ Present every answer as the **per-ontology view**. Do NOT weave the layers into 
 - **🗄️ Data (DDL)** — `DataLake → Table → (Columns / Constraints / Indexes / Views / Procedures)`. Source columns from the table's `ddlText`; use `Get_DB_Schema_Nodes_By_Label(data_lake_id, label=…)` for a complete column/FK/view set. Omit silently if the schema layer isn't onboarded for the project.
 
 Keep each tree compact but **preserve depth** — never flatten a 5-level functional chain into a single arrow line. Use real node names/IDs for existing nodes.
+
+**3. Anchor appendix.** A single fenced block listing every distinct integration point the answer touched — REST routes, EventBus addresses, `DoFilter`/`WriteData` names, stored procedures, data-api table writes. One per line, no commentary. This is the fastest thing for a reader to scan for "what would I have to change", and it makes the answer usable as input to a follow-up task. Omit only when the answer touched none.
+
+**The answer ends with the anchor appendix.** Do not append a reconciliation, comparison, agreements/divergences, or gap-analysis section. If two layers genuinely conflict on a fact, say so inline where that fact appears, in one clause; do not promote it into a section of its own.
+
+**Verified vs inferred.** Everything inside a tree, table or code block is a claim you verified. If you are extrapolating — a file path that follows the repo's naming convention but which you did not open, a step you assume by symmetry with a sibling app — say so in the line itself (`(inferred — not opened)`) or leave it out. Never place an unverified item in an authoritative-looking block with the caveat in a footnote below.
 
 ---
 
@@ -196,7 +218,8 @@ For any question shaped like *"what happens when…"*, *"explain the flow of…"
 3. Add **Architecture** if the flow crosses services / queues / data stores (which is usually true). Add DDL labels too if the prompt names specific tables or asks about persistence shape.
 4. In the functional graph, query **twice** — once with user-centric terms (UI actions, clicks, forms) and once with system-centric terms ("System processes…", "backend handles…", "External System…"). This captures both the trigger side and the processing side of the dual-persona model.
 5. Drill the top functional hits all the way to Steps/Actions via the Phase 3 hierarchy chain.
-6. Render as the per-ontology view — exhaustive Answer summary + per-graph trees + cross-ontology checks (Phase 4).
+5a. **Expand EVERY scenario under both halves of the outcome — not just the happy path.** List them with `Get_all_scenarios_for_a_outcome_id` on the human AND the System outcome, then call `Get_all_steps_actions_for_a_scenario_id` on each. The eligibility gate, the blocked-path variants and the "serve the form" scenario are where the routing codes, the reference-data filters and the guard conditions live — and they are the easiest to skip, because their names sound like plumbing next to the obvious "Apply for X" scenario. An answer that expands only the happy path will silently omit the status codes and the tables the gate reads.
+6. Render as the per-ontology view — exhaustive Answer summary + per-graph trees (Phase 4).
 
 A single search returns an incomplete picture for process questions — always fan out.
 
@@ -204,10 +227,12 @@ A single search returns an incomplete picture for process questions — always f
 
 ## Don'ts
 
+- **Don't narrate the search.** No "Excellent!", no "I now have enough data", no "Let me compose the output", no "All 6 searches are complete". The answer opens with the `Direct Answer` paragraph and nothing before it.
 - **Don't present raw search results as the final answer.** Always drill down and synthesize.
 - **Don't claim a feature doesn't exist** from one failed search — try a rephrase or widen to another graph first.
 - **Don't trust an empty `Architecture_Graph_Search` result for an enumeration question.** Embedding-filtered search silently drops nodes — if the user asked to enumerate (all services, all tables), use `Get_Architecture_Nodes_By_Label` / `Get_DB_Schema_Nodes_By_Label` instead.
 - **Don't mention empty layers or graph-completeness gaps** in user-visible output (e.g., "the architecture graph has 0 Agents"). Silently fall back; present what you do have.
+- **Don't append a cross-ontology / reconciliation section.** No "agreements vs divergences", no layer-by-layer comparison, no gap analysis. The answer is the summary, the trees and the anchor appendix — nothing after it. A genuine conflict between two layers belongs inline, in a clause, next to the fact it concerns.
 - **Don't duplicate `/breeze:impact-analysis`.** `search` reads and synthesizes across layers. It does **not** do scenario-ID → architecture-node anchoring, blast-radius scoring, risk levels, tier classification, or templated Context blocks. If the user asks for impact assessment, blast radius, or a detailed analysis doc, point them at `/breeze:impact-analysis`.
 - **Don't run all graphs for an obviously single-layer question** — it wastes tokens and blurs the answer.
 
@@ -215,7 +240,7 @@ A single search returns an incomplete picture for process questions — always f
 
 ## Output
 
-- **Every answer uses the per-ontology view** (Phase 4): an **exhaustive Answer summary** + `Coverage:` line → one native-hierarchy tree per layer (Functional / Design / Code / Architecture / Data-DDL, empty layers omitted) → Cross-ontology checks (✅ agreements, ⚠️ divergences). Preserve each graph's hierarchy depth; never flatten into a single running narrative or a flat ranked list.
+- **Every answer uses the per-ontology view** (Phase 4): `Direct Answer` paragraph → numbered Phase/Layer walkthrough with tables → flow-at-a-glance → `Coverage:` line → one native-hierarchy tree per layer (Functional / Design / Code / Architecture / Data-DDL, empty layers omitted) → anchor appendix. Preserve each graph's hierarchy depth; never flatten into a single running narrative or a flat ranked list. No reconciliation, comparison or gap-analysis section.
 - For a discovery-style query, the per-graph trees carry the ranked entities (entity type, name, parent repo/DataLake) and the summary states what was found; for a single-layer lookup, render just the one relevant block.
 - **Always** name concrete entities (e.g., *Scenario "Run hourly ANZ ETL"*, *file `backend_nodejs_global_tnlm: src/project/.../search-result-project.dsl.ts`*, *Service node "global_tnlm"*, *DDLTable `RESEARCH_PROJECT_VERSION`*) rather than vague references.
 - **Link the layers**: when functional + code + architecture + DDL all fire, show how they connect on this specific flow.
