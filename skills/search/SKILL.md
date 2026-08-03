@@ -185,10 +185,6 @@ Present every answer as the **per-ontology view**. Do NOT weave the layers into 
 
 Keep each tree compact but **preserve depth** — never flatten a 5-level functional chain into a single arrow line. Use real node names/IDs for existing nodes.
 
-**3. Cross-ontology checks.** A short bulleted section reconciling the views — this is where the per-ontology mode earns its keep:
-- ✅ **Agreements** — where layers corroborate each other (e.g. functional System scenario ↔ code controller/workflow ↔ route/enum literal).
-- ⚠️ **Divergences** — the highest-value output. Examples: a rule the functional graph asserts that the code does not enforce (e.g. a role gate present only in the UI while the route is `authorizedRole:[]`); a code write to a table that has no matching DDL onboarded; an architecture SPOF on the path. State divergences as concrete findings, but keep graph-completeness/onboarding gaps out of end-user-facing wording per the Don'ts.
-
 ---
 
 ## End-to-End Flow Questions
