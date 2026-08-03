@@ -10,6 +10,145 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+## [3.9.0] — 2026-07-29
+
+Metadata pass: three silent-failure modes found while regenerating a ~100-repo Vert.x/MAPL tree.
+Each produced a *clean-looking* run that had quietly skipped real content. All changes are confined
+to `generate-functional-from-metadata` and its two agents; `skills/shared/functional/` is untouched.
+
+### Fixed
+- **`MAPLD03` is not a role code.** `references/rules.md` documented it as the persona seed. It
+  actually holds the entry/control handler name (`StartControl`, `SS01`, `DF01`, `WD01`), and the
+  same value recurs across apps owned by different business roles. The discovery agent could not map
+  it, fell back to inferring the persona from repo name and title — reasonable — but stamped the
+  result `confidence: "mapped"`. Because the confirmation gate keys off non-`mapped`, `humanRawRole`
+  came back **0** and **every persona shipped unreviewed** on a 326-app run. `"mapped"` now means
+  *"read from an authoritative role source"* only; inference is `"inferred"` and carries its
+  evidence, so the gate actually fires.
+- **`field-coverage` could pass vacuously at 0/0.** Enumeration read `MFID`/`MFLT`/`CRUD` only, so
+  modules declaring labels solely in **`MCAP`** (custom-HTML screens with no `MFID`) produced an
+  empty `declaredFields[]` and the 100%-capture "hard gate" succeeded having checked nothing.
+  `MCAP` is now a field source, and an app with screens but zero declared fields must be reported
+  rather than accepted. *(The soft-pass in shared `validate.py` is correct generically and was
+  deliberately left alone — the fix is to populate its input.)*
+- **`GoApplication` was unmapped and silently dropped.** A high-frequency verb — in the reference
+  tree it outnumbered `ShowScreen` — with no row in the verb table, so every cross-application
+  hand-off was lost and each application became an island.
+
+- **Entry points were derived from `MAPL` alone, which is incomplete.** Modules register EventBus
+  addresses the browser calls directly that no `MAPLQ` step declares — `<module>/validation`,
+  `<module>/resources`, `pippen/*/formal`. Verified end-to-end in a real module: `main.js` calls
+  `/services/validate/<module>/validation`, which runs `D1Validator` ("numeric, exactly 8 digits,
+  valid calendar date, else MSG70001"), and **none of it reached the graph**. Discovery now
+  reconciles declared (MAPL) against exposed (code) and called (JS), and records the difference in
+  `undeclaredEntryPoints[]` for the per-app agent to model. For a financial app this was a
+  correctness defect, not a depth preference.
+- **Reading stopped at the MAPL targets.** Those handlers are the spine; the rules live one
+  reference hop further. Measured on a real module: **11 of 65 app-package classes read (17%)**,
+  with every validator, service and component class missed — even though `Validation.java`, which
+  *was* read, imports them by name. Phase 1 now follows same-repo `app/**` imports to depth 2.
+- **Screen templates were never read** — 38 HTML templates per repo, 0 opened. `MSCR`/`MFID`/`MCAP`
+  give codes and labels; only the template shows which fields render, in what widget, and whether
+  they are editable.
+- **Shared `submodules/` was neither read nor excluded.** It is copied verbatim into 60+ repos
+  (identical bytes), so per-app reading is 60× waste — but it is not behaviour-free:
+  `CustomFormal_BTN_Verify_base` hides the approve/reject pair for roles `040`/`060`, the only role
+  branch in the entire application layer, and every per-app run missed it. Now analysed **once** by
+  the parent into `shared-framework-brief.md` and injected into every agent.
+
+### Added
+- `GoApplication` verb mapping: a terminal `Continue to <capability>` action, `@param` targets
+  resolved via the newly documented `MAPLP`, unresolved targets marked rather than invented, and
+  every hand-off recorded in `audit.appTransitions[]`.
+- **Journey map** artifact (`.breeze-metadata-output/journey-map.md`) aggregating those transitions.
+  The upsert schema is a strict tree with no lateral-edge field, so multi-application journeys
+  cannot be graph edges — this is where they become visible.
+- New record types in `references/rules.md`: **`MCAP`** (screen captions / labels), **`PNTC`**
+  (notification & mail templates), **`WWZA`/`WWSC`/`WWSS`** (the Wizard definition trio).
+- New MAPL internals documented: **`MAPLP`** (declared parameter names — resolves `@endAppId` /
+  `@backAppId`), **`MAPLR`** (button→route table), **`MAPLS`** (step-transition chain). These are the
+  app's branch structure; branches are to be emitted as distinct Scenarios, never flattened.
+- Discovery now records `declaredParams[]`, `hasRouting`, `appTransitions[]`, `goApplicationCount`,
+  `undeclaredEntryPoints[]` and a tree-level `sharedFramework` note, and reports
+  `personaMapped` / `personaInferred` / `personaRaw` / `transitions` / `undeclaredEPs` in its summary.
+- **Phase 0b shared-framework pass** in the skill — one analysis of `submodules/` for the whole tree,
+  written to `shared-framework-brief.md` and injected into every per-app prompt.
+- Per-app agent gains `UNDECLARED_ENTRY_POINTS` and `SHARED_FRAMEWORK_BRIEF` inputs, an
+  `audit.validatorsRead[]` record, and a self-check that warns when an app has editable fields but
+  captured **zero** validation rules (no hard gate can catch that — the existing
+  `citation-completeness` check only verifies *read ⇒ cited*, never *read enough*).
+- Field enumeration now attaches the **rule** to each editable field, not just the label —
+  `Enter the change date — 8 digits, must be a valid calendar date (MSG70001)`.
+- Both agents list their Breeze MCP tools under **both** the `mcp__plugin_breeze_breeze-mcp__` and
+  `mcp__breeze-mcp-pat__` prefixes. Interim compatibility measure: where the configured server name
+  differs from the plugin's expectation the tools silently resolve to nothing, and the agents then
+  run blind — no live-graph read-back, so Outcome dedup degrades to naming by convention and the
+  Human↔System join (which is *by Outcome name*) drifts. Prefer aligning the MCP server name and
+  dropping the duplicate list.
+
+### Added — from a 40-app production run
+- **Browser-call reconciliation self-check** (Phase 6). Diff every `url:` in the repo's JS against
+  every `apis[].url` in the payloads; an unexplained difference is a defect. Caught a real miss: an
+  app called `/services/custom/searchAddress` twice from `js/main.js` — the postal-code lookup that
+  autofills the address — and the graph had no action and no api for it, while a sibling app
+  captured the same endpoint correctly. Mechanically checkable, so it should never be eyeballed.
+- **Temp-file hygiene rule** (Phase 7). Under parallel batches agents share one scratchpad; a
+  generic `build_payload.py` was silently overwritten mid-run by a sibling. Every helper script and
+  temp file must be suffixed with `APP_ID`.
+- **Caption-code citation rule** (`rules.md` Phase 2). Actions must name the `MCAP`/`MFID` code they
+  cover, not only the translated English label. Without it the content is correct but untraceable —
+  on one measured app this was the difference between an apparent 46% and an actual ~94% field
+  coverage when an auditor re-derived the declared set from source.
+
+Second batch, found by auditing generated output against **screenshots of the running application**
+rather than against the metadata alone:
+
+- **Persona was inferred per repository, not per application.** A repo is not a persona boundary. In
+  the reference tree `pippen-navigate` holds ten apps: eight are HR target-pickers, but `CEPAY0556`
+  / `CEPAY0557` are the *employee's* own self-service screens — confirmed by screenshots of an
+  employee session. All ten were stamped `HR Administrator`, which would have filed every employee
+  journey's entry point under the wrong actor and broken the Human↔System Outcome join for those
+  apps. Discovery now weights `MAPLD01` above the repo name, and emits `mixedPersonaRepos[]` for the
+  parent to surface at the gate. An empty list on a tree of multi-app repos is now itself a warning.
+- **Caption codes are scoped per screen (`MCAPAK4`), not per application.** Codes restart at
+  `0000001` on every screen, so one app-wide code→text dictionary yields confident, wrong labels:
+  `$CAP0000001$` is *"1. First items to enter"* on screen `S8VY` but *"The specified application has
+  a separately saved application"* on `S8VZ`, and `holdingUser.html` uses the code from the latter.
+  Templates must now be resolved against their own owning screen.
+- **Captions injected from Java were invisible to a template-only sweep.** Handlers put captions
+  into the template engine at runtime (`ctx.getCaptions().get("CAP…")`). On CEPAY0557 a template
+  sweep resolves 45 of 54 declared codes and drops `CAP0000034` — a *visible* guide-card title —
+  along with an error string. The Java sweep for `CAP\d{7}` is now required alongside the template
+  sweep.
+- **UI assembled from a remote call was not declared as a boundary.** `$$kitHtml$$` /
+  `$$approvalHtml$$` are filled from `pippen/kit/formal` and `pippen/approver/formal`, whose services
+  exist in no repo of the set; the same two calls are made by `CustomFormal_FormBase`, so every form
+  embeds them. The calls were already captured in `apis[]`, but nothing said the region's *fields*
+  are unreachable — so reported field coverage read as if it included the approver block.
+
+### Changed
+- Persona confirmation gate presents the **full** persona list with app counts and confidence, not
+  only `raw` entries, and hard-stops when a tree with no role master reports zero inferred/raw
+  personas — that combination means the confidences are wrong, not that the run is clean.
+- **Atomicity warnings are now must-fix at the agent**, though the validator stays advisory (the
+  shared engine is untouched). The previous "use judgement… not mandatory" wording let two apps in
+  one run model the same three-input name row differently — `CEPAY0625` split last/first/middle,
+  `CEPAY0607` bundled them into one action. N separate editable inputs now means N actions; the only
+  exemptions are read-only content folded into a `Review …` description, and System personas.
+- **Tenant-configured field slots are named as such, not as "optional".** Screens render blocks whose
+  labels exist nowhere in the repo (customer configuration — often untranslated, sometimes naming a
+  specific company) and which are frequently `Required`. Calling them *optional* misrepresents them;
+  they are now `tenant-configured` typed slots whose description states the labels come from customer
+  configuration.
+
+**Not changed, deliberately:** the `field-coverage` gate. An independent caption-based audit put two
+apps at 46–47%, but checking against the rendered screens showed every visible field was captured —
+the caption denominator (which mixes unrendered tenant slots and error strings) was the flawed
+measure, not the gate.
+- The Outcome-only reconciliation rule now states explicitly that it **narrows** shared `core.md`
+  §2.4 for metadata trees, and why (one app per sub-agent ⇒ near-duplicate scenarios are usually
+  genuine distinct coverage from different applications).
+
 ## [3.8.0] — 2026-07-21
 
 ### Added

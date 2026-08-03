@@ -66,7 +66,7 @@ line per sub-agent.
 - `references/metadata-flow-structuring-agent.prompt.md` — per-app input renderer.
 - `references/rules.md` — metadata record types, MAPLQ verb mapping, apis[] typing, persona rules, field-capture gate.
 - Schema + word lists live in the **single source of truth** `../shared/functional/{upsert.schema.json, verbs.json}` (ADR 0001). Persona = any string, one persona per payload.
-- `validators/validate.py` — a thin **shim** that delegates to `../shared/functional/validate.py` (the one validator engine). Subcommands unchanged: `schema | rule-a | forbidden | persona --kind | citations --repo-name | field-coverage | citation-completeness | atomicity`. The sub-agent runs these in Phase 6; `field-coverage` is the 100%-field hard gate. `atomicity` is ADVISORY (human half only, skips System personas) — warns on clubbed input actions / input actions carrying apis[] / editable fields without a dedicated action; never blocks. (`rule-a`/`coverage` auto-detect human vs system from the half's single persona; the shim adds no static `--kind`.)
+- `validators/validate.py` — a thin **shim** that delegates to `../shared/functional/validate.py` (the one validator engine). Subcommands unchanged: `schema | rule-a | forbidden | persona --kind | citations --repo-name | field-coverage | citation-completeness | atomicity`. The sub-agent runs these in Phase 6; `field-coverage` is the 100%-field hard gate. `atomicity` is ADVISORY at the validator level (human half only, skips System personas) — warns on clubbed input actions / input actions carrying apis[] / editable fields without a dedicated action; it never blocks the run. **The agent is nonetheless instructed to resolve every warning before writing**, with only two exemptions (read-only content folded into a `Review …` description; System personas). N separate editable inputs must yield N actions regardless of shared captions — inconsistent granularity between apps in one run is a defect. (`rule-a`/`coverage` auto-detect human vs system from the half's single persona; the shim adds no static `--kind`.)
 - `validators/requirements.txt` — `jsonschema`.
 
 ## Inputs / Outputs
@@ -130,13 +130,62 @@ and skip to the per-app loop (resume) — do NOT re-discover.** Otherwise:
 3. The agent writes `applications.json` and returns ONE line
    (`OK · apps: N · flavorA … humanRawRole: N · path: …`). On `FAIL_DISCOVERY`, stop.
 
+### Phase 0b — Shared-framework pass (ONCE for the whole tree)
+
+`src/main/java/**/submodules/**` is shared platform code **copied verbatim into every repo** — the
+same file, identical bytes, across 60+ modules. Two failure modes follow if this is left to the
+per-app agents: either each of N agents re-reads the same code (pure waste), or — as observed — none
+of them read it and real behaviour is missed entirely.
+
+So the parent does it **once**, before the loop, and hands the result to every agent:
+
+1. Pick ONE repo containing `submodules/`. Confirm it is uniform (`md5sum` the same file across 3–4
+   repos; if versions diverge, note each distinct version and which repos carry it).
+2. Read the shared screen/formal/component classes for **persona-conditional or behavioural rules** —
+   role checks, visibility branches, shared validation.
+3. Write `{metadataRoot}/.breeze-metadata-output/shared-framework-brief.md`: one short bullet per
+   finding, each with file + rule. Keep it to a page — it is injected into every per-app prompt.
+
+Worked example of why this matters: `CustomFormal_BTN_Verify_base.java` (present in 60 repos, one
+distinct version) hides the approve/reject button pair when the session role is `040` (Overall HR)
+or `060` (Payer HR). It is the ONLY role branch in the entire application layer, and a per-app pass
+missed it in every app.
+
 ### Persona confirmation gate ⛔ (parent-side)
 
-Read `personaCandidates` from `applications.json`. Present the human persona list (esp. any with
-`confidence: "raw"` — unmapped role codes). Ask the user to confirm names / supply real names for
-raw role codes / merge duplicates. Write confirmed names back into the relevant apps'
+Read `personaCandidates` from `applications.json`. **Present the FULL human persona list with an app
+count and confidence for each** — not only the `raw` ones. Many metadata trees have no authoritative
+role source (`MAPLD03` is a control-handler name, not a role code), so most personas arrive as
+`inferred`: a sound heuristic from repo name and title, but still a guess — and a wrong guess here
+propagates to every scenario beneath it.
+
+Present it like:
+```
+HR Administrator        41 apps   inferred   (repo/title heuristic)
+Store Manager           12 apps   inferred
+Approver                 6 apps   inferred
+<raw value XYZ>          2 apps   raw        ← needs a real name
+```
+Ask the user to confirm / rename / merge. Write the confirmed names back into the relevant apps'
 `personaHuman` fields in `applications.json`. System / External System need no confirmation. This is
 a HARD GATE — do not enter the loop until human personas are confirmed.
+
+**Also surface `mixedPersonaRepos[]`** — repos whose apps resolved to more than one persona. This is
+normal and usually correct (a module can hold both an operator's picker screens and an employee's
+self-service screens), but it is the highest-value thing for the user to eyeball, because a
+repo-uniform mis-assignment silently files a whole journey under the wrong actor. List them with
+the per-app split:
+```
+pippen-navigate   Employee (2): CEPAY0556, CEPAY0557
+                  HR Administrator (8): CEPAY0558, CEPAY0559, CEPAY0560, …
+```
+If the list is **empty on a tree with many multi-app repos**, suspect persona was inferred per repo
+rather than per app — re-run discovery rather than proceeding.
+
+> ⚠️ **If discovery reports `personaInferred: 0` and `personaRaw: 0` on a tree with no role master,
+> STOP.** Inferences have been mislabelled as authoritative, so the gate has nothing to show and
+> 100% of personas would ship unreviewed. Re-run discovery or fix the confidence values before
+> continuing.
 
 ---
 
@@ -162,7 +211,10 @@ The agent's Phase 7 `mkdir -p`s the parent dir before writing, so `OUTPUT_DIR` i
 **Never** set these under `{repo_path}` — that writes into the source module and pollutes it.
 Render `references/metadata-flow-structuring-agent.prompt.md`, substituting the app fields from
 `applications.json` (`app_id`, `repo_name`, `repo_path`, `flavor`, `persona_human`, `persona_system`,
-`mapl_path`, `steps_json`, `ajax_endpoints_json`), the Breeze coordinates (`project_uuid`,
+`mapl_path`, `steps_json`, `ajax_endpoints_json`, `undeclared_entry_points_json` — the code-exposed
+addresses discovery found with no MAPL declaration), `shared_framework_brief` (the contents of
+`shared-framework-brief.md` from Phase 0b — inject it, do not make the agent re-read `submodules/`),
+the Breeze coordinates (`project_uuid`,
 `project_name`, `llm_platform="AWSBEDROCK"`, `api_base`, `api_key`, `human_upsert_path`,
 `system_upsert_path`), the two output paths, `validators_path` (this skill's `validators/` absolute
 dir), `shared_functional_path` (the shared SSOT dir `<pluginRoot>/skills/shared/functional` — the agent
@@ -227,6 +279,27 @@ Per shared `core.md` §2, dedup is Outcome-only inline (deterministic list-all) 
 3. Record merges under `reconciliation` in `applications.json`.
 
 **Do NOT merge below the Outcome level.** Scenario / Step / Action are coverage-first — merging near-duplicate scenarios (from different apps) risks silently dropping distinct flows for no join benefit.
+
+> **Note — this deliberately narrows shared `core.md` §2.4**, which asks the orchestrator to collapse
+> below-outcome duplicates per persona. For metadata trees the fan-out is one app per sub-agent, so
+> near-duplicate scenarios almost always come from *different applications* and are genuinely
+> distinct coverage; merging them loses flows. Outcome-only is the safer contract here.
+
+## Journey map (emit after reconciliation)
+
+The upsert schema is a strict tree — `persona → outcome → scenario → step → action`, with no
+`next` / `link` / `transition` field — so a `GoApplication` hand-off **cannot** be stored as a graph
+edge. It is captured as a terminal action plus `audit.appTransitions[]`. To keep that information
+usable, aggregate every half's `appTransitions[]` and write:
+
+```
+{metadataRoot}/.breeze-metadata-output/journey-map.md
+```
+
+listing each `fromApp (capability) → toApp (capability)` hand-off, plus a section for unresolved
+`@param` targets. Multi-application journeys — one real-world event driving several modules in
+sequence — are visible only here, so a run that skips this leaves them undiscoverable. Record the
+count in `applications.json` under `journeyMap`.
 
 ## When NOT to use
 - Standard React/Vue/Angular UI repos → `/breeze:generate-functional-from-ui`
