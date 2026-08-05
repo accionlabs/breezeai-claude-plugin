@@ -26,6 +26,7 @@ Usage:
   cat payload.json | validate.py api-urls --repo-root <path>
   cat payload.json | validate.py path-linked                       # verb+route/URI in action name ⇒ apis[] required
   cat payload.json | validate.py descriptions                      # every scenario AND action must have a non-empty description
+  cat body.json    | validate.py wrapper                           # HTTP body must be {payload,project:{uuid,name},skipStepAndAction} not bare {personas:[…]}
 """
 import sys, os, json, re, argparse
 
@@ -414,12 +415,40 @@ def cmd_descriptions(full, args):
     finish(not errs, errs)
 
 
+def cmd_wrapper(full, args):
+    """HARD gate: the upsert HTTP body must be the full wrapper shape
+    { "payload": {…}, "project": {"uuid": "…", "name": "…"}, "skipStepAndAction": bool }
+    not a bare { "personas": […] }. A bare payload returns HTTP 500 — the server cannot
+    resolve the project. Run this on BODY_PATH (the file sent to curl), not on the
+    internal {payload,audit} object used in Phase 6."""
+    errs = []
+    if not isinstance(full, dict):
+        finish(False, [{"missing": "root", "fix": "body must be a JSON object"}])
+        return
+    if not isinstance(full.get("payload"), dict):
+        errs.append({"missing": "payload",
+                     "fix": "wrap personas: {\"payload\":{\"personas\":[...]},\"project\":{\"uuid\":\"…\",\"name\":\"…\"},\"skipStepAndAction\":false}"})
+    proj = full.get("project")
+    if not isinstance(proj, dict):
+        errs.append({"missing": "project",
+                     "fix": "add \"project\":{\"uuid\":\"<projectUuid>\",\"name\":\"<projectName>\"}"})
+    else:
+        if not (isinstance(proj.get("uuid"), str) and proj["uuid"].strip()):
+            errs.append({"missing": "project.uuid", "fix": "project.uuid must be a non-empty string"})
+        if not (isinstance(proj.get("name"), str) and proj["name"].strip()):
+            errs.append({"missing": "project.name", "fix": "project.name must be a non-empty string"})
+    if "skipStepAndAction" not in full:
+        errs.append({"missing": "skipStepAndAction", "fix": "add \"skipStepAndAction\":false"})
+    finish(not errs, errs)
+
+
 COMMANDS = {
     "schema": cmd_schema, "rule-a": cmd_rule_a, "forbidden": cmd_forbidden,
     "persona": cmd_persona, "citations": cmd_citations,
     "field-coverage": cmd_field_coverage, "citation-completeness": cmd_citation_completeness,
     "atomicity": cmd_atomicity, "coverage": cmd_coverage, "api-urls": cmd_api_urls,
     "path-linked": cmd_path_linked, "descriptions": cmd_descriptions,
+    "wrapper": cmd_wrapper,
 }
 
 def main():

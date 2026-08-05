@@ -151,7 +151,7 @@ Each subcommand exits **0** pass / **2** fail (read `errors[]`, each carries a `
 Write the User payload to `OUTPUT_PATH_HUMAN` and the System payload to `OUTPUT_PATH_SYSTEM` (each `{payload, audit}`). Both use the identical shared Outcome name.
 
 ## Phase 8 — Upsert
-POST each payload to `<API_BASE>/functional-graph/v2/upsert?embedding=true&llmPlatform=<LLM_PLATFORM>` with header `api-key: <API_KEY>` via `curl --data-binary @<file>` (payload never crosses a tool-arg limit). Upsert the **User** payload first (so the Outcome exists), then the **System** payload (attaches to the same Outcome by name). Capture each HTTP status + functionalId.
+Build each body via python (do NOT cat into a shell var): `{"payload": src["payload"], "project": {"uuid": PROJECT_UUID, "name": PROJECT_NAME}, "skipStepAndAction": false}`. Before each `curl`, run `python3 "$VALIDATORS_PATH/validate.py" wrapper < "$BODY_FILE"` — if it exits 2, emit `FAIL_WRAPPER` and stop (degrade silently if VALIDATORS_PATH is absent). POST each validated body to `<API_BASE>/functional-graph/v2/upsert?embedding=true&llmPlatform=<LLM_PLATFORM>` with header `api-key: <API_KEY>` via `curl --data-binary @<file>` (payload never crosses a tool-arg limit). Upsert the **User** payload first (so the Outcome exists), then the **System** payload (attaches to the same Outcome by name). Capture each HTTP status + functionalId.
 
 ## Phase 9 — Return ONE summary line
 `EP "<title>" [<PERSONA>]: human <status>/fn_… (S scenarios, A actions) + system <status>/fn_… (S scenarios) | Outcome "<name>" | seams=<Class>.<Method>[InProcess], <Op>[SOAP], … | dedup: <reused/created>`

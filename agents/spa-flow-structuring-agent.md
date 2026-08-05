@@ -556,6 +556,15 @@ json.dump(body, open('$BODY_PATH', 'w'))
 "
 ```
 
+### Step 1b — Validate body wrapper (HARD gate, runs on BODY_PATH not on OUTPUT_PATH)
+
+```bash
+if [[ -n "$VALIDATORS_PATH" && -f "$VALIDATORS_PATH/validate.py" ]]; then
+  python3 "$VALIDATORS_PATH/validate.py" wrapper < "$BODY_PATH" \
+    || { echo "FAIL_WRAPPER · body missing project/payload wrapper — abort"; exit 1; }
+fi
+```
+
 ### Step 2 — POST with the `api-key:` header
 
 ```bash
