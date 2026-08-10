@@ -35,6 +35,24 @@ share the same target pages. The agent reads page files once and
 processes all scenarios against that shared context — far more efficient
 than one-agent-per-scenario. Up to 3 outcomes run in parallel.
 
+## How to Create the Design Ontology — Full Workflow
+
+The design ontology (UserJourney → Flow → Page → Component) sits on top
+of the functional graph. This skill requires a **frontend UI repo** — it
+reads actual code for accurate component discovery.
+
+| Step | Skill | What it does | Prerequisites |
+|------|-------|-------------|---------------|
+| 1 | `/breeze:setup-project` | Link Breeze project, create `.breeze.json` | None |
+| 2 | `/breeze:generate-functional-from-ui` | Build functional graph (Persona → Outcome → Scenario → Step → Action) from the UI codebase | Step 1 |
+| 3 | `/breeze:generate-component-registry` | Pre-scan UI repo, classify all components (ATOM/MOLECULE/ORGANISM/TEMPLATE), write `existingcomponents.json` | Step 1 + UI repo |
+| 4 | **`/breeze:generate-design-from-ui`** ← this skill | Generate design graph from functional graph + UI code. Uses component registry cache from Step 3 for faster, consistent classification | Steps 2 + 3 |
+| 5 | `/breeze:analyze-design-deviations` *(optional)* | Compare generated design graph components against Figma design system — find drift, missing components, type mismatches | Step 4 + Figma export |
+
+> **Step 3 is optional but strongly recommended.** Without it, this skill
+> classifies every component from scratch per outcome. With it,
+> classifications are cached and consistent across parallel sub-agents.
+
 ## Resources
 
 **Reference documents are read by the sub-agent, not the parent.**
