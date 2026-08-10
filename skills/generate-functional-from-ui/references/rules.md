@@ -36,6 +36,8 @@ A valid frontend repo has `package.json` AND at least one of:
 If no frontend router file found, stop and suggest
 `/breeze:generate-functional-from-backend`.
 
+For Angular specifically: `angular.json` or `project.json` (NX), `src/app/app.routes.ts`, `src/app/app-routing.module.ts`, `src/app/app.component.ts` with `@Component` decorator.
+
 ---
 
 ### Persona rules (UI pass specific)
@@ -125,6 +127,8 @@ that has its own `useState`/`useReducer`/`useStore` hook, you MUST
 read the file before drafting scenarios. Record in citation list.
 If skipped, justify in `completed[]` under `skippedComponents[]`.
 
+**Angular equivalent:** For Angular apps, the drill-down applies to any imported component matching `/(Dialog|Modal|Drawer|Sidenav|BottomSheet|Panel|Tab(s|Group))Component$/` AND that has injected services (constructor DI), `BehaviorSubject`, `Signal`, or `FormGroup`. You MUST read both the `.component.ts` AND its `.component.html` template before drafting scenarios.
+
 ---
 
 ### JSX coverage validator rules (Step 6.5)
@@ -138,6 +142,8 @@ If skipped, justify in `completed[]` under `skippedComponents[]`.
 - **Network-verb actions (Submit, Generate, Upload, Delete, Send,
   Save, Fetch, Retrieve, Sync) MUST have `apis[]`** — if missing,
   validator MUST fail
+
+**Angular template coverage:** For Angular apps, the "JSX widget inventory" is replaced by the **HTML template element inventory** — every interactive element in `.component.html` files: `<button>`, `<a>` with `(click)`, `<input>`, `<select>`, `<textarea>`, `<mat-*>` Material components, `<form>`, elements with `(click)=`, `(change)=`, `(submit)=`, `(ngSubmit)=`, `routerLink`, `[routerLink]`. The same >=90% coverage rule applies.
 
 ---
 
