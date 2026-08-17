@@ -9,7 +9,7 @@ Persona-conditional checks take --kind {human, system}; persona-agnostic ones do
 
 Hard gates exit 2 when ok is False:   schema, rule-a, forbidden, persona,
                                        citations, field-coverage, citation-completeness,
-                                       path-linked, descriptions
+                                       path-linked, descriptions, seed-fidelity
 Advisory checks always exit 0:         coverage, atomicity, api-urls
 
 Usage:
@@ -26,6 +26,7 @@ Usage:
   cat payload.json | validate.py api-urls --repo-root <path>
   cat payload.json | validate.py path-linked                       # verb+route/URI in action name ⇒ apis[] required
   cat payload.json | validate.py descriptions                      # every scenario AND action must have a non-empty description
+  cat payload.json | validate.py seed-fidelity --seed <rel/path> --repo-name <repo>   # payload must anchor to its SEED_FILE
 """
 import sys, os, json, re, argparse
 
@@ -393,6 +394,84 @@ def cmd_path_linked(full, args):
                           "note": "named route/URI not present in any apis[].url — verify the action links to the right interface"})
     finish(not errs, errs, warns)
 
+def _rel_to_repo(ref, repo_name):
+    """Strip the '<repo>/' prefix from a citation reference so it can be compared
+    against a repo-relative SEED_FILE. If no repo_name is given (or the ref does not
+    carry the prefix) the ref is returned unchanged."""
+    ref = str(ref or "").strip().lstrip("./")
+    if repo_name:
+        pre = repo_name.rstrip("/") + "/"
+        if ref.startswith(pre):
+            return ref[len(pre):]
+    return ref
+
+# Directories too broad to prove "same feature" by containment — a hit inside one of
+# these does NOT anchor a payload (siblings live here), so an exact SEED_FILE citation
+# is required when the seed sits directly in one of them.
+_BROAD_DIRS = {"", ".", "src", "src/routes", "src/pages", "src/views",
+               "src/components", "src/app", "src/features", "app", "pages",
+               "components", "routes", "views", "features"}
+
+def cmd_seed_fidelity(full, args):
+    """HARD gate: the payload MUST anchor to its assigned SEED_FILE — at least one
+    citation must reference the seed itself, or (when the seed lives in a specific,
+    non-broad feature directory) a file within that directory's subtree. Catches the
+    two worst silent failures: (a) a concurrent write swapped in a *different* EP's
+    content, and (b) persona-framing overreach imported a sibling route's content to
+    satisfy the persona focus. Requires --seed (repo-relative) and --repo-name; if
+    either is absent it degrades to an advisory no-op (exit 0) rather than blocking."""
+    payload = get_payload(full)
+    if not args.seed or not args.repo_name:
+        finish(True, warnings=["--seed and --repo-name required to assert seed-fidelity — skipped"], hard=False)
+    seed = _rel_to_repo(args.seed, args.repo_name)
+    cited = set()
+    def collect(node):
+        for c in node.get("citations", []) or []:
+            r = _rel_to_repo(c.get("reference", ""), args.repo_name)
+            if r:
+                cited.add(r)
+    for p in personas(payload):
+        collect(p)
+        for o in p.get("outcomes", []):
+            collect(o)
+            for s in o.get("scenarios", []):
+                collect(s)
+                for st in s.get("steps", []):
+                    collect(st)
+                    for a in st.get("actions", []):
+                        collect(a)
+    seed_dir = os.path.dirname(seed).replace("\\", "/")
+    exact = seed in cited
+    if exact:
+        anchored = True
+    elif seed_dir in _BROAD_DIRS:
+        # A thin file sitting DIRECTLY in a broad dir (e.g. src/routes/chat.tsx) that
+        # renders a child-component tree. Treat as mis-anchored ONLY when it cites a
+        # DIFFERENT sibling under the same broad dir (i.e. another route) — that is the
+        # concurrent-swap / overreach signature (chat.tsx payload citing src/routes/home/*).
+        # Content sourced from a child-component tree (src/components/*) is legitimate and
+        # only warns that the SEED_FILE itself was not cited.
+        anchored = not any(c.startswith(seed_dir + "/") for c in cited)
+    else:
+        anchored = any(c == seed or c.startswith(seed_dir + "/") for c in cited)
+    if not anchored:
+        from collections import Counter
+        tops = Counter("/".join(c.split("/")[:3]) for c in cited if c)
+        finish(False, [{
+            "error": "seed_not_anchored", "seed": seed,
+            "cited_areas": [f"{k} ({v})" for k, v in tops.most_common(5)],
+            "fix": (f"payload does not anchor to its SEED_FILE ('{seed}') — no citation references it "
+                    f"or its feature directory. You likely captured a DIFFERENT route/feature (a concurrent "
+                    f"swap, or you imported a sibling route's content to satisfy the persona focus). Re-read "
+                    f"'{seed}' and describe THAT surface; if it is genuinely thin for this persona, emit a "
+                    f"minimal subtree and set audit.thinForPersona=true — never borrow another route's content."),
+        }])
+    warns = []
+    if not exact:
+        warns.append({"seed_not_cited_exactly": seed,
+                      "note": "anchored via the seed's directory but the SEED_FILE itself is not cited — add a citation to it for traceability"})
+    finish(True, warnings=warns, hard=False)
+
 def cmd_descriptions(full, args):
     """HARD gate: every SCENARIO and every ACTION must carry a non-empty `description`.
     (Scenario description is also schema-required; this additionally enforces it on every
@@ -420,6 +499,7 @@ COMMANDS = {
     "field-coverage": cmd_field_coverage, "citation-completeness": cmd_citation_completeness,
     "atomicity": cmd_atomicity, "coverage": cmd_coverage, "api-urls": cmd_api_urls,
     "path-linked": cmd_path_linked, "descriptions": cmd_descriptions,
+    "seed-fidelity": cmd_seed_fidelity,
 }
 
 def main():
@@ -429,6 +509,7 @@ def main():
     ap.add_argument("--repo-name")
     ap.add_argument("--repo-root")
     ap.add_argument("--seed-file")
+    ap.add_argument("--seed")
     args = ap.parse_args()
     if args.check == "citations" and not args.repo_name:
         print(json.dumps({"ok": False, "errors": ["citations requires --repo-name"]})); sys.exit(2)

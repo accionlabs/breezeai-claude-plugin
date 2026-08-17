@@ -306,7 +306,23 @@ Parse the summary; confirm `path` matches the OUTPUT_PATH you passed in. Branch 
 
 ## Step 4 — Verify (post-upsert sanity check)
 
-For 2-3 unique scenario descriptions from the upserted payload, call:
+**Step 4a — Seed-fidelity assertion (cheap, do this FIRST).** Before the semantic check, confirm the payload the sub-agent wrote actually describes the entry point you assigned — a sub-agent can return `OK · http 200` on a payload silently swapped by a concurrent sibling or padded from another handler (the agent's own Phase-6 `seed-fidelity` gate is the primary guard; this is the parent-side backstop). Grep OUTPUT_PATH for a citation to the EP's own seed (`ep.file`) basename and confirm the persona:
+```bash
+python3 - "$OUTPUT_PATH" "$(basename "$ep_file")" "$ep_persona" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); p=d.get("payload",d); seed,persona=sys.argv[2],sys.argv[3]
+refs=[c.get("reference","") for pe in p.get("personas",[]) for o in pe.get("outcomes",[])
+      for s in o.get("scenarios",[]) for st in (s,)+tuple(s.get("steps",[]))
+      for c in st.get("citations",[])]
+refs+=[c.get("reference","") for pe in p.get("personas",[]) for o in pe.get("outcomes",[])
+       for s in o.get("scenarios",[]) for st in s.get("steps",[]) for a in st.get("actions",[]) for c in a.get("citations",[])]
+pers=[pe.get("persona") for pe in p.get("personas",[])]
+print("SEED_OK" if (any(seed in r for r in refs) and persona in pers) else f"SEED_MISMATCH persona={pers} cites_seed={any(seed in r for r in refs)}")
+PY
+```
+On `SEED_MISMATCH`, do **not** accept the `OK`: record in `entrypoints.failed[]` with `reason: "seed-mismatch"`, re-add `epId` to `remaining[]`, and re-spawn that EP (serially). This turns a silent content-swap into a caught failure.
+
+**Step 4b — Semantic check.** For 2-3 unique scenario descriptions from the upserted payload, call:
 ```
 Functional_Graph_Search(uuid=projectUuid, query=<first 80 chars of description>, limit=3)
 ```
@@ -350,6 +366,8 @@ Plan multi-session for >20 EPs.
 ## Parallelism
 
 The per-EP loop runs in **batches of up to 3** concurrent sub-agents (see the loop preamble). EPs are independent — each is its own upsert — so batching is safe; the only constraint is to finish a batch (all sub-agents returned, checkpoints written) before starting the next, so a mid-run stop leaves `remaining[]` consistent. Drop the batch size to 1 near your context budget or under rate limits. Discovery (Phase 0) is a separate single sub-agent that runs once before the loop.
+
+> ⚠️ **Never run two EPs that share the same seed handler concurrently — serialize them.** When several routes are handled by the same controller/handler file (fat controllers, a resolver class serving many operations), those EPs share a seed; running them at once is the condition that produced content-swaps in the UI pass (a concurrent run's scratch write clobbered its sibling's, leaving the wrong route's content in the file). Put same-seed EPs in different batches. Each sub-agent already writes to an EP-unique `OUTPUT_PATH`, keys scratch files to it, and self-checks `seed-fidelity` in Phase 6; **Step 4a re-asserts it parent-side and catches any swap as `SEED_MISMATCH`** → re-spawn that EP serially. Different-handler EPs may run concurrently.
 
 > ⚠️ **Parallel-dedup race.** Each sub-agent reads the live graph for dedup *before* siblings write, so concurrent siblings can mint slightly-different names for the same Outcome. With Outcome-only inline dedup (shared `core.md` §2) that is the only exposure; it is resolved by the mandatory reconciliation pass below (or by serializing EPs known to share an Outcome).
 
