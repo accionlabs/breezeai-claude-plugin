@@ -482,6 +482,9 @@ cat > "$CAND" << '__CAND_END__'
 { ...your in-memory {payload, audit}... }
 __CAND_END__
 
+# repo-relative seed for the seed-fidelity gate (strip the REPO.root prefix off SEED_FILE)
+SEED_REL="${SEED_FILE#"$REPO_ROOT"/}"
+
 run() { python3 "$SHARED_FUNCTIONAL_PATH/validate.py" "$@" < "$CAND"; }
 run schema                              # exit 2 on schema violations
 run rule-a --kind human                 # exit 2 if a network-verb action lacks apis[] (no identifier fallback on the human half)
@@ -490,10 +493,14 @@ run descriptions                        # exit 2 if any scenario or action has a
 run forbidden                           # exit 2 if an action name contains a forbidden UI word
 run citations --repo-name "$REPO_NAME"  # exit 2 if any reference lacks the <REPO.name>/ prefix
 run field-coverage                      # exit 2 if a declared field is uncovered
+# SEED_REL = SEED_FILE with the REPO.root prefix stripped (repo-relative, e.g. src/routes/chat.tsx)
+run seed-fidelity --repo-name "$REPO_NAME" --seed "$SEED_REL"   # exit 2 if the payload does NOT anchor to its own SEED_FILE
 ```
 
+> **`seed-fidelity` is the anti-swap / anti-overreach gate — treat a failure as a STOP, not a cosmetic fix.** It fails when none of your citations reference `SEED_FILE` (or, for a thin file directly under a broad dir like `src/routes/`, when you cite a *different sibling route* under that dir). Two real causes, both serious: (a) your in-memory payload is actually a **different EP's** content (a concurrent sibling clobbered a shared temp file — re-derive from `SEED_FILE` from scratch, never trust a payload whose citations point at another route), or (b) you **imported a sibling route's content** to satisfy the persona focus when `SEED_FILE` was thin for this persona. The fix is NEVER to bend the seed — it is to describe the surface `SEED_FILE` actually renders. If that surface is genuinely thin for this persona, emit a minimal honest subtree and set `audit.thinForPersona = true`; do not pad it with another route's flows.
+
 Each subcommand prints `{ok, errors, warnings}` and exits **0** (pass) / **2** (fail) / **3** (bootstrap error). Handle:
-- **exit 2** → read `errors[]` (each carries a `fix`), repair the offending nodes in-memory using the repair-reference table below, rewrite `$CAND`, re-run that subcommand. Max **2 repair passes**; if still failing → `FAIL_VALIDATE` with `last_check` = the failing subcommand (`schema|rule-a|path-linked|descriptions|forbidden|citations|field-coverage`).
+- **exit 2** → read `errors[]` (each carries a `fix`), repair the offending nodes in-memory using the repair-reference table below, rewrite `$CAND`, re-run that subcommand. Max **2 repair passes**; if still failing → `FAIL_VALIDATE` with `last_check` = the failing subcommand (`schema|rule-a|path-linked|descriptions|forbidden|citations|field-coverage|seed-fidelity`).
 - **exit 3** (the `jsonschema` dependency isn't installed) **OR `SHARED_FUNCTIONAL_PATH` is absent/unreadable** → do NOT fail the run. Append `audit.warnings[]` `{ "type": "validators_unavailable", "note": "validate.py or jsonschema not available — used reasoning checks only" }`, set `audit.validatorsRun = false`, and rely on the reasoning table as your only check.
 
 ### The REPAIR REFERENCE — reasoning table (how to fix each gate failure + the few checks the script can't judge)
@@ -535,6 +542,8 @@ Notes:
 - `mkdir -p` ensures the parent directory exists.
 - If the JSON sanity check fails, fix the heredoc and rewrite.
 - After writing, do NOT emit the full JSON in any message. The parent reads from OUTPUT_PATH; echoing the payload doubles context cost for nothing.
+- **Write ONLY to `OUTPUT_PATH` (and, if you must stage, to `"$OUTPUT_PATH".tmp` then `mv` it into place). NEVER write your payload to a fixed/shared filename** (e.g. `/tmp/payload.json`, `out.json`, `candidate.json`) and never read or copy from another EP's `OUTPUT_PATH` — concurrent siblings run at the same time and a shared name silently swaps their content. `OUTPUT_PATH` is EP-unique; keep it that way.
+- **Re-open `OUTPUT_PATH` after writing and confirm the persona equals PERSONA and at least one citation references `SEED_FILE`.** If it does not, your buffer was contaminated (a sibling's content) — regenerate from `SEED_FILE`; do not upsert a mismatched file.
 
 ---
 
@@ -543,7 +552,11 @@ Notes:
 ### Step 1 — Build the request body via python (do NOT cat OUTPUT_PATH into a shell variable)
 
 ```bash
-BODY_PATH="/tmp/upsert_body_${PERSONA}_$$.json"
+# Key ALL scratch files to the unique OUTPUT_PATH basename — never to ${PERSONA}/$$, which
+# collide when a concurrent sibling shares this persona or reuses a PID. The OUTPUT_PATH the
+# parent handed you is guaranteed EP-unique (ui_ep{NN}_{persona}_{slug}), so derive from it.
+STEM="$(basename "$OUTPUT_PATH" .json)"
+BODY_PATH="/tmp/upsert_body_${STEM}.json"
 python3 -c "
 import json
 src = json.load(open('$OUTPUT_PATH'))
@@ -559,7 +572,7 @@ json.dump(body, open('$BODY_PATH', 'w'))
 ### Step 2 — POST with the `api-key:` header
 
 ```bash
-RESP_PATH="/tmp/upsert_resp_${PERSONA}_$$.json"
+RESP_PATH="/tmp/upsert_resp_${STEM}.json"
 HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" \
     -X POST "$API_BASE/functional-graph/v2/upsert?embedding=true&llmPlatform=$LLM_PLATFORM" \
     -H "api-key: $API_KEY" \
@@ -599,7 +612,7 @@ OK · outcomes: <N> · scenarios: <N> · steps: <N> · actions: <N> · apis: <N>
 
 **On Phase 6 validation failure (repair gave up after 2 passes):**
 ```
-FAIL_VALIDATE · errors: <count> · last_check: <schema|rule-a|path-linked|chain|forbidden|citations|field-coverage> · path: <OUTPUT_PATH>
+FAIL_VALIDATE · errors: <count> · last_check: <schema|rule-a|path-linked|chain|forbidden|citations|field-coverage|seed-fidelity> · path: <OUTPUT_PATH>
 ```
 
 **On Phase 7 write failure:**

@@ -502,6 +502,9 @@ cat > "$CAND" << '__CAND_END__'
 { "payload": { ...candidate payload... }, "audit": { ...candidate audit... } }
 __CAND_END__
 
+# repo-relative seed for the seed-fidelity gate (strip the REPO.root prefix off SEED_FILE)
+SEED_REL="${SEED_FILE#"$REPO_ROOT"/}"
+
 run() { python3 "$VALIDATORS_PATH/validate.py" "$@" < "$CAND"; }
 run schema                              # exit 2 on schema violations
 run rule-a                              # exit 2 if a side-effect-verb action lacks apis[]/identifier
@@ -509,12 +512,15 @@ run path-linked                         # exit 2 if a verb+route/URI action (Rec
 run descriptions                        # exit 2 if any scenario or action has a null/blank description
 run persona                             # exit 2 if persona != System/External System or count != 1
 run citations --repo-name "$REPO_NAME"  # exit 2 if any reference lacks the <REPO.name>/ prefix
+run seed-fidelity --repo-name "$REPO_NAME" --seed "$SEED_REL"   # exit 2 if the payload does NOT anchor to its own SEED_FILE (handler)
 run coverage                            # warning-only (exit 0); reports side-effect coverage ratio
 ```
 
+> **`seed-fidelity` is the anti-swap / anti-overreach gate — a failure is a STOP.** It fails when no citation references `SEED_FILE` (the handler you were assigned) or its module directory. The serious causes: (a) your in-memory payload is a **different EP's** content — a concurrent sibling clobbered a shared temp file; re-derive from `SEED_FILE` and never trust a buffer whose citations point at another handler — or (b) you pulled in an **unrelated handler's** flows. The fix is to describe what `SEED_FILE` (and the services it injects) actually does; if that surface is genuinely small, emit a minimal honest subtree and set `audit.thinForPersona = true` — never borrow another entry point's content.
+
 Each subcommand prints `{ok, errors, warnings, ...}` and exits **0** (pass) / **2** (fail) / **3** (bootstrap error). Handle:
 
-- **exit 2** → read `errors[]`, repair the offending nodes in-memory using the table below, rewrite `$CAND`, re-run that subcommand. Max **2 repair passes**; if still failing → `FAIL_VALIDATE` with `last_check` = the failing subcommand (`schema|rule-a|path-linked|descriptions|persona|citations`).
+- **exit 2** → read `errors[]`, repair the offending nodes in-memory using the table below, rewrite `$CAND`, re-run that subcommand. Max **2 repair passes**; if still failing → `FAIL_VALIDATE` with `last_check` = the failing subcommand (`schema|rule-a|path-linked|descriptions|persona|citations|seed-fidelity`).
 - **exit 3** (the `jsonschema` dependency isn't installed) **OR `VALIDATORS_PATH` is absent/empty** → do NOT fail the run. Append `audit.warnings[]` `{ "type": "validators_unavailable", "note": "validate.py or jsonschema not available — used reasoning checks only" }`, set `audit.validatorsRun = false`, and rely on the reasoning table as your only check. (Same degrade-don't-die philosophy as the Code_Graph_Search soft floor.)
 - **coverage** is advisory: if it warns the ratio is `<90%`, act on it per check #6 before proceeding — but it never blocks on its own.
 
@@ -558,6 +564,7 @@ Notes:
 - `mkdir -p` ensures the parent directory exists.
 - If the JSON sanity check fails, fix the heredoc and rewrite.
 - After writing, do NOT emit the full JSON in any message. The parent reads from OUTPUT_PATH; echoing the payload doubles context cost for nothing.
+- **Write ONLY to `OUTPUT_PATH` (or stage to `"$OUTPUT_PATH".tmp` then `mv`). NEVER write to a fixed/shared filename and never read another EP's `OUTPUT_PATH`** — concurrent siblings run simultaneously and a shared name silently swaps their content. After writing, re-open `OUTPUT_PATH` and confirm the persona and at least one citation reference `SEED_FILE`; if not, regenerate from `SEED_FILE` rather than upserting a contaminated buffer.
 
 ---
 
@@ -566,7 +573,8 @@ Notes:
 ### Step 1 — Build the request body via python (do NOT cat OUTPUT_PATH into a shell variable)
 
 ```bash
-BODY_PATH="/tmp/be_upsert_body_$$.json"
+STEM="$(basename "$OUTPUT_PATH" .json)"   # EP-unique; never key scratch files to $$ alone (concurrent siblings can collide)
+BODY_PATH="/tmp/be_upsert_body_${STEM}.json"
 python3 -c "
 import json
 src = json.load(open('$OUTPUT_PATH'))
@@ -584,7 +592,7 @@ This is the clipping-avoidance contract: the payload travels **disk → curl →
 ### Step 2 — POST with the `api-key:` header
 
 ```bash
-RESP_PATH="/tmp/be_upsert_resp_$$.json"
+RESP_PATH="/tmp/be_upsert_resp_${STEM}.json"
 HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" \
     -X POST "$API_BASE/functional-graph/v2/upsert?embedding=true&llmPlatform=$LLM_PLATFORM" \
     -H "api-key: $API_KEY" \
@@ -624,7 +632,7 @@ OK · outcomes: <N> · scenarios: <N> · steps: <N> · actions: <N> · apis: <N>
 
 **On Phase 6 validation failure (repair gave up after 2 passes):**
 ```
-FAIL_VALIDATE · errors: <count> · last_check: <schema|rule-a|chain|persona|citations|coverage|polymorphic> · path: <OUTPUT_PATH>
+FAIL_VALIDATE · errors: <count> · last_check: <schema|rule-a|chain|persona|citations|coverage|polymorphic|seed-fidelity> · path: <OUTPUT_PATH>
 ```
 
 **On Phase 7 write failure:**

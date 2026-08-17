@@ -419,7 +419,24 @@ Parse the summary to confirm `path` matches the OUTPUT_PATH you passed in. Branc
 
 ## Step 4 — Verify (post-upsert sanity check)
 
-For 2-3 unique scenario descriptions from the upserted payload, call:
+**Step 4a — Seed-fidelity assertion (cheap, do this FIRST).** Before the semantic check, confirm the payload the sub-agent wrote actually describes the EP you assigned. A sub-agent can return `OK · http 200` on a payload that was silently swapped by a concurrent sibling or padded from another route (the agent's own Phase-6 `seed-fidelity` gate is the primary guard; this is the parent-side backstop). Grep the OUTPUT_PATH for a citation to the EP's own seed basename:
+```bash
+python3 - "$OUTPUT_PATH" "$(basename "$ep_component")" "$persona" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); p=d.get("payload",d); seed,persona=sys.argv[2],sys.argv[3]
+refs=[c.get("reference","") for pe in p.get("personas",[]) for o in pe.get("outcomes",[])
+      for s in o.get("scenarios",[]) for lvl in (s,)+tuple(s.get("steps",[]))
+      for c in lvl.get("citations",[])]
+refs+=[c.get("reference","") for pe in p.get("personas",[]) for o in pe.get("outcomes",[])
+       for s in o.get("scenarios",[]) for st in s.get("steps",[]) for a in st.get("actions",[]) for c in a.get("citations",[])]
+pers=[pe.get("persona") for pe in p.get("personas",[])]
+ok = any(seed in r for r in refs) and persona in pers
+print("SEED_OK" if ok else f"SEED_MISMATCH persona={pers} seed={seed} cites_seed={any(seed in r for r in refs)}")
+PY
+```
+If it prints `SEED_MISMATCH`, do **not** accept the `OK`: record it in `entrypoints.failed[]` with `reason: "seed-mismatch"`, re-add `(epId, persona)` to `remaining[]`, and re-spawn that one EP (serially — see Parallelism) with a corrective note. This is the single check that turns a silent content-swap into a caught failure.
+
+**Step 4b — Semantic check.** For 2-3 unique scenario descriptions from the upserted payload, call:
 ```
 Functional_Graph_Search(uuid=projectUuid, query=<first 80 chars of description>, limit=3)
 ```
@@ -467,10 +484,13 @@ For an EP with 3 personas, multiply by 3. Plan multi-session for >20 EPs.
 ## Parallelism
 
 The Agent tool supports concurrent sub-agents in one message. Recommended:
-- Up to 3 sub-agents in flight at once
-- Group by EP — finish all personas of EP N before starting EP N+1 (so the EP's `remaining[]` entry is cleared atomically)
+- **Up to 3 sub-agents in flight at once — but never two runs that share the same seed component.** Two (EP, persona) pairs on the *same* seed file (e.g. the two personas of one EP, or an EP + its panel that render the same component) MUST run **serially**, one after the other. Same-seed siblings are the exact condition that produced content-swaps in practice (a concurrent run's scratch write clobbered its sibling's, so the file ended up with the wrong route's content). Different-seed EPs may run concurrently.
+- Group by EP — finish all personas of EP N before starting EP N+1 (so the EP's `remaining[]` entry is cleared atomically). Within an EP, run its personas **serially** (they share the seed).
+- Each sub-agent already writes to an EP-unique `OUTPUT_PATH` and keys its scratch files to that basename, and self-checks `seed-fidelity` in Phase 6; Step 4a re-asserts it parent-side. Serial same-seed execution is the belt to those suspenders — apply it, don't rely on the guards alone.
 
-> ⚠️ **Parallel-dedup race (known limitation).** Each sub-agent builds its dedup neighborhood by reading the LIVE graph *before* it writes. Concurrent siblings therefore read a pre-write snapshot and cannot see each other's about-to-be-created nodes. With the OUTCOME-ONLY inline dedup model (shared `core.md` §2), the only thing at risk is **Outcome-name convergence** — two siblings may mint slightly-different names for the same capability (e.g. "Monitor Project Progress" vs "Monitor Project Status"). Two mitigations, apply at least one:
+> ⚠️ **Two independent races — do not conflate them.**
+> **(1) Content-swap race (severe, mitigated above):** concurrent same-seed siblings can end up with each other's *content* if any scratch file is shared. Mitigation: serialize same-seed runs (above) + the agent's EP-unique paths + the `seed-fidelity` gate + Step 4a. A swap that slips through surfaces as `SEED_MISMATCH` in Step 4a → re-spawn that EP serially.
+> **(2) Parallel-dedup race (cosmetic):** each sub-agent builds its dedup neighborhood by reading the LIVE graph *before* it writes, so concurrent siblings can't see each other's about-to-be-created nodes. With the OUTCOME-ONLY inline dedup model (shared `core.md` §2), the only thing at risk is **Outcome-name convergence** — two siblings may mint slightly-different names for the same capability (e.g. "Monitor Project Progress" vs "Monitor Project Status"). Two mitigations, apply at least one:
 > 1. **Serialize shared-Outcome work** — when several personas of one EP (or several EPs) will land on the same capability/Outcome, run them sequentially rather than concurrently so the later ones read the earlier one's Outcome.
 > 2. **Rely on the mandatory reconciliation pass** (below) to merge near-duplicate Outcomes after the fan-out.
 > Below-outcome nodes are intentionally NOT deduped (coverage-first) — the parallel race collides only at the Outcome, so reconciliation is Outcome-level only and leaves below-outcome nodes as distinct coverage.

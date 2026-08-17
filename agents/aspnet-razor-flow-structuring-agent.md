@@ -178,6 +178,7 @@ Materialize your candidate `{payload, audit}` to a temp file and run each subcom
 CAND="$(mktemp)"; cat > "$CAND" << '__CAND_END__'
 { ...your in-memory {payload, audit}... }
 __CAND_END__
+SEED_REL="${SEED_FILE#"$REPO_ROOT"/}"   # repo-relative seed (.cshtml) for the seed-fidelity gate
 run() { python3 "$SHARED_FUNCTIONAL_PATH/validate.py" "$@" < "$CAND"; }
 run schema                              # exit 2 on schema violations
 run rule-a --kind human                 # exit 2 if a network-verb action lacks apis[]
@@ -186,7 +187,10 @@ run descriptions                        # exit 2 if any scenario/action descript
 run forbidden                           # exit 2 on a forbidden UI word in an action name
 run citations --repo-name "$INDEXED_REPO_NAME"   # exit 2 if a reference lacks the <repo>/ prefix, sits on persona/outcome, OR a scenario/step/action has NO citation (all three levels are MANDATORY)
 run field-coverage                      # exit 2 if a declared field is uncovered
+run seed-fidelity --repo-name "$INDEXED_REPO_NAME" --seed "$SEED_REL"   # exit 2 if the payload does NOT anchor to its own SEED_FILE (the .cshtml view)
 ```
+> **`seed-fidelity` is the anti-swap / anti-overreach gate — a failure is a STOP, not a cosmetic fix.** It fails when no citation references `SEED_FILE` (the assigned `.cshtml` view) or its feature directory. Serious causes: (a) the in-memory payload is a **different EP's** content — a concurrent sibling clobbered a shared temp file; re-derive from `SEED_FILE`, never trust a buffer citing another view — or (b) you imported a **sibling view's** content to pad a thin page. Fix by describing the surface `SEED_FILE` (+ its action/PageModel) actually renders; if genuinely thin, emit a minimal subtree and set `audit.thinForPersona = true`.
+
 Exit **2** → read `errors[]` (each carries a `fix`), repair in-place using the repair-reference table, re-run. Max **2 passes**, then `FAIL_VALIDATE` with `last_check`. Exit **3** or `SHARED_FUNCTIONAL_PATH` unreadable → append `audit.warnings[] {type:"validators_unavailable"}`, set `audit.validatorsRun=false`, rely on the reasoning table.
 
 ### The REPAIR REFERENCE — reasoning checks + repair guide (what no script can judge)
@@ -210,21 +214,22 @@ cat > "$OUTPUT_PATH" << '__OUTPUT_END__'
 __OUTPUT_END__
 python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$OUTPUT_PATH" && echo OK
 ```
-Single-quoted sentinel (no `$` expansion). Do not echo the JSON after writing.
+Single-quoted sentinel (no `$` expansion). Do not echo the JSON after writing. **Write ONLY to `OUTPUT_PATH` (or stage to `"$OUTPUT_PATH".tmp` then `mv`) — never a fixed/shared filename, never another EP's path; concurrent siblings collide on a shared name.** After writing, re-open `OUTPUT_PATH` and confirm the persona and ≥1 citation reference `SEED_FILE`; if not, regenerate rather than upsert a contaminated buffer.
 
 ## Phase 8 — Upsert + report
-Build the body via python (do NOT cat OUTPUT_PATH into a shell var), then POST:
+Build the body via python (do NOT cat OUTPUT_PATH into a shell var), then POST. Key scratch files to the EP-unique OUTPUT_PATH basename, never to `${PERSONA}/$$` (concurrent siblings collide):
 ```bash
-BODY_PATH="/tmp/upsert_body_${PERSONA}_$$.json"
+STEM="$(basename "$OUTPUT_PATH" .json)"
+BODY_PATH="/tmp/upsert_body_${STEM}.json"
 python3 -c "import json; s=json.load(open('$OUTPUT_PATH')); json.dump({'payload':s['payload'],'project':{'uuid':'$PROJECT_UUID','name':'$PROJECT_NAME'},'skipStepAndAction':False}, open('$BODY_PATH','w'))"
-RESP_PATH="/tmp/upsert_resp_${PERSONA}_$$.json"
+RESP_PATH="/tmp/upsert_resp_${STEM}.json"
 HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" -X POST "$API_BASE/functional-graph/v2/upsert?embedding=true&llmPlatform=$LLM_PLATFORM" -H "api-key: $API_KEY" -H "Content-Type: application/json" --data-binary "@$BODY_PATH")
 ```
 Auth header is `api-key:` (lowercase, no `Bearer`). `5xx` → sleep 15, retry once; `4xx` → do not retry. On `2xx` extract `data.functionalId`.
 
 **Final message = ONE line, plain text, no payload echo, api-key NEVER shown:**
 - Success: `OK · outcomes: <N> · scenarios: <N> · steps: <N> · actions: <N> · apis: <N> · cgs: <N> · http: <STATUS> · functionalId: <id> · path: <OUTPUT_PATH>`
-- `FAIL_VALIDATE · errors: <n> · last_check: <schema|rule-a|chain|forbidden|citations|route-url> · path: <OUTPUT_PATH>`
+- `FAIL_VALIDATE · errors: <n> · last_check: <schema|rule-a|chain|forbidden|citations|route-url|seed-fidelity> · path: <OUTPUT_PATH>`
 - `FAIL_WRITE · <path> · <error>` / `FAIL_UPSERT · http: <status> · path: <OUTPUT_PATH> · note: <first 100 chars of resp>`
 
 After the summary line, stop.
