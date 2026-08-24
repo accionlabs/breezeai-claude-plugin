@@ -1,21 +1,27 @@
 {
-    "name": "breezeai-plugins",
-    "owner": {
-      "name": "Accion Labs",
-      "email": "contact@accionlabs.com"
-    },
-    "plugins": [
-      {
-        "name": "breeze",
-        "source": "./",
-        "description": "Breeze AI — functional graph, code graph, design analysis, and requirement tracing skills via MCP",
-        "version": "3.8.1",
-        "author": {
-          "name": "Accion Breeze"
-        },
-        "homepage": "https://github.com/accionlabs/breezeai-claude-plugin",
-        "repository": "https://github.com/accionlabs/breezeai-claude-plugin",
-        "keywords": ["breeze", "ontology", "functional-graph", "mcp", "design-analysis"]
-      }
-    ]
-  }
+  "name": "breezeai-plugins",
+  "owner": {
+    "name": "Accion Labs",
+    "email": "contact@accionlabs.com"
+  },
+  "plugins": [
+    {
+      "name": "breeze",
+      "source": "./",
+      "description": "Breeze AI — functional graph, code graph, design analysis, and requirement tracing skills via MCP",
+      "version": "3.9.1",
+      "author": {
+        "name": "Accion Breeze"
+      },
+      "homepage": "https://github.com/accionlabs/breezeai-claude-plugin",
+      "repository": "https://github.com/accionlabs/breezeai-claude-plugin",
+      "keywords": [
+        "breeze",
+        "ontology",
+        "functional-graph",
+        "mcp",
+        "design-analysis"
+      ]
+    }
+  ]
+}

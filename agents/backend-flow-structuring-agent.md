@@ -43,7 +43,7 @@ The parent will pass a structured block in the `prompt` argument with these fiel
 ```
 PERSONA:               <System | External System>     # mechanical — DO NOT infer a human role, DO NOT change
 ENTRY_POINT:
-  kind:                <REST | GraphQL | Queue>        # the EP type
+  kind:                <REST | GraphQL | Queue | Lambda> # the EP type (Lambda for standalone AWS Lambda handlers)
   httpMethod:          <GET | POST | ... | null>       # REST only
   url:                 <absolute route or null>        # REST only, e.g. "/v2/search/projects/export-email/xls"
   operation:           <GraphQL operation name or null># e.g. "projectById"
@@ -106,6 +106,9 @@ If `EXISTING_NEIGHBORHOOD.outcomes` is empty, the graph has nothing similar yet 
 | Webhook receiver (HMAC-validated, partner-pushes-data-in) | **External System** |
 | Payment gateway / partner API callback route | **External System** |
 | Queue consumer for a 3rd-party provider's event stream | **External System** |
+| AWS Lambda (SQS/SNS/EventBridge/DynamoDB triggered — internal) | **System** |
+| AWS Lambda (API Gateway — internal route) | **System** |
+| AWS Lambda (inbound webhook from 3rd-party, e.g. SendGrid) | **External System** |
 
 **You NEVER:** read JWT decoders, role guards, or auth middleware to derive human role names; create or propose a human persona; decide whether a controller "is or isn't called by the UI" — both cases are `System`. Auth guards/scopes/roles you find are recorded as **constraints in action descriptions**, never as personas.
 
@@ -131,19 +134,37 @@ If `EXISTING_NEIGHBORHOOD.outcomes` is empty, the graph has nothing similar yet 
 1. `Read` the SEED_FILE in full — imports, class definition, constructor (service/repository/client injections), and the full handler method body at `SEED_LINE`.
 2. **Resolve route / operation / queue identity first:**
    - REST: combine `@Controller('prefix')` + `@Get/@Post/@Put/@Delete('subpath')` into the single `absoluteUrl`. Resolve any route-prefix template literals by `Read`ing the imported config file — never leave `${...}` in the URL.
-   - GraphQL: confirm operation name, argument types, and return type against BOTH the SDL file and the resolver method signature. If they disagree, **SDL is authoritative** — note the drift in `audit.warnings[]`.
+   - GraphQL: confirm operation name, argument types, and return type against BOTH the SDL file and the resolver method signature. If they disagree, **SDL is authoritative** — note the drift in `audit.warnings[]`. For graphql-dotnet (`ObjectGraphType`), there is no SDL — the schema is code-first. The operation name is the `Field<>()` string argument; args are `QueryArgument<>` registrations; return type is the generic type parameter. For HotChocolate, the schema is also code-first — operation is the method name, args are method parameters.
+     - **`@ResolveField` grouped mutations/queries (NestJS code-first):** When a root `@Mutation(() => StubType)` or `@Query(() => StubType)` returns an empty stub object (e.g. `return new NotificationsMutation()`) and the real operations are `@ResolveField()` methods on the SAME resolver class, the entry point is the `@ResolveField` method — NOT the parent `@Mutation`/`@Query`. Read every `@ResolveField` in the class to understand the full set of operations. Each `@ResolveField` is its own flow with its own service call chain, validation, side effects, and error paths. The operation name is `<StubType>.<fieldName>` (e.g. `NotificationsMutation.create`, `NotificationsMutation.markAsRead`). The parent mutation/query is just a routing stub and should NOT appear as its own scenario.
    - Queue: resolve the queue/topic/pattern from env vars or config tokens by `Read`ing the config module — never leave `${QUEUE_URL}` unresolved.
+   - **Lambda handler (no decorators):** When the seed file is a Lambda handler (plain `export const handler` with an AWS event type signature like `SQSHandler` or `APIGatewayProxyHandlerV2`), there are no decorators. These use `NestFactory.createApplicationContext(...)` (headless — no HTTP listener) NOT `NestFactory.create(...)` + `app.listen()` (which is a server). Read the handler function body to understand: (a) the NestJS module it bootstraps, (b) the service class it `app.get()`s, (c) the service method it calls. The service class IS the handler's business logic — drill into it as you would a controller's injected service. The event type signature tells you the inbound surface for the `Receive`/`Consume` action's `apis[]`.
 3. **Component-import drill-down (Rule B — mandatory):** for EVERY service, repository, or client injected into the handler's constructor, `Read` the file before drafting scenarios. Walk one or two hops deep through the call chain. If you intentionally skip a leaf utility, record it in `audit.skippedDependencies[]` with a one-line reason.
-4. For GraphQL resolvers also `Read` the SDL file, any `@Directive` implementations, and DataLoader/batching wrappers.
+4. For GraphQL resolvers also `Read` the SDL file (if schema-first), any `@Directive` / authorization rule implementations, and DataLoader/DataStore/batching wrappers. For graphql-dotnet, read the DataLoader classes under `GraphQL/DataLoaders/` and DataStore classes under `GraphQL/DataStores/` that the resolver references. For MediatR-based resolvers, `Grep` for the `IRequestHandler<>` implementation and read its `Handle()` method.
 5. Stop reading when: the handler body is fully understood, every injected dependency is read, every side effect is traceable to a file, and every request/response DTO is resolved.
 6. Record every file you read in `audit.filesRead`.
 7. Record every file you considered and skipped in `audit.skippedComponents[]` with a one-line reason.
 
-**.NET / C# idioms (when the repo is .NET — ASMX / WCF / Web API).** The paradigm is identical (handler → injected services → side effects); read it with these mappings:
-- **Handler** — the `[WebMethod]` method (`.asmx.cs`), the `[OperationContract]` implementation on the service class (`.svc.cs`, or a class implementing the `[ServiceContract]` interface), or the `[ApiController]` action. The class is often **partial** — also read the matching `.designer.cs`.
-- **Operation identity** — for SOAP the `absoluteUrl` is `<Service>.asmx/<Operation>` (ASMX) or `<IContract>/<Operation>` (WCF; resolve the endpoint address from `<system.serviceModel>` in `web.config`/`app.config`). Set `apis[i].type = "SOAP"` (use `REST` only for `[WebGet]`/`[WebInvoke]`/Web API actions).
-- **Dependency injection** — constructor injection (as in Node), but also **property injection** and container registration (`Startup.cs` / `Global.asax` / Autofac/Unity/Ninject/Castle modules, or `web.config`). If a dependency is resolved via a container or a static `ServiceLocator`/`DependencyResolver`, `Grep`/`Code_Graph_Search` the registration to find the concrete implementation, then read it.
-- **Data access (side effects)** — Entity Framework `DbContext` (LINQ + `SaveChanges()` → entity/table), ADO.NET (`SqlCommand` / stored-procedure name → table/proc), Dapper, or a repository class. Record the EF entity/table or the SQL command / stored-proc name as the DB identifier in Phase 3, exactly as you would a TypeORM repository + table.
+**.NET / C# idioms (when the repo is .NET — ASMX / WCF / Web API / ASP.NET Core).** The paradigm is identical (handler → injected services → side effects); read it with these mappings:
+- **Handler** — the `[WebMethod]` method (`.asmx.cs`), the `[OperationContract]` implementation on the service class (`.svc.cs`, or a class implementing the `[ServiceContract]` interface), the `[ApiController]` action, OR a **graphql-dotnet `Field<>()` resolver lambda** (see below). The class is often **partial** — also read the matching `.designer.cs`.
+- **Operation identity** — for SOAP the `absoluteUrl` is `<Service>.asmx/<Operation>` (ASMX) or `<IContract>/<Operation>` (WCF; resolve the endpoint address from `<system.serviceModel>` in `web.config`/`app.config`). Set `apis[i].type = "SOAP"` (use `REST` only for `[WebGet]`/`[WebInvoke]`/Web API actions). For GraphQL the operation is `Query.<fieldName>` or `Mutation.<fieldName>`.
+- **Dependency injection** — constructor injection (as in Node), but also **property injection** and container registration (`Startup.cs` / `Program.cs` / `Global.asax` / Autofac/Unity/Ninject/Castle modules, or `web.config`). If a dependency is resolved via a container or a static `ServiceLocator`/`DependencyResolver`, `Grep`/`Code_Graph_Search` the registration to find the concrete implementation, then read it. In ASP.NET Core the registrations are in `Startup.ConfigureServices()` or `Program.cs` builder via `services.AddScoped<IFoo, Foo>()` / `services.AddTransient<>()` / `services.AddSingleton<>()`.
+- **Data access (side effects)** — Entity Framework `DbContext` (LINQ + `SaveChanges()` / `SaveChangesAsync()` → entity/table), ADO.NET (`SqlCommand` / stored-procedure name → table/proc), Dapper, or a repository class. Record the EF entity/table or the SQL command / stored-proc name as the DB identifier in Phase 3, exactly as you would a TypeORM repository + table. For Entity Framework Core: the `DbContext` has `DbSet<Entity>` properties — each maps to a table. Read the DbContext class to enumerate tables.
+
+**graphql-dotnet (`ObjectGraphType`) resolver pattern (C#).** When the seed file is a graphql-dotnet resolver class (a class inheriting `ObjectGraphType` or `ObjectGraphType<T>`):
+- The "handler" is the `resolve:` lambda or method reference inside a `Field<>()` / `FieldAsync<>()` call in the constructor. There are no decorators — the field name string IS the operation name.
+- The resolve lambda typically: (a) extracts arguments via `context.GetArgument<T>("argName")`, (b) calls an injected service or `IMediator.Send(new XxxCommand(...))`, (c) returns the result.
+- **Constructor injection:** The class takes services via constructor parameters (e.g. `public QueryProducts(IProductService productService, IMediator mediator)`). Read the `Startup.cs` / `ServiceCollectionExtensions.cs` to resolve interface → implementation bindings if needed.
+- **MediatR CQRS pattern:** When the resolver calls `_mediator.Send(new XxxCommand(...))`, the business logic is in the `IRequestHandler<XxxCommand, TResult>` implementation — NOT the resolver. `Grep` for `IRequestHandler<XxxCommand` to find the handler class, then read its `Handle(XxxCommand request, CancellationToken ct)` method. That method contains the validation, business rules, repository calls, and side effects.
+- **DataLoader pattern:** When the resolver calls `dataLoaderContext.GetOrAddBatchLoader<TKey, TValue>("loaderName", async (keys, ct) => ...)` or uses a named `IDataLoaderResult<T>`, the actual DB query lives in the DataLoader's batch function. Read the DataLoader class (under `GraphQL/DataLoaders/`) to find the repository/service call.
+- **DataStore pattern:** Similar to DataLoader but for custom batching. Read `GraphQL/DataStores/` classes.
+- **Authorization:** graphql-dotnet uses `this.AuthorizeWith("PolicyName")` or custom `AuthorizationRule` middleware — record in action description, NOT as a persona.
+- **Partial classes / extension methods:** Large repos split query registrations across partial classes or extension methods (e.g. `AddProductQueries(this ObjectGraphType query, ...)` called from the root Query constructor). Follow the method call to find the actual `Field<>()` registrations.
+
+**HotChocolate resolver pattern (C#).** When the seed file uses HotChocolate attributes:
+- Classes annotated with `[QueryType]`, `[MutationType]`, `[SubscriptionType]`, or `[ExtendObjectType(typeof(Query))]`.
+- Each public method = one resolver. Method parameters are automatically mapped to GraphQL arguments.
+- `[UseFiltering]`, `[UseSorting]`, `[UsePaging]` attributes indicate IQueryable-based resolvers that EF translates to SQL.
+- `[Authorize("PolicyName")]` on methods = auth constraint for action description.
 
 ### Phase 2 — Field & enum enumeration (mandatory)
 
@@ -580,6 +601,15 @@ json.dump(body, open('$BODY_PATH', 'w'))
 ```
 
 This is the clipping-avoidance contract: the payload travels **disk → curl → HTTP**, never as a tool-call argument, so large backend trees are never truncated.
+
+### Step 1b — Validate body wrapper (HARD gate, runs on BODY_PATH not on OUTPUT_PATH)
+
+```bash
+if [[ -n "$VALIDATORS_PATH" && -f "$VALIDATORS_PATH/validate.py" ]]; then
+  python3 "$VALIDATORS_PATH/validate.py" wrapper < "$BODY_PATH" \
+    || { echo "FAIL_WRAPPER · body missing project/payload wrapper — abort"; exit 1; }
+fi
+```
 
 ### Step 2 — POST with the `api-key:` header
 

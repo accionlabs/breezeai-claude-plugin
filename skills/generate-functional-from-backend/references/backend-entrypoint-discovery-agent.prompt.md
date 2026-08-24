@@ -22,4 +22,4 @@ INDEXED_REPO_NAME:     {{indexed_repo_name}}
 OUTPUT_PATH:           {{output_path}}
 EXISTING_PERSONAS:     {{existing_personas_json}}
 
-Inventory every REST route, GraphQL operation, and queue/event/cron handler (plus orphans) under REPO.root. Flag GraphQL operations as `needs_confirmation` (do NOT wait for input). Write the full inventory to OUTPUT_PATH and return ONLY the `OK · …` / `FAIL_…` summary line per the agent's Phase 7 spec.
+Inventory every REST route, GraphQL operation, queue/event/cron handler, and AWS Lambda handler (plus orphans) under REPO.root. Detect monorepo layout (nest-cli.json, nx.json, etc.) and scan all application roots (apps/*/src/) — not just src/. For NestJS code-first GraphQL with @ResolveField grouped mutations/queries, treat each @ResolveField as a separate operation. Flag GraphQL operations as `needs_confirmation` (do NOT wait for input). Write the full inventory to OUTPUT_PATH and return ONLY the `OK · …` / `FAIL_…` summary line per the agent's Phase 7 spec.

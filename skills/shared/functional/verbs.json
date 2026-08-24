@@ -63,7 +63,18 @@
     "<Button\\b", "<IconButton\\b", "<Input\\b", "<TextField\\b", "<TextArea\\b", "<Textarea\\b",
     "<Select\\b", "<MenuItem\\b", "<Checkbox\\b", "<Switch\\b", "<Toggle\\b", "<Radio\\b",
     "<Autocomplete\\b", "<DatePicker\\b", "<TimePicker\\b", "<Slider\\b", "<Tabs\\b", "<Stepper\\b",
-    "<Dialog\\b", "<Drawer\\b", "<Sheet\\b", "<Popover\\b", "<DropdownMenu\\b", "<ContextMenu\\b", "<Form\\b"
+    "<Dialog\\b", "<Drawer\\b", "<Sheet\\b", "<Popover\\b", "<DropdownMenu\\b", "<ContextMenu\\b", "<Form\\b",
+    "<mat-button\\b", "<mat-raised-button\\b", "<mat-icon-button\\b", "<mat-fab\\b", "<mat-mini-fab\\b",
+    "<mat-form-field\\b", "<mat-input\\b", "<mat-select\\b", "<mat-option\\b", "<mat-checkbox\\b",
+    "<mat-radio-button\\b", "<mat-radio-group\\b", "<mat-slide-toggle\\b", "<mat-slider\\b",
+    "<mat-autocomplete\\b", "<mat-datepicker\\b", "<mat-dialog\\b", "<mat-dialog-content\\b",
+    "<mat-sidenav\\b", "<mat-drawer\\b", "<mat-tab-group\\b", "<mat-tab\\b", "<mat-stepper\\b",
+    "<mat-menu\\b", "<mat-menu-item\\b", "<mat-card\\b", "<mat-expansion-panel\\b", "<mat-chip\\b",
+    "<mat-paginator\\b", "<mat-sort-header\\b", "<mat-table\\b",
+    "\\(click\\)=", "\\(ngSubmit\\)=", "\\(change\\)=", "\\(input\\)=", "\\(selectionChange\\)=",
+    "\\[formGroup\\]", "\\[formControl\\]", "formControlName=", "\\[\\(ngModel\\)\\]",
+    "\\[routerLink\\]", "routerLink=",
+    "<button\\s+mat-", "<a\\s+mat-"
   ],
 
   "api_types": ["REST", "GraphQL", "gRPC", "WebSocket", "Event", "SOAP"],
@@ -82,6 +93,7 @@
     "forbidden_persona_names": "15 from validate-graph.py + metadata-engine/tech names {devops, verticle, filter, webappengine, engine}. A human persona name must contain NONE of these as a standalone word.",
     "identifier_patterns": "Backend rule-a fallback: a side-effect action with empty apis[] is still OK if its description names a Repository/table/entity/index/bucket/collection or an s3://|sqs://|kafka://|rabbit:// URI or an -> / → transform arrow.",
     "api_types": "apis[].type is FREE TEXT server-side (no enum enforced — PersonaDto uses @IsString). REST/GraphQL/gRPC/WebSocket/Event are the schema-validated set; SOAP is the recommended extension for ASP.NET/WCF/ASMX. See core.md § apis[] join models for the per-stack mapping.",
+    "widget_patterns": "Two families: (1) JSX/React component tags (<Button, <Dialog, etc.) and (2) Angular Material tags (<mat-button, <mat-form-field, etc.) plus Angular template bindings ((click)=, (ngSubmit)=, [formGroup], [(ngModel)], routerLink). The coverage advisory check in validate.py matches these patterns against seed files. For Angular apps, also matches attribute-style Material buttons (<button mat-, <a mat-). Both families use word-boundary regex (\\b) or escaped Angular syntax (\\(, \\[).",
     "overlap_keywords": "PROJECT-SPECIFIC (these are a finance project's domain terms). validate-graph.py's cross-persona-overlap check should read these from project config, not hard-code them. Kept here as the legacy default so behaviour does not change; tune per project."
   }
 }

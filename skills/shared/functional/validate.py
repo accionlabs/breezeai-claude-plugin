@@ -26,6 +26,7 @@ Usage:
   cat payload.json | validate.py api-urls --repo-root <path>
   cat payload.json | validate.py path-linked                       # verb+route/URI in action name ⇒ apis[] required
   cat payload.json | validate.py descriptions                      # every scenario AND action must have a non-empty description
+  cat body.json    | validate.py wrapper                           # HTTP body must be {payload,project:{uuid,name},skipStepAndAction} not bare {personas:[…]}
 """
 import sys, os, json, re, argparse
 
@@ -311,10 +312,15 @@ def cmd_coverage(full, args):
         if ratio < 0.90:
             unmatched = [s.get("identifier") for s in se if not s.get("matchedToAction")]
             warns.append({"side_effect_coverage": round(ratio, 3), "unmatched": unmatched})
-    else:  # human — JSX widget seed-file
+    else:  # human — JSX/Angular template widget seed-file
         if not args.seed_file or not os.path.exists(args.seed_file):
-            finish(True, warnings=["--seed-file missing — JSX coverage not asserted"], hard=False)
+            finish(True, warnings=["--seed-file missing — widget coverage not asserted"], hard=False)
         src = open(args.seed_file, encoding="utf-8", errors="ignore").read()
+        # Angular: also read the paired .component.html template if the seed is a .component.ts
+        if args.seed_file.endswith(".component.ts"):
+            html_path = args.seed_file.replace(".component.ts", ".component.html")
+            if os.path.exists(html_path):
+                src += "\n" + open(html_path, encoding="utf-8", errors="ignore").read()
         total = sum(len(re.findall(p, src)) for p in WIDGET_PATTERNS)
         action_count = sum(1 for _ in iter_actions(payload))
         ratio = 1.0 if total == 0 else action_count / total
@@ -323,7 +329,11 @@ def cmd_coverage(full, args):
     finish(True, warnings=warns, hard=False)
 
 def _url_needle(url):
-    u = re.split(r"\s*\(", str(url))[0]
+    u = str(url)
+    # GraphQL operation names (Query.opName / Mutation.opName) — search for the operation name
+    if re.match(r"^(Query|Mutation)\.\w+$", u):
+        return u.split(".", 1)[1]  # just the operation name
+    u = re.split(r"\s*\(", u)[0]
     u = re.split(r"[?#]", u)[0]
     segs = [s for s in u.split("/") if s and not s.startswith("{") and not s.startswith(":")]
     return "/".join(segs[-3:]) if segs else None
@@ -337,7 +347,7 @@ def cmd_api_urls(full, args):
     for dp, dn, fn in os.walk(root):
         dn[:] = [d for d in dn if d not in ("node_modules", ".git", "dist", "build")]
         for f in fn:
-            if f.endswith((".js", ".jsx", ".ts", ".tsx", ".vue")):
+            if f.endswith((".js", ".jsx", ".ts", ".tsx", ".vue", ".html")):
                 try:
                     src.append(open(os.path.join(dp, f), encoding="utf-8", errors="ignore").read())
                 except Exception:
@@ -414,12 +424,40 @@ def cmd_descriptions(full, args):
     finish(not errs, errs)
 
 
+def cmd_wrapper(full, args):
+    """HARD gate: the upsert HTTP body must be the full wrapper shape
+    { "payload": {…}, "project": {"uuid": "…", "name": "…"}, "skipStepAndAction": bool }
+    not a bare { "personas": […] }. A bare payload returns HTTP 500 — the server cannot
+    resolve the project. Run this on BODY_PATH (the file sent to curl), not on the
+    internal {payload,audit} object used in Phase 6."""
+    errs = []
+    if not isinstance(full, dict):
+        finish(False, [{"missing": "root", "fix": "body must be a JSON object"}])
+        return
+    if not isinstance(full.get("payload"), dict):
+        errs.append({"missing": "payload",
+                     "fix": "wrap personas: {\"payload\":{\"personas\":[...]},\"project\":{\"uuid\":\"…\",\"name\":\"…\"},\"skipStepAndAction\":false}"})
+    proj = full.get("project")
+    if not isinstance(proj, dict):
+        errs.append({"missing": "project",
+                     "fix": "add \"project\":{\"uuid\":\"<projectUuid>\",\"name\":\"<projectName>\"}"})
+    else:
+        if not (isinstance(proj.get("uuid"), str) and proj["uuid"].strip()):
+            errs.append({"missing": "project.uuid", "fix": "project.uuid must be a non-empty string"})
+        if not (isinstance(proj.get("name"), str) and proj["name"].strip()):
+            errs.append({"missing": "project.name", "fix": "project.name must be a non-empty string"})
+    if "skipStepAndAction" not in full:
+        errs.append({"missing": "skipStepAndAction", "fix": "add \"skipStepAndAction\":false"})
+    finish(not errs, errs)
+
+
 COMMANDS = {
     "schema": cmd_schema, "rule-a": cmd_rule_a, "forbidden": cmd_forbidden,
     "persona": cmd_persona, "citations": cmd_citations,
     "field-coverage": cmd_field_coverage, "citation-completeness": cmd_citation_completeness,
     "atomicity": cmd_atomicity, "coverage": cmd_coverage, "api-urls": cmd_api_urls,
     "path-linked": cmd_path_linked, "descriptions": cmd_descriptions,
+    "wrapper": cmd_wrapper,
 }
 
 def main():

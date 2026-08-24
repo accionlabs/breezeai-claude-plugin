@@ -217,6 +217,10 @@ Build the body via python (do NOT cat OUTPUT_PATH into a shell var), then POST:
 ```bash
 BODY_PATH="/tmp/upsert_body_${PERSONA}_$$.json"
 python3 -c "import json; s=json.load(open('$OUTPUT_PATH')); json.dump({'payload':s['payload'],'project':{'uuid':'$PROJECT_UUID','name':'$PROJECT_NAME'},'skipStepAndAction':False}, open('$BODY_PATH','w'))"
+if [[ -n "$VALIDATORS_PATH" && -f "$VALIDATORS_PATH/validate.py" ]]; then
+  python3 "$VALIDATORS_PATH/validate.py" wrapper < "$BODY_PATH" \
+    || { echo "FAIL_WRAPPER · body missing project/payload wrapper — abort"; exit 1; }
+fi
 RESP_PATH="/tmp/upsert_resp_${PERSONA}_$$.json"
 HTTP_STATUS=$(curl -sS -o "$RESP_PATH" -w "%{http_code}" -X POST "$API_BASE/functional-graph/v2/upsert?embedding=true&llmPlatform=$LLM_PLATFORM" -H "api-key: $API_KEY" -H "Content-Type: application/json" --data-binary "@$BODY_PATH")
 ```

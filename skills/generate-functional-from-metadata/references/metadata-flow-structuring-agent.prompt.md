@@ -19,11 +19,14 @@ PERSONA_SYSTEM:        {{persona_system}}
 MAPL_PATH:             {{mapl_path}}
 STEPS:                 {{steps_json}}
 AJAX_ENDPOINTS:        {{ajax_endpoints_json}}
+UNDECLARED_ENTRY_POINTS: {{undeclared_entry_points_json}}
+SHARED_FRAMEWORK_BRIEF:
+{{shared_framework_brief}}
 PROJECT_UUID:          {{project_uuid}}
 PROJECT_NAME:          {{project_name}}
 LLM_PLATFORM:          {{llm_platform}}
 API_BASE:              {{api_base}}
-API_KEY:               {{api_key}}
+API_KEY_FILE:          {{api_key_file}}   # path to JSON holding `apiKey` — read it at POST time; never inline the literal
 HUMAN_UPSERT_PATH:     {{human_upsert_path}}
 SYSTEM_UPSERT_PATH:    {{system_upsert_path}}
 OUTPUT_PATH_HUMAN:     {{output_path_human}}
