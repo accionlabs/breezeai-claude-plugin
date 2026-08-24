@@ -39,11 +39,12 @@
       "WebFetch(domain:www.morphllm.com)",
       "WebFetch(domain:www.ssdnodes.com)",
       "WebFetch(domain:teamcopilot.ai)",
-      "Bash(ls -1 skills/generate-design-from-ui/references/*.md)"
+      "Bash(ls -1 skills/generate-design-from-ui/references/*.md)",
+      "mcp__breeze-mcp__Get_Functional_Nodes_By_Label"
     ]
   },
-  "disabledMcpjsonServers": [],
   "enabledMcpjsonServers": [
     "breeze-mcp"
-  ]
+  ],
+  "disabledMcpjsonServers": []
 }
