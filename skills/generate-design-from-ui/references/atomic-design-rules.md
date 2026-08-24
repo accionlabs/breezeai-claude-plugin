@@ -791,6 +791,223 @@ Before classifying a component, ask:
 
 ---
 
+## Angular-Specific Classification
+
+Angular components look very different from React/Vue. Use these rules
+when `FRAMEWORK` is `angular`.
+
+### How Angular Maps to Atomic Design
+
+| Angular Concept | Atomic Design Signal | Why |
+|---|---|---|
+| `@Component` with one HTML element, no `@Input`/`@Output` beyond label/style | **ATOM** | Thin wrapper, no logic |
+| `@Component` with 2-4 `@Input()` props, no services injected, no `signal()`/`computed()` | **MOLECULE** | Small composed unit |
+| `@Component` with injected services (`inject()` or constructor DI), `signal()`, `BehaviorSubject`, `FormGroup` | **ORGANISM** | Self-contained with state |
+| `@Component` with `<ng-content>` / `<router-outlet>` / named slots, layout-only template | **TEMPLATE** | Page-level layout skeleton |
+
+### State Management Detection (Angular)
+
+In React, `useState`/`useReducer` signal state. In Angular, look for:
+
+```typescript
+// Signals (Angular 16+) → ORGANISM
+count = signal(0)
+doubled = computed(() => this.count() * 2)
+effect(() => console.log(this.count()))
+
+// Reactive forms → ORGANISM
+form = new FormGroup({
+  email: new FormControl('', Validators.required),
+  password: new FormControl('')
+})
+// or inject(FormBuilder)
+form = this.fb.group({ email: ['', Validators.required] })
+
+// Service injection with state → ORGANISM
+constructor(private store: Store<AppState>) {}        // NgRx
+constructor(private userService: UserService) {}       // Custom service with BehaviorSubject
+private authService = inject(AuthService)              // inject() function (Angular 14+)
+
+// Observable subscriptions → ORGANISM
+data$ = this.http.get<Item[]>('/api/items')
+items$ = this.store.select(selectItems)
+
+// BehaviorSubject in service (treat component that subscribes as ORGANISM)
+private _items = new BehaviorSubject<Item[]>([])
+items$ = this._items.asObservable()
+```
+
+**No state signals → likely ATOM or MOLECULE:**
+```typescript
+// Pure presentational — ATOM or MOLECULE
+@Component({
+  selector: 'app-badge',
+  template: `<span [class]="variant">{{ label }}</span>`
+})
+export class BadgeComponent {
+  @Input() label = ''
+  @Input() variant: 'info' | 'warning' = 'info'
+}
+```
+
+### @Input / @Output Analysis
+
+| Pattern | Classification |
+|---|---|
+| 0-2 `@Input()`, 0 `@Output()`, no services | **ATOM** |
+| 2-4 `@Input()`, 0-1 `@Output()`, no services | **MOLECULE** |
+| 3+ `@Input()`, 1+ `@Output()`, injected services | **ORGANISM** |
+| `<ng-content>` or `<router-outlet>`, layout template | **TEMPLATE** |
+
+### Angular Component Examples
+
+**ATOM:**
+```typescript
+@Component({
+  selector: 'app-icon-button',
+  standalone: true,
+  template: `
+    <button [class]="variant" (click)="clicked.emit()">
+      <mat-icon>{{ icon }}</mat-icon>
+    </button>
+  `
+})
+export class IconButtonComponent {
+  @Input() icon = ''
+  @Input() variant = 'default'
+  @Output() clicked = new EventEmitter<void>()
+}
+```
+
+**MOLECULE:**
+```typescript
+@Component({
+  selector: 'app-search-bar',
+  standalone: true,
+  imports: [MatInputModule, MatIconModule, MatButtonModule],
+  template: `
+    <mat-form-field>
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput [placeholder]="placeholder" [(ngModel)]="query">
+      <button mat-icon-button matSuffix (click)="onSearch()">
+        <mat-icon>arrow_forward</mat-icon>
+      </button>
+    </mat-form-field>
+  `
+})
+export class SearchBarComponent {
+  @Input() placeholder = 'Search...'
+  @Output() search = new EventEmitter<string>()
+  query = ''
+  onSearch() { this.search.emit(this.query) }
+}
+```
+
+**ORGANISM:**
+```typescript
+@Component({
+  selector: 'app-user-table',
+  standalone: true,
+  imports: [MatTableModule, MatPaginatorModule, MatSortModule],
+  templateUrl: './user-table.component.html'
+})
+export class UserTableComponent implements OnInit {
+  private userService = inject(UserService)
+  
+  displayedColumns = ['name', 'email', 'role', 'actions']
+  dataSource = new MatTableDataSource<User>()
+  
+  // Signals
+  loading = signal(true)
+  selectedUsers = signal<User[]>([])
+  
+  @ViewChild(MatPaginator) paginator!: MatPaginator
+  @ViewChild(MatSort) sort!: MatSort
+  
+  ngOnInit() {
+    this.userService.getAll().subscribe(users => {
+      this.dataSource.data = users
+      this.loading.set(false)
+    })
+  }
+  
+  ngAfterViewInit() {
+    this.dataSource.paginator = this.paginator
+    this.dataSource.sort = this.sort
+  }
+}
+```
+
+**TEMPLATE:**
+```typescript
+@Component({
+  selector: 'app-form-page-layout',
+  standalone: true,
+  imports: [RouterOutlet],
+  template: `
+    <div class="form-page-layout">
+      <header class="page-header">
+        <ng-content select="[header]"></ng-content>
+      </header>
+      <main class="form-container">
+        <ng-content select="[form]"></ng-content>
+      </main>
+      <footer class="form-actions">
+        <ng-content select="[actions]"></ng-content>
+      </footer>
+    </div>
+  `
+})
+export class FormPageLayoutComponent {}
+```
+
+### Angular Material / CDK Classification
+
+| Component | Type | Why |
+|---|---|---|
+| `<mat-button>`, `<mat-icon>`, `<mat-checkbox>` | **ATOM** | Single element wrappers |
+| `<mat-form-field>` (with `<input matInput>` + `<mat-label>` + `<mat-error>`) | **MOLECULE** | 2-4 atoms composed |
+| `<mat-table>` with sort + paginator + selection | **ORGANISM** | Complex state management |
+| `<mat-tab-group>` with content panels | **ORGANISM** | Manages active tab state |
+| `<mat-dialog>` wrapper with form inside | **ORGANISM** | Modal with own state |
+| `<mat-sidenav-container>` layout | **TEMPLATE** | Layout structure only |
+| `<mat-toolbar>` + `<mat-sidenav>` + `<router-outlet>` | **TEMPLATE** | Page shell |
+
+### Standalone vs NgModule Components
+
+Both are classified the same way — the module system doesn't affect
+atomic design level. However:
+
+- **Standalone** (`standalone: true`): Read `imports` array for composition
+- **NgModule-based**: Read the module's `declarations` + `imports` for composition
+- In both cases, the component template is the source of truth for
+  `supportingComponents`
+
+### Angular Decision Tree
+
+```
+START: Looking at an Angular @Component
+
+Is it a single Material/HTML element wrapper?
+  @Input() for label/icon/variant only, no services
+  YES → ATOM
+
+Does it use <ng-content> / <router-outlet> for layout?
+  No business logic, just structural slots
+  YES → TEMPLATE
+
+Does it inject services, use signals/BehaviorSubject, or have FormGroup?
+  YES → ORGANISM
+
+Does it compose 2-4 child components with minimal state?
+  YES → MOLECULE
+
+Does it have 5+ child components or complex template logic?
+  YES → ORGANISM
+```
+
+---
+
 ## Further Reading
 
 - [Atomic Design by Brad Frost](https://atomicdesign.bradfrost.com/)
