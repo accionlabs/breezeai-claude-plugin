@@ -312,10 +312,15 @@ def cmd_coverage(full, args):
         if ratio < 0.90:
             unmatched = [s.get("identifier") for s in se if not s.get("matchedToAction")]
             warns.append({"side_effect_coverage": round(ratio, 3), "unmatched": unmatched})
-    else:  # human — JSX widget seed-file
+    else:  # human — JSX/Angular template widget seed-file
         if not args.seed_file or not os.path.exists(args.seed_file):
-            finish(True, warnings=["--seed-file missing — JSX coverage not asserted"], hard=False)
+            finish(True, warnings=["--seed-file missing — widget coverage not asserted"], hard=False)
         src = open(args.seed_file, encoding="utf-8", errors="ignore").read()
+        # Angular: also read the paired .component.html template if the seed is a .component.ts
+        if args.seed_file.endswith(".component.ts"):
+            html_path = args.seed_file.replace(".component.ts", ".component.html")
+            if os.path.exists(html_path):
+                src += "\n" + open(html_path, encoding="utf-8", errors="ignore").read()
         total = sum(len(re.findall(p, src)) for p in WIDGET_PATTERNS)
         action_count = sum(1 for _ in iter_actions(payload))
         ratio = 1.0 if total == 0 else action_count / total
@@ -324,7 +329,11 @@ def cmd_coverage(full, args):
     finish(True, warnings=warns, hard=False)
 
 def _url_needle(url):
-    u = re.split(r"\s*\(", str(url))[0]
+    u = str(url)
+    # GraphQL operation names (Query.opName / Mutation.opName) — search for the operation name
+    if re.match(r"^(Query|Mutation)\.\w+$", u):
+        return u.split(".", 1)[1]  # just the operation name
+    u = re.split(r"\s*\(", u)[0]
     u = re.split(r"[?#]", u)[0]
     segs = [s for s in u.split("/") if s and not s.startswith("{") and not s.startswith(":")]
     return "/".join(segs[-3:]) if segs else None
@@ -338,7 +347,7 @@ def cmd_api_urls(full, args):
     for dp, dn, fn in os.walk(root):
         dn[:] = [d for d in dn if d not in ("node_modules", ".git", "dist", "build")]
         for f in fn:
-            if f.endswith((".js", ".jsx", ".ts", ".tsx", ".vue")):
+            if f.endswith((".js", ".jsx", ".ts", ".tsx", ".vue", ".html")):
                 try:
                     src.append(open(os.path.join(dp, f), encoding="utf-8", errors="ignore").read())
                 except Exception:

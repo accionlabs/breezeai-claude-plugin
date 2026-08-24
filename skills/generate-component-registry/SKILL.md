@@ -159,7 +159,7 @@ Default: 1 (merge).
 | **Next.js** | `pages/**/*.tsx` or `app/**/page.tsx` | File path = route. **Also include `layout.tsx`/`_app.tsx` files** |
 | **Vue 2/3** | `src/router/index.{js,ts}` | `path` → `component`, **including `children: [...]` nested routes** |
 | **Nuxt** | `pages/**/*.vue` | File path = route. **Also include `layouts/*.vue`** |
-| **Angular** | `*-routing.module.ts` or `app.routes.ts` | `path` → `component`/`loadComponent`, **including parent routes with `children`** |
+| **Angular** | `*-routing.module.ts` or `app.routes.ts` | `path` → `component`/`loadComponent`/`loadChildren`, **including parent routes with `children`, route guards, resolvers** |
 | **SvelteKit** | `src/routes/**/+page.svelte` | File path = route. **Also include `+layout.svelte`** |
 
 **Steps:**
@@ -184,10 +184,74 @@ Default: 1 (merge).
    ]
    ```
 
+#### Angular-Specific Router Parsing
+
+Angular routing is more complex than other frameworks. Follow these
+additional steps when `FRAMEWORK` is Angular:
+
+**1. Find ALL routing files** — Angular apps often have multiple:
+```
+Glob for: *-routing.module.ts, *-routes.ts, app.routes.ts
+```
+There may be a root `app-routing.module.ts` plus feature-level
+routing modules (`users-routing.module.ts`, `admin-routing.module.ts`).
+
+**2. Follow `loadChildren` and `loadComponent` imports:**
+```typescript
+// Lazy-loaded module (legacy)
+{ path: 'users', loadChildren: () => import('./users/users.module').then(m => m.UsersModule) }
+// → Find UsersModule → find its routing module → extract child routes
+
+// Lazy-loaded standalone component (modern)
+{ path: 'settings', loadComponent: () => import('./settings/settings.component').then(c => c.SettingsComponent) }
+// → Resolve import path → add to uniquePages
+```
+
+**3. Resolve NX/monorepo path aliases:**
+If the repo has `tsconfig.base.json` with `paths`:
+```json
+{ "paths": { "@myorg/feature-users": ["libs/feature-users/src/index.ts"] } }
+```
+Then `loadChildren: () => import('@myorg/feature-users')` resolves
+to `libs/feature-users/src/lib/users-routing.module.ts`.
+
+**4. Extract route guards and resolvers** — these reference
+components/services that should be in the registry:
+```typescript
+{
+  path: 'admin',
+  canActivate: [AuthGuard, RoleGuard],   // → services, not components
+  resolve: { userData: UserResolver },     // → service
+  component: AdminDashboardComponent       // → page component
+}
+```
+
+**5. Angular page components live in `src/app/`, not `src/pages/`:**
+```
+Angular typical structure:
+  src/app/
+    ├── features/
+    │   ├── users/
+    │   │   ├── users.component.ts      ← page
+    │   │   ├── users.component.html    ← template
+    │   │   ├── user-detail/            ← sub-page
+    │   │   └── components/             ← page-local components
+    │   └── admin/
+    ├── shared/                          ← shared components
+    ├── core/                            ← core services/guards
+    └── app.component.ts                 ← root layout
+```
+
+**6. Include dialog/sheet components in uniquePages:**
+Grep for `MatDialog.open(X)` and `MatBottomSheet.open(X)` across
+the entire app — these open components that may not be in any route
+but still contain UI components that should be in the registry.
+
 ### 1b. Discover shared component directories
 
 Before page scanning, identify the repo's shared component directories:
 
+**React / Vue / Svelte / Next / Nuxt:**
 ```
 Glob for common shared patterns:
   src/components/**/*.{tsx,jsx,vue,svelte,ts}
@@ -197,14 +261,31 @@ Glob for common shared patterns:
   components/**/*.{tsx,jsx,vue,svelte,ts}   (Nuxt/Next)
 ```
 
+**Angular:**
+```
+Glob for Angular shared patterns:
+  src/app/shared/**/*.component.ts
+  src/app/core/**/*.component.ts
+  src/app/common/**/*.component.ts
+  src/app/ui/**/*.component.ts
+  libs/shared/**/*.component.ts             (NX monorepo)
+  libs/ui/**/*.component.ts                 (NX monorepo)
+```
+
+> **Angular file matching:** Use `*.component.ts` (not just `*.ts`)
+> to avoid matching services, guards, pipes, and other non-component
+> files. For each `.component.ts`, the agent also reads the matching
+> `.component.html` template.
+
 Record these paths — they'll be scanned in Step 2 as a dedicated
 batch alongside pages.
 
 ### 1c. Expand page directories
 
 For each page entry file, identify its directory and glob for
-sibling files that are part of the same page:
+sibling files that are part of the same page.
 
+**React / Vue / Svelte:**
 ```
 src/pages/Dashboard/
   ├── index.tsx          ← page entry (already found)
@@ -213,6 +294,31 @@ src/pages/Dashboard/
   ├── sections/          ← scan these
   └── hooks/             ← note for state analysis
 ```
+
+**Angular:**
+```
+src/app/features/users/
+  ├── users.component.ts       ← page entry (already found)
+  ├── users.component.html     ← MUST include (template)
+  ├── users.module.ts          ← read for declarations/imports
+  ├── components/              ← scan these (page-local components)
+  │   ├── user-card/
+  │   │   ├── user-card.component.ts
+  │   │   └── user-card.component.html
+  │   └── user-filter/
+  │       ├── user-filter.component.ts
+  │       └── user-filter.component.html
+  ├── dialogs/                 ← scan these (dialog components)
+  │   └── edit-user-dialog/
+  ├── services/                ← note for state analysis
+  └── models/                  ← skip (interfaces/types)
+```
+
+> **Angular dual-file rule:** For every `*.component.ts` found, ALWAYS
+> include the matching `*.component.html` in the scan list. The `.ts`
+> file has the class logic (services, state) and the `.html` has the
+> composition (child components, bindings). Missing either = incomplete
+> classification.
 
 Add all discovered files to the page's scan list.
 
@@ -309,15 +415,65 @@ For each component you find, return a JSON array:
   }
 ]
 
-Classification rules:
+## Classification Rules (React / Vue / Svelte)
+
 - ATOM: Single UI element, no internal state, no children.
   supportingComponents = []
-- MOLECULE: 2-4 atoms composed together, minimal state.
-  supportingComponents must have ≥ 2 ATOMs.
-- ORGANISM: Self-contained section with own hooks/state.
+- MOLECULE: 2-4 atoms composed together, minimal state (useState
+  for local UI only). supportingComponents must have ≥ 2 ATOMs.
+- ORGANISM: Self-contained section with own hooks/state (useState,
+  useReducer, useContext, external store).
   supportingComponents must have ≥ 2 MOLECULEs and/or ATOMs.
-- TEMPLATE: Layout-only, no business logic, just slots.
+- TEMPLATE: Layout-only, no business logic, just slots/children.
   supportingComponents must have ≥ 2 ORGANISMs.
+
+## Classification Rules (Angular)
+
+Angular components have SEPARATE .ts and .html files. Read BOTH.
+
+- ATOM: Single HTML/Material element wrapper. @Input() for
+  label/icon/variant only. No injected services. No signals.
+  Examples: <mat-button>, <mat-icon>, custom IconButtonComponent.
+  supportingComponents = []
+
+- MOLECULE: 2-4 child components composed together. Minimal state.
+  No service injection (or Router/ActivatedRoute only).
+  Examples: <mat-form-field> + <input matInput> + <mat-label>,
+  SearchBarComponent, BreadcrumbComponent.
+  supportingComponents must have ≥ 2 ATOMs.
+
+- ORGANISM: Injects services (inject(X) or constructor DI), uses
+  signal()/computed()/BehaviorSubject, has FormGroup/FormBuilder,
+  uses @ngrx/store, has @ViewChild with imperative logic.
+  Examples: DataTableComponent with MatSort + MatPaginator,
+  UserFormComponent with FormBuilder, DashboardWidgetComponent.
+  supportingComponents must have ≥ 2 MOLECULEs and/or ATOMs.
+
+- TEMPLATE: Uses <ng-content>, <router-outlet>, or named slots
+  for layout. No business logic. Defines WHERE things go.
+  Examples: <mat-sidenav-container> layout, AppShellComponent
+  with toolbar + sidenav + router-outlet.
+  supportingComponents must have ≥ 2 ORGANISMs.
+
+Angular state signals (any = ORGANISM):
+  signal(), computed(), effect()
+  new FormGroup(), inject(FormBuilder)
+  inject(Store), this.store.select() (NgRx)
+  BehaviorSubject subscriptions
+  @ViewChild with imperative DOM manipulation
+
+Angular Material shortcuts:
+  <mat-button>, <mat-icon>, <mat-checkbox> → ATOM
+  <mat-form-field> + <input matInput> → MOLECULE
+  <mat-table> with sort + paginator → ORGANISM
+  <mat-tab-group> with content panels → ORGANISM
+  <mat-dialog> content with forms → ORGANISM
+  <mat-sidenav-container> → TEMPLATE
+
+Angular naming: Use PascalCase CLASS NAME (e.g., UserTableComponent),
+NOT the kebab-case selector (e.g., app-user-table).
+
+## Common Rules (All Frameworks)
 
 ⛔ If a non-ATOM has fewer than 2 supportingComponents, it is
 likely misclassified. Re-check:
@@ -326,7 +482,9 @@ likely misclassified. Re-check:
   - 1 child TEMPLATE → probably an ORGANISM
 
 Naming: Use exact exported name or PascalCase file name.
-Skip: Skeleton, LoadSkeleton, NoData, Empty, Spinner, LoadingOverlay.
+Angular: Use PascalCase class name, NOT kebab selector.
+Skip: Skeleton, LoadSkeleton, NoData, Empty, Spinner, LoadingOverlay,
+  MatProgressSpinner, MatProgressBar (loading indicators).
 
 Read each file, extract components, classify, and return the JSON.
 ```

@@ -196,6 +196,8 @@ Do not overwrite an existing `entrypoints.json`.
 3. `Read` the router file locally
 4. `Read` the sidebar/navbar component for non-routed features
 
+**Angular-specific route discovery:** Angular apps may define routes across multiple files — a root `app.routes.ts` with lazy-loaded child routes via `loadChildren: () => import('./feature/feature.routes').then(m => m.routes)` or `loadComponent`. Follow every `loadChildren`/`loadComponent` import to discover the full route tree. Also check for `*-routing.module.ts` files in apps still using NgModule-based routing. For NX monorepos, routes may reference components from shared libraries (`@nx/libs/*`) — resolve these via the `tsconfig.base.json` `paths` aliases at the NX workspace root.
+
 **If `stack = mvc`** (ASP.NET MVC / Razor Pages — Razor server-rendered): entry points are **Razor views**, each owned by a controller action or a Razor Page handler.
 1. **MVC:** `Glob '**/Views/**/*.cshtml'` (skip `_Layout`, `_ViewStart`, `_ViewImports`, `Shared/EditorTemplates`/`DisplayTemplates`, partials `_*.cshtml`). Each feature view (`Views/Accounts/Edit.cshtml`) is an EP — `kind: mvc-action`, `route` = the controller action route (convention `/{controller}/{action}` or the `[Route]`/`[HttpX("…")]` attribute), `seed_file` = the `.cshtml`; the agent reads the matching controller action (GET+POST) + view-model.
 2. **Razor Pages:** `Glob '**/Pages/**/*.cshtml'` with a co-located `.cshtml.cs`. Each page is an EP — `kind: razor-page`, `route` = the page route, `seed_file` = the `.cshtml`; the agent reads the `PageModel` (`OnGet*`/`OnPost*`).
@@ -234,7 +236,7 @@ Group routes by domain category (e.g. Search, Pipeline, Notifications, Insights,
 
 ### Sub-step 0.6 — Discover orphaned views
 
-1. Compare every file under `src/pages/**` and `src/views/**` against routes from 0.3
+1. Compare every file under `src/pages/**`, `src/views/**`, `src/app/**/pages/**`, `src/app/**/views/**`, and `src/app/**/components/**` against routes from 0.3
 2. For unmatched files, check imports and API calls
 3. Classify each orphan as sub-component, dead code, or truly unused
 
@@ -244,9 +246,11 @@ Group routes by domain category (e.g. Search, Pipeline, Notifications, Insights,
 
 ### Sub-step 0.7 — Discover non-routed feature surfaces ⛔ HARD GATE
 
-1. Enumerate panel/drawer/modal type constants — grep for `TPanel`, `PanelType`, `DrawerType`, `ModalType`, setter calls, disclosure hooks, feature folders, `*-modal.tsx` / `*-drawer.tsx` etc.
+1. Enumerate panel/drawer/modal type constants — grep for `TPanel`, `PanelType`, `DrawerType`, `ModalType`, setter calls, disclosure hooks, feature folders, `*-modal.tsx` / `*-drawer.tsx` etc. **For Angular apps**, also grep for: `MatDialog.open(`, `MatDialogRef`, `MAT_DIALOG_DATA`, `MatBottomSheet`, `MatBottomSheetRef`, `MatSidenav`, `MatDrawer`, `DialogService`, `*-modal.component.ts`, `*-dialog.component.ts`, `*-drawer.component.ts`, and any custom `*ModalComponent` / `*DialogComponent` class names.
 2. Locate every renderer for each unique panel type string
+   For Angular, the renderer is the component class passed as the first argument to `MatDialog.open(ComponentClass, config)` — locate the `.component.ts` AND its paired `.component.html` template.
 3. Locate every trigger (`setPanelType("X")` call sites)
+   For Angular, triggers are typically `this.dialog.open(...)` calls inside component methods, invoked from template event bindings like `(click)="openDialog()"`.
 4. Read each renderer and classify as viewer or feature-rich
 5. Present discovery list to user with classifications
 6. Wait for user confirmation
@@ -261,6 +265,18 @@ Group routes by domain category (e.g. Search, Pipeline, Notifications, Insights,
 1. If backend repo is indexed in code graph, `Code_Graph_Search` for backend routes
 2. Flag backend endpoints with no frontend caller
 3. Do NOT modify the graph — just record for review
+
+---
+
+### Sub-step 0.8b — NX monorepo cross-library resolution (Angular / React NX workspaces)
+
+When the target UI app lives in an NX monorepo:
+
+1. Locate `tsconfig.base.json` at the NX workspace root — it contains `paths` aliases (e.g. `"@nx/libs/ngx-source-core": ["libs/ngx-source-core/src/index.ts"]`)
+2. When the sub-agent encounters an import from a path alias (e.g. `@nx/libs/ngx-source-components`), resolve it via the `paths` mapping to the actual library source
+3. Shared components (modals, dialogs, form components) frequently live in NX shared libraries, NOT in the app itself — the sub-agent must be able to follow these imports to read the component and its template
+4. If the entire NX workspace is indexed as a single code ontology, `Code_Graph_Search` will resolve cross-lib references automatically. If each lib is indexed separately, note which code ontology IDs cover the shared libs in `.breeze.json` under `targetRepos.sharedLibCodeOntologyIds[]` (optional — for manual scoping)
+5. Record the NX workspace root and `paths` aliases in `entrypoints.json` under `nxWorkspace: { root, pathAliases }` for the sub-agent's reference
 
 ---
 

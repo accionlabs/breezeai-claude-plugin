@@ -55,6 +55,14 @@ Begin the response with one line so the user can verify scope at a glance:
 
     Project: <name> (<uuid>)
 
+### Step 4: Load project context
+
+Immediately after announcing the project, call `Call_Get_Project_Details_` with the resolved UUID and read `metadata.description` and `metadata.projectContext` into the active context. Do this **before** making any graph search or graph write tool calls (`Functional_Graph_Search`, `Code_Graph_Search`, `Design_Graph_Search`, `Architecture_Graph_Search`, `Call_Create_Functional_Node_`, `Call_Update_Functional_Node_`, etc.).
+
+The `projectContext` field contains project-specific terminology rules, architectural conventions, and known caveats that must be respected in all responses and graph operations for this project. Treat it as authoritative — if it contradicts a general default, the projectContext wins.
+
+This step is skipped only for skills explicitly listed as exempt in the table below (they make no graph calls).
+
 ## Persistent project mapping
 
 `.breeze.json` is mutated ONLY by these skill modes:

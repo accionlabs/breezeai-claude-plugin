@@ -10,8 +10,8 @@ write-to-disk, upsert — lives in `agents/backend-flow-structuring-agent.md`
 per-call variable inputs.
 
 `PERSONA` is computed mechanically by the parent from the EP type
-(REST / GraphQL / internal route / queue consumer / scheduled job → `System`;
-webhook / partner callback / 3rd-party event stream → `External System`).
+(REST / GraphQL / internal route / queue consumer / scheduled job / Lambda → `System`;
+webhook / partner callback / 3rd-party event stream / inbound webhook Lambda → `External System`).
 The agent uses it verbatim and never derives a human role.
 
 ---

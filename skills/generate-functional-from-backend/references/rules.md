@@ -32,10 +32,21 @@
 
 A valid backend repo has one of: `package.json` (Node) / `pom.xml` /
 `build.gradle` (JVM) / `requirements.txt` / `pyproject.toml`
-(Python) / `go.mod` (Go) / `composer.json` (PHP), AND at least one
-of: `src/controllers/`, `src/routes/`, `app/controllers/`, `cmd/`,
-`internal/handlers/`, `*.controller.ts`, `routes.py`, GraphQL schema
-files (`*.graphql`, `schema.gql`, `*.resolver.ts`).
+(Python) / `go.mod` (Go) / `composer.json` (PHP) / `*.csproj` /
+`*.sln` (.NET), AND at least one of: `src/controllers/`,
+`src/routes/`, `app/controllers/`, `cmd/`, `internal/handlers/`,
+`*.controller.ts`, `*Controller.cs`, `routes.py`, GraphQL schema
+files (`*.graphql`, `schema.gql`, `*.resolver.ts`), GraphQL type
+classes (`**/GraphQL/**/*.cs` with `ObjectGraphType` / `[QueryType]`),
+Lambda handler files (`handler.ts`, `main.ts` with
+`SQSHandler`/`APIGatewayProxyHandler`), OR monorepo application dirs
+(`apps/*/src/`).
+
+**Monorepo layout:** When `nest-cli.json` (with `"monorepo": true` or
+a `"projects"` map), `nx.json`, `lerna.json`, `turbo.json`, or
+`pnpm-workspace.yaml` is present, scan all application roots
+(`apps/*/src/`) and shared library roots (`libs/*/src/`) — not just
+`src/`.
 
 If the path looks like a frontend repo, stop and suggest
 `/breeze:generate-functional-from-ui`.
@@ -93,6 +104,10 @@ The backend pass uses **only** two personas — assignment is mechanical:
 | **NestJS microservices** | `@MessagePattern(pattern)` / `@EventPattern(pattern)` | One EP per pattern handler |
 | **AWS SQS (nestjs-sqs)** | `@SqsMessageHandler(queueName)` | One EP per handler method |
 | **AWS SQS (raw SDK)** | `Consumer.create({ queueUrl, handleMessage })` | One EP per consumer instance |
+| **AWS Lambda (SQS-triggered)** | `export const handler: SQSHandler` + `NestFactory.createApplicationContext(...)` | One EP per Lambda app |
+| **AWS Lambda (API Gateway)** | `export const handler: APIGatewayProxyHandler(V2)` | One EP per Lambda app (type `REST`, transport `ApiGateway`) |
+| **AWS Lambda (SNS-triggered)** | `export const handler: SNSHandler` | One EP per Lambda app |
+| **AWS Lambda (EventBridge/cron)** | `export const handler: ScheduledHandler` | One EP per Lambda app (subType `scheduled-job`) |
 | **Kafka (kafkajs / NestJS)** | `@KafkaListener(topic)` / `@MessagePattern(topic, Transport.KAFKA)` | One EP per topic handler |
 | **RabbitMQ (@golevelup/nestjs-rabbitmq)** | `@RabbitSubscribe({ exchange, routingKey, queue })`, `@RabbitHandler` | One EP per subscribe method |
 | **RabbitMQ (amqplib)** | `channel.consume(queue, handler)` | One EP per consume call |
@@ -254,18 +269,32 @@ No file-based handoff.
 | **Go net/http / chi / gin** | `go.mod` | `router.HandleFunc` / `r.GET` |
 | **Apollo Server / NestJS GraphQL** | `@apollo/server`, `@nestjs/graphql` | `@Resolver`, `@Query`, `@Mutation`, SDL `*.graphql` |
 | **GraphQL Yoga / Mercurius** | `graphql-yoga`, `mercurius` | SDL + resolver maps |
+| **NestJS monorepo** | `nest-cli.json` with `"monorepo": true` or `"projects"` | Same as NestJS but scan `apps/*/src/` and `libs/*/src/` |
+| **AWS Lambda (Node.js)** | `@types/aws-lambda` in devDeps; `SQSHandler`, `APIGatewayProxyHandler` types | `export const handler` / `exports.handler` in `main.ts` / `handler.ts` / `index.ts` |
+| **ASP.NET Core (Web API)** | `*.csproj` with `Microsoft.NET.Sdk.Web`; `*Controller.cs`; `Startup.cs`/`Program.cs` | `[ApiController]` + `[Route]` + `[HttpGet]`/`[HttpPost]`/etc. |
+| **ASP.NET Core + graphql-dotnet** | `GraphQL.Server.All` or `GraphQL.MicrosoftDI` in `*.csproj`; `ObjectGraphType` classes | `Field<Type>("name", resolve: ...)` in constructor; Schema class wires Query/Mutation/Subscription |
+| **ASP.NET Core + HotChocolate** | `HotChocolate.AspNetCore` in `*.csproj`; `[QueryType]`/`[MutationType]` attributes | Public methods on `[QueryType]`/`[MutationType]`/`[ExtendObjectType]` classes |
+| **.NET + MediatR** | `MediatR` in `*.csproj`; `IMediator.Send()` calls | GraphQL resolver → `IMediator.Send(new XxxCommand())` → `IRequestHandler<XxxCommand>` |
+| **.NET + Entity Framework Core** | `Microsoft.EntityFrameworkCore` in `*.csproj`; `DbContext` classes | `DbSet<Entity>` → LINQ queries → `SaveChangesAsync()` |
 
 ---
 
 ### Route discovery recipes (per framework)
 
-- **NestJS:** Glob `src/**/*.controller.ts`. Read `@Controller('prefix')` + `@Get/@Post/@Put/@Delete('subpath')`
+- **NestJS:** Glob `src/**/*.controller.ts` (single-project) or `apps/*/src/**/*.controller.ts` (monorepo). Read `@Controller('prefix')` + `@Get/@Post/@Put/@Delete('subpath')`
+- **NestJS monorepo:** Also glob `apps/*/src/**/main.ts` for Lambda handler exports (`export const handler: SQSHandler`, `export const handler: APIGatewayProxyHandlerV2`, etc.). Read each `main.ts` to identify the NestJS module + service it delegates to
+- **NestJS GraphQL (@ResolveField grouping):** When a `@Mutation(() => StubType)` or `@Query(() => StubType)` returns an empty stub object and the actual operations live in `@ResolveField()` methods on the same resolver class, treat EACH `@ResolveField` as a separate operation (not the parent `@Mutation`/`@Query`). The operation name is `<parentType>.<fieldName>` (e.g. `NotificationsMutation.create`)
 - **LoopBack 4:** Glob `src/controllers/**/*.controller.ts`. Extract `@get/@post/@put/@del`. Resolve template literals by reading config
 - **Express/Fastify:** Glob router files. Trace `app.use(...)` / `fastify.get(...)` chains
 - **Spring Boot:** Glob `**/*Controller.java`. Extract `@RequestMapping` class prefix + method annotations
 - **FastAPI:** Glob `**/*.py`. Extract `@app.get()` / `@router.post()` + `APIRouter(prefix=...)`
 - **Django:** Read `urls.py` tree from root URLconf outward
 - **Go:** Grep for `HandleFunc` / `.GET` / `.POST` registrations
+- **ASP.NET Core (REST):** Glob `**/*Controller.cs` and `**/Controllers/**/*.cs`. Read `[ApiController]` + `[Route("api/[controller]")]` class attributes + `[HttpGet]`/`[HttpPost("{id}")]` method attributes. Resolve route tokens (`[controller]` → class name minus "Controller" suffix)
+- **ASP.NET Core + graphql-dotnet (ObjectGraphType):** Read the Schema class (`*.cs` inheriting `Schema`) to find root `Query`/`Mutation`/`Subscription` types. Read each root type's constructor for `Field<>()` / `FieldAsync<>()` registrations — each is one operation. For large repos the root type often delegates to partial classes or extension methods under `GraphQL/Queries/<Domain>/` and `GraphQL/Mutations/<Domain>/` — glob those directories and read each file. Each `Field<>()` call = one EP. Extract: field name string, return type, `QueryArgument<>` args, and the `resolve:` lambda/method (which typically calls an injected service or `IMediator.Send()`). Category = the subfolder name.
+- **ASP.NET Core + HotChocolate:** Glob `**/*.cs`, grep for `[QueryType]` / `[MutationType]` / `[ExtendObjectType]`. Each public method on annotated classes = one EP. Read `[UseFiltering]`, `[UseSorting]`, `[UsePaging]`, `[Authorize]` for metadata.
+- **MediatR tracing (CQRS):** When a GraphQL resolver or controller calls `_mediator.Send(new XxxCommand(...))`, the EP's business logic lives in the `IRequestHandler<XxxCommand>` implementation, NOT the resolver. Read `Startup.cs`/`Program.cs` for `services.AddMediatR(...)` to confirm it's registered, then `Grep` for `IRequestHandler<XxxCommand>` to find the handler class. Drill into the handler's `Handle()` method for side effects.
+- **Entity Framework Core tracing:** Side effects surface as `DbContext.Set<Entity>()` LINQ queries and `SaveChangesAsync()` calls. The `DbContext` class has `DbSet<Entity>` properties — each maps to a database table. Read the `DbContext` to enumerate all tables. For repositories, trace: resolver → service → repository → `DbContext` method → entity/table.
 
 ---
 
@@ -290,3 +319,8 @@ No file-based handoff.
 | Using MCP write tools | 10-50x slower | Writes EXCLUSIVELY via curl upsert |
 | Naming outcomes after routes/resolvers | "Handle ProjectsController" | Business capabilities |
 | Null description on System actions | Actions are opaque | System descriptions REQUIRED |
+| Missing graphql-dotnet `Field<>()` calls | Zero GraphQL EPs discovered for C# repo | Scan `ObjectGraphType` constructors + partial classes/extensions under `GraphQL/Queries/` and `GraphQL/Mutations/` |
+| Not tracing MediatR `Send()` → handler | Scenario describes only the resolver, not the business logic | `Grep` for `IRequestHandler<CommandType>` and `Read` the handler's `Handle()` method |
+| Confusing DataLoader with side effect | DataLoader is a batching optimization, not a business action | Record the underlying repository/DB call the DataLoader wraps, not the DataLoader itself |
+| Not reading `Startup.cs` / `Program.cs` for DI | Cannot resolve `IFoo` → `Foo` concrete class | Read `ServiceCollectionExtensions` or `Startup.ConfigureServices` for `AddScoped`/`AddTransient` registrations |
+| Missing EF Core `DbSet<>` → table mapping | DB side effects missing table names | Read the `DbContext` class to enumerate `DbSet<Entity>` properties → table names |

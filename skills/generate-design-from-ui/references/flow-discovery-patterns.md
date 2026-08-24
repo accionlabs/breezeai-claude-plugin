@@ -559,16 +559,124 @@ router.push('/path')
 ```
 
 ### Angular
-```typescript
-// Template
-<a routerLink="/path">...</a>
-<a [routerLink]="['/path', id]">...</a>
 
-// Programmatic
-constructor(private router: Router) {}
-this.router.navigate(['/path'])
-this.router.navigateByUrl('/path')
+Angular navigation spans **two file types**: `.html` templates and `.ts`
+component/service files. Always grep BOTH.
+
+**Type A — Navigation TO a route:**
+```bash
+# Template-based navigation (*.html and inline templates in *.ts)
+grep -rn "routerLink=.*<route>" --include="*.html" --include="*.ts"
+grep -rn "\[routerLink\]=.*<route>" --include="*.html" --include="*.ts"
+
+# Programmatic navigation (*.ts only)
+grep -rn "this\.router\.navigate\(.*<route>" --include="*.ts"
+grep -rn "this\.router\.navigateByUrl\(.*<route>" --include="*.ts"
+grep -rn "router\.navigate\(.*<route>" --include="*.ts"
+
+# inject() style (Angular 14+)
+grep -rn "inject(Router)" --include="*.ts"
+# Then read those files for navigate calls to target route
 ```
+
+**Type B — On-page branching (Angular template syntax):**
+```bash
+# Structural directives (legacy syntax)
+grep -rn "\*ngIf=" --include="*.html" --include="*.ts"
+grep -rn "\*ngSwitch\|\*ngSwitchCase" --include="*.html" --include="*.ts"
+
+# Control flow blocks (Angular 17+ syntax)
+grep -rn "@if\s*(" --include="*.html" --include="*.ts"
+grep -rn "@else" --include="*.html" --include="*.ts"
+grep -rn "@switch\s*(" --include="*.html" --include="*.ts"
+grep -rn "@case\s*(" --include="*.html" --include="*.ts"
+
+# Tab / stepper components (Angular Material)
+grep -rn "<mat-tab-group\|<mat-tab\b\|<mat-stepper\|<mat-step\b" --include="*.html" --include="*.ts"
+
+# CDK stepper
+grep -rn "cdkStepper\|CdkStep" --include="*.html" --include="*.ts"
+
+# PrimeNG / other UI libs
+grep -rn "<p-tabView\|<p-steps\|<p-accordion" --include="*.html" --include="*.ts"
+```
+
+**Type B — Modals, dialogs, drawers, overlays:**
+```bash
+# Angular Material dialogs
+grep -rn "MatDialog\|this\.dialog\.open\|inject(MatDialog)" --include="*.ts"
+grep -rn "MatDialogRef\|dialogRef\.close" --include="*.ts"
+
+# Angular Material bottom sheet
+grep -rn "MatBottomSheet\|this\.bottomSheet\.open" --include="*.ts"
+
+# Angular CDK overlays
+grep -rn "Overlay\|CdkOverlay\|CdkPortal\|TemplatePortal" --include="*.ts"
+
+# Custom dialog services
+grep -rn "DialogService\|ModalService\|DrawerService\|SidebarService" --include="*.ts"
+
+# Component-level dialog triggers in templates
+grep -rn "(click)=.*open.*[Dd]ialog\|(click)=.*show.*[Mm]odal" --include="*.html"
+```
+
+**Page nav — Outbound navigation from a component:**
+```bash
+# All navigation patterns in one component's directory
+grep -rn "routerLink\|router\.navigate\|router\.navigateByUrl" src/app/<component-dir>/ --include="*.html" --include="*.ts"
+
+# Route guard redirects (can redirect to login/error pages)
+grep -rn "UrlTree\|createUrlTree\|RedirectCommand" --include="*.ts"
+```
+
+**Entry context detection (does target page read where user came from?):**
+```bash
+# ActivatedRoute usage
+grep -rn "ActivatedRoute\|this\.route\.\|inject(ActivatedRoute)" src/app/<target-dir>/ --include="*.ts"
+
+# Query params / route params
+grep -rn "paramMap\|queryParamMap\|params\['" src/app/<target-dir>/ --include="*.ts"
+
+# Route data (from resolver or route config)
+grep -rn "this\.route\.data\|route\.snapshot\.data" src/app/<target-dir>/ --include="*.ts"
+```
+
+### Angular Route Discovery
+
+Angular routing is defined in `*-routing.module.ts` or `app.routes.ts`
+(standalone). Key patterns to discover all routes:
+
+```bash
+# Find all route definitions
+grep -rn "path:\s*'" --include="*routing*.ts" --include="*routes*.ts"
+
+# Find lazy-loaded routes
+grep -rn "loadChildren\|loadComponent" --include="*routing*.ts" --include="*routes*.ts"
+
+# Find route guards (auth/permission boundaries)
+grep -rn "canActivate\|canDeactivate\|canMatch\|canLoad" --include="*routing*.ts" --include="*routes*.ts"
+
+# Find resolvers (data pre-fetch)
+grep -rn "resolve:" --include="*routing*.ts" --include="*routes*.ts"
+```
+
+**NX / Monorepo path aliases:** If the repo has `tsconfig.base.json`
+with `paths` entries, resolve aliases before following `loadChildren`
+imports. Example: `loadChildren: () => import('@myorg/feature-users')`
+→ find `libs/feature-users/src/lib/users-routing.module.ts`.
+
+### Angular Flow Classification — Additional Rules
+
+| Angular Pattern | Separate Flow? | Why |
+|---|---|---|
+| `MatDialog.open(CreateUserDialogComponent)` | **YES** if dialog has own form/state | Modal with own workflow |
+| `MatBottomSheet.open(FilterSheetComponent)` | **YES** if feature-rich | Bottom sheet with CRUD |
+| `*ngIf="isEditMode"` switching between view/edit templates | **YES** | Different component trees |
+| `@if (user.role === 'admin')` showing admin panel | **NO** | Permission gate, same page |
+| `<mat-tab-group>` with independent forms in each tab | **YES** per tab | Each tab is a distinct workflow |
+| `<mat-tab-group>` with read-only info panels | **NO** | Tabs are navigation within page |
+| Route guard `canActivate` redirecting to login | **YES** | Different page (login redirect) |
+| `<router-outlet>` with child routes | **Depends** | Check if child routes = separate pages |
 
 ---
 
