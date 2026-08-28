@@ -1,10 +1,10 @@
 ---
-name: update-ontology-from-diff
+name: update-functional-from-diff
 description: >
   Incrementally update functional ontology (UI + backend) and design
   ontology (UI) from a git diff between two commit IDs. Use when:
-  "update ontology from diff", "sync graph with commits",
-  "update functional from commits", "incremental ontology update",
+  "update functional from diff", "sync graph with commits",
+  "update functional from commits", "incremental functional update",
   "diff-based graph update", user provides two commit SHAs.
 argument-hint: "<prev-commit-id> <current-commit-id>"
 ---

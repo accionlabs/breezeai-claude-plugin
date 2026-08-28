@@ -22,7 +22,7 @@ When the user asks about Breeze capabilities or wants to perform a Breeze task, 
 | Generate functional graph from backend | `/breeze:generate-functional-from-backend` |
 | Detect personas from UI code | `/breeze:detect-personas` |
 | Add/update nodes in functional graph | `/breeze:update-functional-graph` |
-| Incremental ontology update from git diff | `/breeze:update-ontology-from-diff` |
+| Incremental ontology update from git diff | `/breeze:update-functional-from-diff` |
 | Incremental design graph update from git diff | `/breeze:update-design-from-diff` |
 | Validate graph quality | `/breeze:validate-functional-graph` |
 | Generate code from graph | `/breeze:generate-code` |
@@ -41,7 +41,7 @@ When the user asks about Breeze capabilities or wants to perform a Breeze task, 
 6. `/breeze:generate-spec`
 
 **Incremental update (after commits):**
-1. `/breeze:update-ontology-from-diff <prev-sha> <current-sha>`
+1. `/breeze:update-functional-from-diff <prev-sha> <current-sha>`
 
 **Greenfield (from designs/docs):**
 1. `/breeze:project setup`
