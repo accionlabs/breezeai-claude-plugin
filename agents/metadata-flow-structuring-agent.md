@@ -325,6 +325,10 @@ import json,sys
 src=json.load(open(sys.argv[1]))
 json.dump({'payload':src['payload'],'project':{'uuid':'$PROJECT_UUID','name':'$PROJECT_NAME'},'skipStepAndAction':False}, open('$BODY','w'))
 " "$HALF_FILE"
+if [[ -n "$VALIDATORS_PATH" && -f "$VALIDATORS_PATH/validate.py" ]]; then
+  python3 "$VALIDATORS_PATH/validate.py" wrapper < "$BODY" \
+    || { echo "FAIL_WRAPPER · body missing project/payload wrapper — abort"; exit 1; }
+fi
 
 # System half (v2, embedding queued async):
 HTTP=$(curl -sS -o /tmp/p3_resp_$$.json -w "%{http_code}" \
