@@ -18,6 +18,7 @@ OUTCOME:
   id:                  {{outcome_id}}
   name:                {{outcome_name}}
   personaName:         {{persona_name}}
+  platform:            {{platform}}
 SCENARIOS:             {{scenarios_json}}
 MODALITIES:            [{{modalities}}]
 FRAMEWORK:             {{framework}}

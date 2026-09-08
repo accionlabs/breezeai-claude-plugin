@@ -72,7 +72,7 @@ END LOOP
 `Bulk_Update_Design_Nodes`** — one call per scenario. Never batch
 multiple scenarios in one call.
 
-**Backend dedup:** Nodes are matched by `projectUuid + name`
+**Backend dedup:** Nodes are matched by `projectUuid + name + platform`
 (case-insensitive). If existing, new parent edges are created and
 parent ID arrays (`userJourneyIds[]`, `flowIds[]`, `pageIds[]`) are
 appended to. No `Update_Design_Node` calls needed for linking.

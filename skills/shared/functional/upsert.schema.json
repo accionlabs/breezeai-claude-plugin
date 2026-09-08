@@ -28,6 +28,8 @@
               "additionalProperties": false,
               "properties": {
                 "outcome":     { "type": "string", "minLength": 1 },
+                "platform":    { "type": "string", "description": "Scope — which product/deployment (e.g. 'customer portal'). Normalised to lowercase. Defaults to 'default'." },
+                "moduleType":  { "type": "string", "description": "Classifier — what kind of module (e.g. 'Pippen'). Not part of the uniqueness key." },
                 "description": { "type": ["string", "null"] },
                 "citations":   { "type": "array", "items": { "$ref": "#/$defs/citation" } },
                 "scenarios": {

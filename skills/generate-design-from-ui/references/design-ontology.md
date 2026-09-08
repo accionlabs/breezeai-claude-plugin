@@ -38,7 +38,7 @@ Flows, Pages, and Components support **multi-parent relationships**:
 
 ### Backend Dedup Mechanism
 
-**The backend deduplicates by `projectUuid + name` (case-insensitive).**
+**The backend deduplicates by `projectUuid + name + platform` (case-insensitive).**
 When a node with the same name already exists:
 1. A new parent relationship edge is created (e.g. `INCLUDES_FLOW`)
 2. The new parent ID is appended to the parent ID array
@@ -85,6 +85,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Name of the user journey |
+| `platform` | string | No | Scope — which product/deployment (e.g. "customer portal"). Part of uniqueness key. Backend normalises to trimmed lowercase. Defaults to "default" |
 | `description` | string | No | Description |
 | `scenarioId` | string | Yes | Linked functional Scenario ID |
 
@@ -93,6 +94,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Name of the flow |
+| `platform` | string | No | Inherited from parent UserJourney. Part of uniqueness key. Backend normalises to trimmed lowercase |
 | `description` | string | No | Description |
 | `modality` | string | Yes | `WEB`, `MOBILE`, `TABLET`, `DESKTOP`, `VOICE`, `API`, `KIOSK`, `WATCH`, `TV` |
 | `entryPoint` | string | No | Page ID of the starting page |
@@ -105,6 +107,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Name of the page |
+| `platform` | string | No | Inherited from parent Flow. Part of uniqueness key. Backend normalises to trimmed lowercase |
 | `description` | string | No | Description |
 | `pageType` | string | No | `LIST`, `DETAIL`, `FORM`, `DASHBOARD` |
 | `requiresAuth` | boolean | No | Requires authentication |
@@ -119,6 +122,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Name of the component |
+| `platform` | string | No | Inherited from parent Page. Part of uniqueness key. Backend normalises to trimmed lowercase |
 | `type` | string | Yes | `ORGANISM`, `MOLECULE`, `ATOM`, `TEMPLATE` |
 | `description` | string | No | Description |
 | `designSystemRef` | string | No | Design system reference (metadata, not dedup key) |

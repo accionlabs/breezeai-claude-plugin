@@ -727,7 +727,7 @@ UserJourney (1:1 with scenario, scenarioId required)
 ```json
 {
   "userJourneys": [{
-    "name": "...", "description": "...", "scenarioId": "...",
+    "name": "...", "platform": "...", "description": "...", "scenarioId": "...",
     "flows": [{
       "name": "...", "modality": "WEB", "entryPoint": "...", "exitPoint": "...",
       "stepIds": ["..."],
@@ -746,7 +746,8 @@ UserJourney (1:1 with scenario, scenarioId required)
 
 **Rules:**
 - One `Bulk_Update_Design_Nodes` call PER SCENARIO (not per outcome)
-- Include reused nodes by name — backend dedup handles linking
+- Set `platform` on UserJourney from the outcome's platform (defaults to "default"). Children inherit it.
+- Include reused nodes by name — backend dedup handles linking (by projectUuid + name + platform)
 - `pageType` and `modality` MUST be UPPERCASE
 - Pages have NO `actionIds` — actions map to Components only
 - Every stepId/actionId must appear in at least one design node
