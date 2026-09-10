@@ -2,12 +2,13 @@
 name: validate-design-graph
 description: >
   Validate the design graph for structural integrity, ontology compliance,
-  and functional graph linkage. Checks orphan nodes, empty hierarchy,
-  duplicate names, missing scenarioIds, invalid enums (lowercase modality/
-  pageType/type), template compliance, supportingComponents rules,
-  actionIds on pages, and optional cross-validation against the functional
-  graph. Use when: "validate design", "check design graph", "audit design
-  graph", "design graph health check", "design quality".
+  and functional graph linkage. Supports validating all personas or a
+  selected subset. Checks orphan nodes, empty hierarchy, duplicate names,
+  missing scenarioIds, invalid enums (lowercase modality/pageType/type),
+  template compliance, supportingComponents rules, actionIds on pages,
+  and optional cross-validation against the functional graph. Use when:
+  "validate design", "check design graph", "audit design graph",
+  "design graph health check", "design quality", "validate for persona".
 ---
 
 ## Project
@@ -16,7 +17,50 @@ This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE
 
 ---
 
-## Step 1 — Collect Design Graph Data
+## Step 1 — Choose Scope (All or Selected Personas)
+
+Before collecting data, ask the user what to validate:
+
+```
+Validation Scope:
+
+  1. **All personas** — validate the entire design graph
+  2. **Selected personas** — validate only UserJourneys linked to
+     specific personas
+
+Choose 1 or 2:
+```
+
+Default: 1 (all).
+
+**If user chooses 2 (selected personas):**
+
+1. Call `Get_complete_functional_graph` with the project UUID
+2. Extract the list of personas from the functional graph
+3. Present the personas:
+   ```
+   Personas found:
+     1. Admin User
+     2. Customer
+     3. Support Agent
+     ...
+
+   Enter persona numbers (comma-separated), or "all":
+   ```
+4. Record `selectedPersonas` — the chosen persona names/IDs
+5. Walk the functional graph: for each selected persona, collect all
+   Outcome → Scenario chains. Record the set of `scenarioIds` that
+   belong to these personas as `scopedScenarioIds`
+6. These `scopedScenarioIds` will be used in Step 2 to filter which
+   UserJourneys (and their descendant Flows/Pages/Components) are
+   included in validation
+
+**If user chooses 1 (all):** set `scopedScenarioIds = null` (no
+filter — validate everything).
+
+---
+
+## Step 2 — Collect Design Graph Data
 
 Fetch all design nodes by label. For each label, paginate until all
 nodes are collected:
@@ -32,19 +76,54 @@ FOR label IN ["UserJourney", "Flow", "Page", "Component"]:
   END LOOP
 ```
 
-Combine all nodes into a single JSON file and save to
+**If `scopedScenarioIds` is set (persona filter active):**
+
+After collecting all nodes, filter down to only the relevant subgraph:
+
+1. **UserJourneys:** keep only those whose `scenarioId` is in
+   `scopedScenarioIds`
+2. **Flows:** keep only those whose `userJourneyIds` contains at
+   least one kept UserJourney
+3. **Pages:** keep only those whose `flowIds` contains at least one
+   kept Flow
+4. **Components:** keep only those whose `pageIds` contains at least
+   one kept Page
+
+> **Shared components:** A Component may belong to multiple Pages
+> (some in-scope, some not). Keep it if ANY of its `pageIds` is
+> in scope. Validation will only check its relationships within
+> the scoped subgraph.
+
+Log the filter result:
+```
+Persona filter applied:
+  Personas: {names}
+  Scenarios in scope: {N} / {total}
+  UserJourneys: {kept} / {total}
+  Flows: {kept} / {total}
+  Pages: {kept} / {total}
+  Components: {kept} / {total}
+```
+
+Combine all (filtered) nodes into a single JSON file and save to
 `design-graph-export.json` in the project root.
 
 ---
 
-## Step 2 — Collect Functional Graph (optional but recommended)
+## Step 3 — Collect Functional Graph (optional but recommended)
 
-Ask the user:
+> **If persona filter was used:** the functional graph was already
+> fetched in Step 1. Reuse it — do not fetch again.
+
+Ask the user (only if functional graph was NOT already fetched):
 > "Do you want to cross-validate against the functional graph? (y/n)"
 
-**If yes:**
+**If yes (or already fetched in Step 1):**
 1. Call `Get_complete_functional_graph` with the project UUID
+   (skip if already fetched)
 2. Note the saved file path — pass it to the validation script with `--functional`
+3. If persona filter is active, also pass `--scenario-ids <comma-separated IDs>`
+   so the script only checks coverage for in-scope scenarios
 
 **If no:**
 - The script will still run all structural checks; it will skip
@@ -52,7 +131,7 @@ Ask the user:
 
 ---
 
-## Step 3 — Run Validation Script
+## Step 4 — Run Validation Script
 
 Run the validation script against the saved design graph file:
 
@@ -100,7 +179,7 @@ Read the output `design-validation-report.json` — it's structured JSON.
 
 ---
 
-## Step 4 — Present Results
+## Step 5 — Present Results
 
 Present the validation report in this format:
 
@@ -111,6 +190,8 @@ Present the validation report in this format:
 
 | Metric | Value |
 |---|---|
+| Scope | {All personas / Selected: Persona1, Persona2} |
+| Scenarios in scope | {N} / {total} |
 | UserJourneys | {N} |
 | Flows | {N} |
 | Pages | {N} |
@@ -241,7 +322,7 @@ whose parent step is not in the Flow reachable from that Component's Page}
 
 ---
 
-## Step 5 — Recommend Actions
+## Step 6 — Recommend Actions
 
 Based on the findings, provide a prioritized action list:
 
@@ -252,7 +333,7 @@ Based on the findings, provide a prioritized action list:
 
 ---
 
-## Step 6 — Optionally Fix Issues
+## Step 7 — Optionally Fix Issues
 
 Ask the user:
 > "Would you like me to fix any of these issues?"
@@ -331,6 +412,15 @@ UserJourney (1:1 with functional Scenario, scenarioId required)
 - Every node must have valid parent references (no dangling IDs)
 - Full chain UserJourney → Flow → Page → Component must be unbroken
 - No duplicate IDs in parent/link arrays
+
+**UJ naming (persona disambiguation):**
+- UJ names follow the format `"{ScenarioName} for {PersonaName}"` (with
+  optional platform suffix). This prevents the backend from merging UJs
+  across personas that share the same outcome/scenario name.
+- The scenario↔UJ 1:1 check compares **total human scenario count** to
+  **UJ count** — they must be equal. A mismatch indicates the generation
+  skill failed to create separate UJs per persona (likely missing the
+  `for {PersonaName}` qualifier).
 
 **Hierarchy:**
 - Every UserJourney must have at least one Flow

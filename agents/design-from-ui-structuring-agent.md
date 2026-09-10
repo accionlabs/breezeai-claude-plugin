@@ -728,14 +728,17 @@ UserJourney (1:1 with scenario, scenarioId required)
 {
   "userJourneys": [{
     "name": "...", "platform": "...", "description": "...", "scenarioId": "...",
+    "citations": [{"type": "figma", "reference": "https://..."}],
     "flows": [{
       "name": "...", "modality": "WEB", "entryPoint": "...", "exitPoint": "...",
       "stepIds": ["..."],
       "pages": [{
         "name": "...", "pageType": "FORM", "stepIds": ["..."],
+        "citations": [{"type": "code", "reference": "<code-node-id>"}],
         "components": [
           { "name": "...", "type": "TEMPLATE", "layoutType": "FLEX", "supportingComponents": ["..."] },
-          { "name": "...", "type": "ORGANISM", "actionIds": ["..."], "supportingComponents": ["..."] },
+          { "name": "...", "type": "ORGANISM", "actionIds": ["..."], "supportingComponents": ["..."],
+            "citations": [{"type": "code", "reference": "<code-node-id>"}] },
           { "name": "...", "type": "ATOM", "supportingComponents": [] }
         ]
       }]
@@ -743,6 +746,14 @@ UserJourney (1:1 with scenario, scenarioId required)
   }]
 }
 ```
+
+**Per-node citations:** UserJourney, Page, and Component accept a
+`citations` array. Each node's citations are merged with top-level
+citations (shared default). Flow does NOT support per-node citations.
+Cite the source artifact the node was derived from (component file,
+route definition, design doc). Format:
+`{"type": "code", "reference": "<code-node-id>"}` or other types
+(`document`, `exDoc`, `figma`, `jira`, `confluence`, `prompt`).
 
 **Rules:**
 - One `Bulk_Update_Design_Nodes` call PER SCENARIO (not per outcome)

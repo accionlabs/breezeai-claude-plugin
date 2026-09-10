@@ -822,6 +822,7 @@ TEMPLATE already exists (reused), omit it from the payload.
 - **Component supportingComponents** — ORGANISM → MOLECULE/ATOM, MOLECULE → ATOM, ATOM → `[]`
 - **Reused components** — include with `designSystemRef`; backend deduplicates via upsert
 - **Multi-modality** — separate Flow entries per modality under the same UserJourney
+- **Per-node citations** — UserJourney, Page, and Component accept a `citations` array (merged with top-level). Flow does NOT support per-node citations. Cite the source artifact each node was derived from.
 
 ### 5c. Make the Call
 

@@ -336,6 +336,7 @@ if semantically the same**.
 | Tool | Purpose |
 |---|---|
 | `Bulk_Update_Design_Nodes` | **PRIMARY** — create entire UserJourney tree per scenario |
+| `Create_Design_Node` | Create a single node with per-node citations (not idempotent — 400 on duplicate name) |
 | `Update_Design_Node` | Link additional stepIds/actionIds to existing nodes |
 | `Update_Functional_Node` | Mark scenario as processed (`isDesignGenerated=true`) |
 | `Delete_Design_Node` | Remove nodes when replacing |

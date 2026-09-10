@@ -88,6 +88,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | `platform` | string | No | Scope — which product/deployment (e.g. "customer portal"). Part of uniqueness key. Backend normalises to trimmed lowercase. Defaults to "default" |
 | `description` | string | No | Description |
 | `scenarioId` | string | Yes | Linked functional Scenario ID |
+| `citations` | object[] | No | Per-node citations. Merged with top-level citations. Each: `{"type": "document\|exDoc\|figma\|jira\|confluence\|code\|prompt", "name"?, "inputText"?, "reference"?}` |
 
 ### Flow
 
@@ -114,6 +115,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | `allowedRoles` | string[] | No | Roles allowed to access |
 | `flowIds` | string[] | Yes | Parent Flow IDs (multi-parent) |
 | `stepIds` | string[] | No | Linked functional Step IDs |
+| `citations` | object[] | No | Per-node citations. Merged with top-level citations. Each: `{"type": "document\|exDoc\|figma\|jira\|confluence\|code\|prompt", "name"?, "inputText"?, "reference"?}` |
 
 > **Page has NO `actionIds` field.** Actions map to Components only.
 
@@ -133,6 +135,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | `pageIds` | string[] | Yes | Parent Page IDs (multi-parent) |
 | `actionIds` | string[] | No | Linked functional Action IDs |
 | `supportingComponents` | string[] | No | Names of child components |
+| `citations` | object[] | No | Per-node citations. Merged with top-level citations. Each: `{"type": "document\|exDoc\|figma\|jira\|confluence\|code\|prompt", "name"?, "inputText"?, "reference"?}` |
 
 ---
 
