@@ -33,7 +33,7 @@ and MCP upserting for ALL scenarios in that outcome.
 **Why outcome-per-agent?** Scenarios within an outcome almost always
 share the same target pages. The agent reads page files once and
 processes all scenarios against that shared context — far more efficient
-than one-agent-per-scenario. Up to 3 outcomes run in parallel.
+than one-agent-per-scenario. Up to 5 outcomes run in parallel.
 
 ## How to Create the Design Ontology — Full Workflow
 
@@ -80,7 +80,11 @@ reads actual code for accurate component discovery.
 
 - **Design graph** updated via `Bulk_Update_Design_Nodes` (called by sub-agents)
 - **`design-progress.json`** -- checkpoint for multi-session resume
-- **Per-scenario payload files** in `{uiRepo}/.breeze-output/` for audit
+- **Per-outcome payload files** in `{uiRepo}/design_output/` for audit -- each
+  file contains full functional linkage: `outcomeId`, `personaId`,
+  `personaName` at top level; `scenarioId`, `outcomeId`, `personaId`,
+  `personaName`, `outcomeName` on every UserJourney; `stepIds` on
+  flows/pages; `actionIds` on components
 
 ---
 
@@ -93,6 +97,52 @@ reads actual code for accurate component discovery.
 1. Read `.breeze.json` from the plugin working directory
 2. If missing or incomplete, tell the user to run `/breeze:setup-project`
 3. Extract `projectUuid`
+4. Read `designGraph.platform` from `.breeze.json`:
+
+```json
+{
+  "designGraph": {
+    "platform": {
+      "id": "source-web",
+      "suffix": " [Source Web]",
+      "personas": ["End User", "Admin"]
+    }
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Yes (multi-platform) | Unique slug for this platform. Used to scope registry files, output dirs, and checkpoint. |
+| `suffix` | Yes (multi-platform) | Appended to every design node name before upserting. Prevents backend name-based dedup from merging same-named nodes across platforms. |
+| `personas` | Yes (multi-platform) | Persona names that belong to THIS platform. Only outcomes from these personas are processed. Outcomes from other personas are excluded — they belong to another platform's design graph. |
+
+- If `designGraph.platform` exists → set `PLATFORM_ID`, `APP_SUFFIX`,
+  and `PLATFORM_PERSONAS`.
+- If absent → set `PLATFORM_ID = ""`, `APP_SUFFIX = ""`,
+  `PLATFORM_PERSONAS = null` (no filtering — single-platform project).
+
+> **Why platform isolation matters:** A single Breeze project may host
+> design graphs for multiple applications (e.g., customer portal + admin
+> dashboard, or web + mobile). Without isolation, context leaks between
+> platforms through six vectors:
+>
+> | Leak vector | What goes wrong |
+> |---|---|
+> | **Backend name dedup** | "Login Page" from Web merges with "Login Page" from Mobile into one node |
+> | **Shared registries** | Sub-agent reuses Platform A's component when building Platform B |
+> | **Shared persona outcomes** | Sub-agent processes outcomes from both platforms in one run |
+> | **MCP queries** | `Get_all_Design_By_Label` returns nodes from both platforms; sub-agent links to wrong one |
+> | **Reconciliation** | Merges same-name nodes across platforms (destroys both) |
+> | **Checkpoint** | Progress file mixes scenarios from both platforms |
+>
+> The `platform` config prevents ALL of these by:
+> 1. **Name suffixing** — `APP_SUFFIX` makes names unique across platforms
+> 2. **Persona scoping** — only outcomes from `PLATFORM_PERSONAS` are queued
+> 3. **Registry scoping** — each platform gets its own registry files
+> 4. **Output scoping** — each platform gets its own output dir and checkpoint
+> 5. **MCP query filtering** — sub-agents filter results by suffix before reusing
+> 6. **Reconciliation scoping** — only merges nodes with matching suffix
 
 > **Parameter naming hint:** All Breeze MCP tools require the project ID
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
@@ -118,8 +168,10 @@ reads actual code for accurate component discovery.
    { "targetRepos": { "frontend": "/abs/path/to/ui-repo" } }
    ```
 6. If path has no frontend router file, stop and inform user
-7. Set `OUTPUT_BASE = {uiRepo}/.breeze-output`
-8. Ensure `.breeze-output/` is in the target repo's `.gitignore`
+7. Set `OUTPUT_BASE`:
+   - If `PLATFORM_ID` is non-empty: `{uiRepo}/design_output/{PLATFORM_ID}`
+   - Otherwise: `{uiRepo}/design_output`
+8. Ensure `design_output/` is in the target repo's `.gitignore`
 
 > **Frontend repo detection:** A valid frontend repo has `package.json`
 > AND at least one of: `src/router/`, `src/routes/`, `app/routes`,
@@ -148,7 +200,7 @@ Ask user which processing mode to use:
 
 | Mode      | Description                                                |
 | --------- | ---------------------------------------------------------- |
-| `auto`    | Sub-agents execute full pipeline; up to 3 outcomes in parallel |
+| `auto`    | Sub-agents execute full pipeline; up to 5 outcomes in parallel |
 | `outcome` | Auto within each outcome, pause between outcomes for review |
 | `dry-run` | Sub-agents write payloads to disk only; no MCP mutations   |
 
@@ -224,163 +276,261 @@ Look for `{OUTPUT_BASE}/design-progress.json`.
 
 ---
 
-## Step 2: Build Outcome Queue
+## Step 2: Persona Discovery & Blocklist
 
-### 2a. Build non-human outcome blocklist
+### 2a. Fetch persona list and build blocklist
 
 > **HARD STOP: Build this BEFORE any processing.**
+>
+> Only fetch the **persona list** here — NOT all outcomes for all
+> personas. Outcomes are fetched one persona at a time in Step 3.
 
 1. Call `Get_all_personas(uuid: "<projectUuid>")`
-2. Identify non-human personas: `System`, `External System`
-3. For each non-human persona, call
-   `Get_all_outcomes_for_a_persona_id(uuid, personaId: "<id>")`
-4. Collect all outcome IDs into `blockedOutcomeIds`
-5. If zero personas → STOP, tell user to run
+2. Classify each persona into one of three buckets:
+   - **Blocked (non-human):** `System`, `External System` (always blocked)
+   - **Blocked (cross-platform):** If `PLATFORM_PERSONAS` is set, block
+     every human persona whose name is NOT in `PLATFORM_PERSONAS`
+   - **Allowed:** human personas that pass both filters
+3. Build `allowedPersonas` list (ordered) and `blockedPersonaIds` set
+4. If zero **allowed** personas → STOP, tell user to check
+   `designGraph.platform.personas` in `.breeze.json` or run
    `/breeze:generate-functional-from-ui` first
-6. Log: `"Blocklist built: {N} non-human outcome(s) excluded"`
+5. Log:
+   ```
+   Persona discovery:
+     Total: {N} personas
+     Allowed: {names} ({N})
+     Blocked (non-human): {names} ({N})
+     Blocked (cross-platform): {names} ({N})
+   ```
 
-### 2b. Build the outcome queue
-
-1. For each **human persona**, call
-   `Get_all_outcomes_for_a_persona_id(uuid, personaId)`
-2. For each outcome, fetch its scenarios:
-   `Get_all_scenarios_for_a_outcome_id(uuid, outcome_id, page, limit)`
-   Paginate until all fetched. Filter out `isDesignGenerated == true`.
-3. For each scenario, fetch steps/actions:
-   `Get_all_steps_actions_for_a_scenario_id(uuid, parameters0_Value: scenarioId)`
-4. Skip outcomes with zero unprocessed scenarios
-5. Build the queue:
-
-```json
-[
-  {
-    "outcomeId": "...",
-    "outcomeName": "Authentication",
-    "personaName": "End User",
-    "scenarios": [
-      {
-        "id": "scenario-uuid",
-        "name": "Login with Email",
-        "stepsActions": [{ "stepId": "...", "stepName": "...", "actions": [...] }]
-      }
-    ]
-  }
-]
-```
-
-### 2c. Show the queue to user
+### 2b. Show processing plan to user
 
 ```
-Outcome Queue ({N} outcomes, {M} total scenarios):
+Processing Plan:
+Platform: {PLATFORM_ID or "single-platform (no isolation)"}
+Mode: {mode}
 
-  1. [End User] Authentication — 5 scenarios
-  2. [End User] Search — 8 scenarios
-  3. [Admin] User Management — 4 scenarios
+Personas to process (in order):
+  1. End User
+  2. Admin
+  3. Customer Support
+  ...
 
-Processing mode: {mode}
+Each persona's outcomes will be fetched and processed in batches
+of up to 5 parallel sub-agents before moving to the next persona.
 ```
 
-### 2d. Write Checkpoint
+### 2c. Write Checkpoint
 
-Write `{OUTPUT_BASE}/design-progress.json` with **scenario-level
-tracking** (like `entrypoints.json` in the functional skill):
+Write `{OUTPUT_BASE}/design-progress.json`:
 
 ```json
 {
   "project": "<repo name>",
   "projectUuid": "<uuid>",
+  "platformId": "<platform slug or empty>",
+  "appSuffix": "<suffix or empty>",
+  "platformPersonas": ["End User", "Admin"],
   "framework": "<framework>",
   "uiRepo": "<path>",
   "modalities": ["WEB"],
   "processingMode": "<auto|outcome|dry-run>",
-  "blockedOutcomeIds": ["..."],
-  "totalOutcomes": 5,
-  "totalScenarios": 28,
+  "allowedPersonas": [
+    { "id": "persona-uuid-1", "name": "End User", "status": "pending" },
+    { "id": "persona-uuid-2", "name": "Admin", "status": "pending" }
+  ],
+  "currentPersonaIndex": 0,
+  "personas": {}
+}
+```
+
+> The `personas` object is populated progressively — one persona at a
+> time in Step 3. This avoids fetching 3,000+ scenarios upfront.
+
+---
+
+## Step 3: Per-Persona Processing Loop
+
+> **This is the main loop.** Process one persona at a time. For each
+> persona: fetch outcomes → batch into groups of up to 5 → spawn
+> parallel sub-agents → wait → update checkpoint → next batch →
+> when all outcomes done → next persona.
+
+### 3a. Fetch outcome list for current persona
+
+> **Only fetch the outcome list here — NOT scenarios or steps/actions.**
+> Sub-agents fetch their own scenarios and steps/actions to save parent
+> context. The parent only needs outcome IDs and names for dispatching.
+
+For the current persona in `allowedPersonas`:
+
+1. Call `Get_all_outcomes_for_a_persona_id(uuid, personaId)`
+2. For each outcome, call `Get_all_scenarios_for_a_outcome_id` but
+   **only to get scenario count and filter `isDesignGenerated`** —
+   do NOT fetch steps/actions (sub-agent does that)
+3. Skip outcomes with zero unprocessed scenarios
+4. Build the persona's outcome list:
+
+```json
+{
+  "personaId": "...",
+  "personaName": "End User",
   "outcomes": [
     {
       "outcomeId": "...",
       "outcomeName": "Authentication",
-      "personaName": "End User",
-      "status": "pending",
-      "scenarios": [
-        {
-          "id": "scenario-uuid-1",
-          "name": "Login with Email",
-          "status": "pending",
-          "payloadPath": null,
-          "flowsCreated": 0,
-          "pagesCreated": 0,
-          "componentsCreated": 0,
-          "error": null,
-          "completedAt": null
-        },
-        {
-          "id": "scenario-uuid-2",
-          "name": "Register New Account",
-          "status": "pending",
-          "payloadPath": null,
-          "flowsCreated": 0,
-          "pagesCreated": 0,
-          "componentsCreated": 0,
-          "error": null,
-          "completedAt": null
-        }
-      ]
+      "scenarioCount": 5,
+      "scenarioIds": ["uuid-1", "uuid-2", "uuid-3", "uuid-4", "uuid-5"]
     }
-  ],
-  "completed": [],
-  "remaining": ["outcome-uuid-1", "outcome-uuid-2"],
-  "failed": [],
-  "reconciliationDone": false
+  ]
 }
 ```
 
+5. Update checkpoint — add this persona's outcomes:
+
+```json
+{
+  "personas": {
+    "End User": {
+      "personaId": "persona-uuid-1",
+      "status": "in_progress",
+      "totalOutcomes": 12,
+      "outcomes": [
+        {
+          "outcomeId": "...",
+          "outcomeName": "Authentication",
+          "status": "pending",
+          "scenarioCount": 5
+        }
+      ],
+      "completed": [],
+      "remaining": ["outcome-uuid-1", "outcome-uuid-2"],
+      "failed": []
+    }
+  }
+}
+```
+
+6. Log:
+   ```
+   Persona: End User
+     Outcomes: {N}
+     Processing in batches of 5...
+   ```
+
+### 3b. Batch and spawn sub-agents
+
+Take up to 5 outcomes from the persona's `remaining` list and spawn
+sub-agents in parallel:
+
+```
+Batch 1/4: [Authentication (5 scenarios), Search (8 scenarios), Cart (3 scenarios)]
+  Spawning 3 sub-agents...
+```
+
+For each outcome in the batch, render the sub-agent prompt and spawn
+(same as before — see sub-agent template placeholders).
+
+### 3c. Collect results and update checkpoint
+
+After all agents in the batch complete:
+
+1. Read each agent's results manifest
+2. Update per-scenario status in the checkpoint
+3. Move completed outcomes from `remaining` to `completed`
+4. Move failed outcomes to `failed`
+5. Write checkpoint to disk
+6. Log batch summary:
+   ```
+   Batch 1/4 complete:
+     ✅ Authentication — 5/5 scenarios
+     ✅ Search — 7/8 scenarios (1 failed)
+     ✅ Cart — 3/3 scenarios
+   ```
+
+### 3d. Next batch or next persona
+
+- **More outcomes remaining for this persona?** → go to 3b (next batch)
+- **All outcomes done for this persona?** → mark persona as `completed`
+  in checkpoint, log summary, advance `currentPersonaIndex`
+- **More personas remaining?** → go to 3a (fetch next persona's outcomes)
+- **All personas done?** → proceed to Step 4 (reconciliation)
+
+```
+Persona complete: End User
+  Outcomes: 12/12 completed
+  Scenarios: 44/45 succeeded, 1 failed
+  
+Next persona: Admin (2/5)
+  Fetching outcomes...
+```
+
+### 3e. Resume from checkpoint
+
+If `design-progress.json` exists with in-progress data:
+
+1. Find `currentPersonaIndex` — resume from that persona
+2. For the current persona, check `remaining` outcomes
+3. For partially processed outcomes (status = `PARTIAL`), re-send
+   ALL scenario metadata but mark which ones need re-processing
+4. Skip fully completed personas
+5. Log:
+   ```
+   Resuming from checkpoint:
+     Personas completed: {N}/{total}
+     Current persona: {name}
+     Remaining outcomes: {N}
+   ```
+
 > **Scenario status values:** `pending` → `completed` | `failed`
 >
-> The sub-agent writes a `results_{outcomeName_slug}.json` manifest
-> after processing, which the parent reads to update scenario-level
-> status in the checkpoint.
+> The sub-agent writes all scenario data into the outcome file
+> (`design_{outcome_slug}.json`). Each scenario entry has a `status`
+> field. The parent reads this file to update scenario-level status
+> in the checkpoint.
 
 ---
 
-## Step 3: Per-Outcome Sub-Agent Loop
+## Step 3 Reference: Registry Paths, Sub-Agent Template, Response Handling
 
-### 3-pre. Resolve Component Registry Path
+### Registry Paths (resolve once at start)
 
-Check if `existingcomponents.json` exists in the plugin working
-directory (may have been created by `/breeze:generate-component-registry`
-or prior design runs).
+All registries are **platform-scoped** when `PLATFORM_ID` is set:
 
-- **Exists and non-empty** → set `componentRegistryPath` to its
-  absolute path. Sub-agents will use it as a classification cache
-  (skip re-classifying known components).
-- **Missing or empty** → set `componentRegistryPath` to `"none"`.
-  Sub-agents classify everything from scratch.
+| Registry | Single-platform path | Multi-platform path |
+|---|---|---|
+| Components | `existingcomponents.json` | `existingcomponents.{PLATFORM_ID}.json` |
+| Flows | `existingflows.json` | `existingflows.{PLATFORM_ID}.json` |
+| Pages | `existingpages.json` | `existingpages.{PLATFORM_ID}.json` |
 
-> **Recommended workflow:** Run `/breeze:generate-component-registry`
-> first to pre-populate the registry. This makes design generation
-> faster (cached classifications) and more consistent (same naming
-> across outcomes processed in parallel).
+> **UJ duplicate detection:** No separate registry file. Sub-agents
+> scan `OUTPUT_DIR/design_*.json` payload files for `ujName` values.
 
-### 3a. Spawn Sub-Agents (up to 3 in parallel)
+**Component registry** (pre-populated by `/breeze:generate-component-registry`):
+- **Exists and non-empty** → set `componentRegistryPath` to absolute path.
+- **Missing or empty** → STOP. Run `/breeze:generate-component-registry`
+  first. Components must come from the registry (Critical Rule 16).
 
-For each outcome in the queue (or batch of up to 3 in `auto`/`dry-run` mode):
+**Page registry** (`existingpages.json` / scoped variant):
+- **Exists and non-empty** → set `pageRegistryPath` to absolute path.
+- **Missing or empty** → set `pageRegistryPath` to `"none"`.
 
-**Pre-flight:**
-1. Skip if outcome already in `completed`
-2. Skip if `outcomeId` in `blockedOutcomeIds`
+> **⛔ Component registry is REQUIRED.** The sub-agent selects
+> components from the registry — it does not classify from scratch.
+> Without a pre-populated registry, the sub-agent has nothing to
+> select from. Run `/breeze:generate-component-registry` first.
 
-**Render sub-agent prompt:**
+### Sub-Agent Prompt Template
 
-Read the template at `references/design-structuring-agent.prompt.md`
-and substitute:
+Read `references/design-structuring-agent.prompt.md` and substitute:
 
 | Placeholder | Value |
 |---|---|
 | `{{outcome_id}}` | outcome UUID |
 | `{{outcome_name}}` | outcome name |
 | `{{persona_name}}` | persona name |
-| `{{scenarios_json}}` | JSON array of scenarios with stepsActions |
+| `{{persona_id}}` | persona UUID |
 | `{{modalities}}` | comma-separated: `"WEB"` or `"WEB", "MOBILE"` |
 | `{{framework}}` | detected framework from Phase 0a |
 | `{{repo_root_absolute_path}}` | absolute UI repo path |
@@ -388,119 +538,76 @@ and substitute:
 | `{{output_dir}}` | `{OUTPUT_BASE}/` |
 | `{{skill_references_path}}` | absolute path to references directory |
 | `{{component_registry_path}}` | absolute path to `existingcomponents.json`, or `"none"` |
+| `{{page_registry_path}}` | absolute path to `existingpages.json`, or `"none"` |
 | `{{mode}}` | `live` or `dry-run` |
+| `{{app_suffix}}` | `APP_SUFFIX` (e.g., `" [Source Web]"` or `""`) |
+| `{{platform_id}}` | `PLATFORM_ID` (e.g., `"source-web"` or `""`) |
 
-**Spawn:**
+### Sub-Agent Response Handling
 
-```
-Agent(
-  subagent_type: "breeze:design-from-ui-structuring-agent",
-  description: "Design outcome: {outcomeName} ({N} scenarios)",
-  prompt: <rendered template>
-)
-```
-
-For `auto`/`dry-run` mode, spawn up to 3 agents in a single message.
-
-### 3b. Handle Sub-Agent Response
-
-Parse the summary line, then read the results manifest for details.
-
-**Step 1: Parse summary line:**
+**Parse summary line:**
 
 | Prefix | Action |
 |---|---|
 | `OK` | All scenarios succeeded |
-| `PARTIAL` | Some scenarios failed — check manifest |
-| `BUDGET` | Sub-agent hit ~75% context budget — some scenarios still `pending`. Treat outcome as `PARTIAL` for checkpoint; pending scenarios need re-processing on resume |
-| `FAIL` | Outcome-level failure (e.g., could not read target page) |
+| `PARTIAL` | Some scenarios failed — check outcome file |
+| `BUDGET` | Hit context budget — pending scenarios need re-processing |
+| `FAIL` | Outcome-level failure |
 
-**Step 2: Read results manifest:**
+**Read outcome file** (`{OUTPUT_DIR}/design_{outcome_slug}.json`):
 
-The sub-agent writes `{OUTPUT_DIR}/results_{outcome_slug}.json`:
-```json
-{
-  "outcomeId": "...",
-  "outcomeName": "Authentication",
-  "scenarios": [
-    {
-      "id": "scenario-uuid-1",
-      "name": "Login with Email",
-      "status": "completed",
-      "payloadPath": ".breeze-output/design_login-with-email.json",
-      "flowsCreated": 2,
-      "pagesCreated": 3,
-      "componentsCreated": 12,
-      "completedAt": "2026-08-10T..."
-    },
-    {
-      "id": "scenario-uuid-2",
-      "name": "Social Login",
-      "status": "failed",
-      "error": "FAIL_UPSERT · http: 422",
-      "payloadPath": ".breeze-output/design_social-login.json"
-    }
-  ],
-  "totals": {
-    "scenarios": 5,
-    "succeeded": 4,
-    "failed": 1,
-    "flows": 8,
-    "pages": 10,
-    "components": 34
-  }
-}
+The outcome file contains all scenario data keyed by scenario ID.
+Each entry has `status`, `stats`, `payload`, and `validation` fields.
+
+```
+FOR each scenarioId, entry in file.scenarios:
+  IF entry.status == "completed":
+    → update checkpoint with entry.stats
+  IF entry.status == "failed":
+    → log entry.error
+  IF entry.status == "pending":
+    → keep in remaining for re-processing
 ```
 
-**Step 3: Merge into checkpoint:**
+**⛔ Hierarchy completeness check (parent-side guard):**
 
-For each scenario in the manifest, update the matching entry in
-`design-progress.json` with status, stats, payloadPath, error.
+```
+FOR each scenarioId, entry in file.scenarios WHERE entry.status == "completed":
+  FOR each userJourney in entry.payload.userJourneys:
+    IF userJourney.flows is empty → FAIL this scenario
+    FOR each flow in userJourney.flows:
+      IF flow.pages is empty → FAIL this scenario
+      FOR each page in flow.pages:
+        IF page.components is empty → FAIL this scenario
+```
 
-### 3c. Update Checkpoint
+If any fails → mark as `failed` with `HIERARCHY_INCOMPLETE` error,
+downgrade outcome to `PARTIAL`.
 
-After each outcome (or batch):
-- `OK` → move outcome from `remaining[]` to `completed[]`
-- `PARTIAL` → move to `completed[]` (failed scenarios stay `failed` in checkpoint)
-- `BUDGET` → keep outcome in `remaining[]` with per-scenario status updated (completed scenarios marked done, pending scenarios stay `pending` for re-processing on resume)
-- `FAIL` → move to `failed[]`
-- Update every scenario's status/stats from the results manifest
-- Write checkpoint to disk
-- Log progress: `"[{completed}/{total}] Outcome: {name} — {succeeded}/{scenarioCount} scenarios"`
+**Update checkpoint:**
+- `OK` → mark persona's outcome as `completed`
+- `PARTIAL` → mark `completed` (failed scenarios stay `failed`)
+- `BUDGET` → keep outcome in `remaining` (pending scenarios stay `pending`)
+- `FAIL` → mark as `failed`
 
-### 3d. Outcome Mode: Pause Between Outcomes
+### Outcome Mode: Pause Between Outcomes
 
-After each outcome completes (only in `outcome` mode):
+In `outcome` mode only — after each outcome:
 
 ```
 --- OUTCOME COMPLETE: "{outcomeName}" ---
-  Scenarios: {succeeded}/{total} succeeded
-  Failed: {N}
-  Flows: {N}, Pages: {N}, Components: {N}
-
-  Next outcome: [{persona}] {name} ({N} scenarios)
-
-Continue to next outcome? (continue/stop/skip)
+  Scenarios: {succeeded}/{total}
+  Next: [{persona}] {name} ({N} scenarios)
+Continue? (continue/stop/skip)
 ```
 
-| Response | Action |
-|---|---|
-| continue/y | Proceed |
-| stop/n | Exit, go to reconciliation |
-| skip | Skip next, show the one after |
+### Budget Management
 
-### 3e. Budget Management
-
-Tune the batch size down to 1 if you are near your context budget or
-hitting rate limits.
-
-When context reaches ~75%, flush checkpoint and stop:
+When parent context reaches ~75%, flush checkpoint and stop:
 ```
 Context budget reaching limit. Progress saved.
-
-  Completed: {N} outcomes ({M} scenarios)
-  Remaining: {N} outcomes ({M} scenarios)
-
+  Personas completed: {N}/{total}
+  Current persona: {name} — {N}/{M} outcomes done
 Resume: /breeze:generate-design-from-ui continue from {uiRepo}
 ```
 
@@ -515,20 +622,30 @@ check for edge-case duplicates. The backend deduplicates by
 `projectUuid + name` (case-insensitive), so most cases are handled.
 This catches near-name mismatches across parallel agents.
 
+> **⛔ Platform scoping (critical):** When `APP_SUFFIX` is non-empty,
+> reconciliation MUST only operate on nodes belonging to this platform.
+> After fetching all nodes via `Get_all_Design_By_Label`, **filter to
+> keep only nodes whose name ends with `APP_SUFFIX`** before grouping
+> and merging. Never merge a node from this platform with a node from
+> another platform — that destroys both graphs.
+
 ### 4a. Flow Reconciliation
 
 1. `Get_all_Design_By_Label(uuid, label: "Flow")` (paginate)
-2. Group by `(name, modality)` — find groups with >1 entry
-3. True duplicates → merge (keep one, reassign edges, delete other)
-4. Near-duplicates → log for user review
+2. **Filter:** keep only nodes matching this platform (name ends with
+   `APP_SUFFIX`, or all nodes if `APP_SUFFIX` is empty)
+3. Group by `(name, modality)` — find groups with >1 entry
+4. True duplicates → merge (keep one, reassign edges, delete other)
+5. Near-duplicates → log for user review
 
 ### 4b. Page Reconciliation
 
-Group by `(name, pageType)`, merge true duplicates.
+Filter to platform, then group by `(name, pageType)`, merge true
+duplicates.
 
 ### 4c. Component Reconciliation
 
-Group by `name`, merge true duplicates.
+Filter to platform, then group by `name`, merge true duplicates.
 
 ### 4d. Record Results
 
@@ -605,8 +722,7 @@ Re-run in auto mode to execute.
 
 ```
 Progress:  {OUTPUT_BASE}/design-progress.json
-Payloads:  {OUTPUT_BASE}/design_*.json
-Manifests: {OUTPUT_BASE}/results_*.json
+Payloads:  {OUTPUT_BASE}/design_*.json (one per outcome, scenarios keyed by ID)
 
 Resume: /breeze:generate-design-from-ui continue from {uiRepo}
 ```

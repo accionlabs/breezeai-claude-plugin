@@ -21,6 +21,7 @@
 | Tool | Purpose |
 |---|---|
 | `Bulk_Update_Design_Nodes` | **PRIMARY** — create entire UserJourney tree per scenario |
+| `Create_Design_Node` | Create a single node with per-node citations (not idempotent — 400 on duplicate name) |
 | `Update_Design_Node` | Update metadata fields on existing nodes |
 | `Update_Functional_Node` | Mark scenario as processed (`isDesignGenerated=true`) |
 | `Delete_Design_Node` | Remove nodes when replacing |
@@ -86,3 +87,23 @@ registry update (Step 6d) is sufficient since dedup is by name.
 
 **Mark processed:** `Update_Functional_Node` with
 `isDesignGenerated: true` after successful upsert.
+
+---
+
+## Citation Placement (Design Graph)
+
+Per-node `citations` arrays are supported on **UserJourney**, **Page**,
+and **Component** nodes. Each node's citations are resolved individually
+and merged with the top-level `citations` (which apply as a shared
+default to every node). **Flow does not support per-node citations**
+(derived structure — no distinct source artifact).
+
+| Level | Per-node `citations`? | Typical source |
+|---|---|---|
+| **Component** | yes — primary | the component file / Figma component |
+| **Page** | yes | the route definition file |
+| **UserJourney** | optional | a design doc or Figma board |
+| Flow | no | derived structure, no distinct artifact |
+
+Citation format: `{"type": "code", "reference": "<code-ontology-node-id>"}`.
+Other types: `document`, `exDoc`, `figma`, `jira`, `confluence`, `prompt`.

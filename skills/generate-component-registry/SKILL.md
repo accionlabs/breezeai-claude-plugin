@@ -1,13 +1,14 @@
 ---
 name: generate-component-registry
 description: >
-  Scan a frontend UI codebase to discover all components, classify them
-  by atomic design level (ATOM, MOLECULE, ORGANISM, TEMPLATE), and build
-  the `existingcomponents.json` registry. Optionally upserts Component
+  Scan a frontend UI codebase (single-repo or monorepo with multiple
+  frontend apps) to discover all components, classify them by atomic
+  design level (ATOM, MOLECULE, ORGANISM, TEMPLATE), and build the
+  `existingcomponents.json` registry. Optionally upserts Component
   nodes to the Breeze design graph.
   Use when: "build component registry", "scan components", "create
   component inventory", "populate existingcomponents.json",
-  "component discovery from UI".
+  "component discovery from UI", "scan all apps", "monorepo components".
 argument-hint: "[repo-path]"
 ---
 
@@ -74,6 +75,15 @@ every page is scanned exactly once.
    `/breeze:setup-project`
 3. If missing and user wants registry-only → proceed without it
 4. Extract `projectUuid` if available
+5. Check for `designGraph.appSuffix` in `.breeze.json`. If present,
+   store as `APP_SUFFIX`. If absent, set `APP_SUFFIX = ""`.
+
+> **Multi-app collision guard:** When `APP_SUFFIX` is non-empty, this
+> project shares a Breeze graph with other apps. After building the
+> registry, check each component name against the other apps'
+> `existingcomponents.json` files. If a name collides, append
+> `APP_SUFFIX` to the source-web name. Update all
+> `supportingComponents` references to match.
 
 > **Parameter naming:** All Breeze MCP tools require the project ID
 > as **`uuid`** (NOT `projectId` or `projectUuid`). See
@@ -87,7 +97,7 @@ every page is scanned exactly once.
 
 1. Check if user passed a path via `$ARGUMENTS`
 2. Check `.breeze.json` field `targetRepos.frontend`
-3. Check if cwd looks like a frontend repo
+3. Check if cwd looks like a frontend repo or monorepo root
 4. Ask the user: "Which UI repo? Provide an absolute path."
 5. Persist to `.breeze.json` if available:
    `{ "targetRepos": { "frontend": "..." } }`
@@ -96,9 +106,74 @@ every page is scanned exactly once.
 > `src/router/`, `src/routes/`, `app/routes`, `pages/`, `src/pages/`,
 > `app/`, or framework router imports.
 
+### 0a-mono. Detect Monorepo
+
+After resolving the root path, check if it is a **monorepo** before
+treating it as a single-app repo.
+
+**Monorepo signals (check in order):**
+
+| Signal | Type |
+|---|---|
+| `nx.json` at root | NX workspace |
+| `pnpm-workspace.yaml` at root | pnpm workspaces |
+| `lerna.json` at root | Lerna |
+| `workspaces` key in root `package.json` | npm/yarn workspaces |
+| `rush.json` at root | Rush (Microsoft) |
+| `turbo.json` at root | Turborepo |
+| `apps/` directory with multiple sub-directories, each having `package.json` | Generic monorepo |
+
+**If monorepo detected:**
+
+1. Enumerate frontend apps by scanning `apps/` (and `packages/`
+   if present) for sub-directories that pass the **frontend repo
+   detection** test above.
+2. Also scan for **shared UI libraries** in:
+   ```
+   libs/ui/**, libs/shared/**, libs/components/**
+   packages/ui/**, packages/shared/**, packages/design-system/**
+   ```
+3. Display the discovered apps and ask the user which to scan:
+   ```
+   Monorepo detected ({type}).
+
+   Frontend apps found:
+     1. apps/admin      (Angular)
+     2. apps/portal     (React Router)
+     3. apps/marketing  (Next.js)
+
+   Shared UI libs:
+     - libs/ui          (components)
+     - libs/shared      (utilities + components)
+
+   Scan:
+     A. All apps (recommended — cross-app scope widening enabled)
+     B. Select specific apps
+     C. Shared libs only
+
+   Choose A, B, or C:
+   ```
+4. If user selects **B**, prompt for comma-separated numbers.
+5. Record the selection as `targetApps` (list of resolved paths)
+   and `sharedLibPaths` (always included if present).
+6. Persist to `.breeze.json`:
+   ```json
+   {
+     "targetRepos": {
+       "frontend": "/path/to/monorepo-root",
+       "monorepo": true,
+       "targetApps": ["apps/admin", "apps/portal"],
+       "sharedLibPaths": ["libs/ui", "libs/shared"]
+     }
+   }
+   ```
+
+**If NOT a monorepo:** proceed as a single-app repo. Set
+`targetApps = [resolvedPath]`, `sharedLibPaths = []`.
+
 ### 0b. Detect Framework
 
-Identify the framework from router files and `package.json`:
+Identify the framework **per app** from router files and `package.json`:
 
 | Signal | Framework |
 |---|---|
@@ -109,7 +184,11 @@ Identify the framework from router files and `package.json`:
 | `*-routing.module.ts` or `app.routes.ts` | Angular |
 | `src/routes/` with `+page.svelte` | SvelteKit |
 
-Record the detected framework for use during page discovery and
+For monorepos, each app in `targetApps` gets its own `framework`
+label. Shared libs do not need a framework label — classify their
+components using the same rules as the parent app that imports them.
+
+Record the detected frameworks for use during page discovery and
 component reading.
 
 ### 0c. Ask user: mode
@@ -150,6 +229,11 @@ Default: 1 (merge).
 
 > **Goal:** Parse the router to build a deduplicated list of every
 > page in the app, including layout routes. No functional graph needed.
+>
+> **Monorepo:** Repeat Steps 1a–1e for **each app** in `targetApps`.
+> Shared libs (Step 1b) are processed once across all apps. Maintain
+> a single merged `uniquePages` list tagged with `appName` so that
+> scope widening in Step 2c can detect cross-app reuse.
 
 ### 1a. Locate and parse the router
 
@@ -173,13 +257,14 @@ Default: 1 (merge).
      shared chrome components that must be in the registry
 4. For lazy-loaded routes (`() => import(...)`, `loadComponent`,
    `defineAsyncComponent`), resolve the import path to the actual file
-5. Build `uniquePages` list:
+5. Build `uniquePages` list. For monorepos, tag each entry with
+   the app name so cross-app scope widening works in Step 2c:
    ```
    uniquePages = [
-     { route: "(layout)", file: "src/layouts/MainLayout.tsx", type: "layout" },
-     { route: "/dashboard", file: "src/pages/Dashboard/index.tsx", type: "page" },
-     { route: "/search", file: "src/pages/Search/index.tsx", type: "page" },
-     { route: "/settings", file: "src/pages/Settings/index.tsx", type: "page" },
+     { route: "(layout)", file: "src/layouts/MainLayout.tsx", type: "layout", app: "admin" },
+     { route: "/dashboard", file: "src/pages/Dashboard/index.tsx", type: "page", app: "admin" },
+     { route: "/search", file: "src/pages/Search/index.tsx", type: "page", app: "portal" },
+     { route: "/settings", file: "src/pages/Settings/index.tsx", type: "page", app: "portal" },
      ...
    ]
    ```
@@ -242,18 +327,47 @@ Angular typical structure:
     └── app.component.ts                 ← root layout
 ```
 
-**6. Include dialog/sheet components in uniquePages:**
-Grep for `MatDialog.open(X)` and `MatBottomSheet.open(X)` across
-the entire app — these open components that may not be in any route
-but still contain UI components that should be in the registry.
+**6. Include dialog/sheet/modal components in uniquePages:**
+These components are NOT in the router but contain UI that must be
+in the registry. Grep across the entire app for:
+
+**Angular:**
+```
+MatDialog.open(X), this.dialog.open(X)
+MatBottomSheet.open(X), this.bottomSheet.open(X)
+```
+
+**React:**
+```
+<Modal, <Dialog, <Drawer, <Sheet, <Popup
+useModal(, useDialog(
+```
+
+**Vue:**
+```
+<el-dialog, <a-modal, <v-dialog, <n-modal
+```
+
+Also glob for components in dedicated directories:
+```
+**/dialogs/**/*.component.{ts,tsx,jsx,vue,svelte}
+**/modals/**/*.component.{ts,tsx,jsx,vue,svelte}
+**/overlays/**/*.component.{ts,tsx,jsx,vue,svelte}
+**/sheets/**/*.component.{ts,tsx,jsx,vue,svelte}
+**/drawers/**/*.component.{ts,tsx,jsx,vue,svelte}
+```
+
+Add each discovered dialog/modal component to `uniquePages` with
+`type: "dialog"` so the scanning agent knows to classify it as
+a Component (ORGANISM or MOLECULE), never a Page.
 
 ### 1b. Discover shared component directories
 
-Before page scanning, identify the repo's shared component directories:
+Before page scanning, identify the repo's shared component directories.
 
-**React / Vue / Svelte / Next / Nuxt:**
+**React / Vue / Svelte / Next / Nuxt (per app):**
 ```
-Glob for common shared patterns:
+Glob for common shared patterns inside the app root:
   src/components/**/*.{tsx,jsx,vue,svelte,ts}
   src/ui/**/*.{tsx,jsx,vue,svelte,ts}
   src/lib/components/**/*.{tsx,jsx,vue,svelte,ts}
@@ -261,16 +375,25 @@ Glob for common shared patterns:
   components/**/*.{tsx,jsx,vue,svelte,ts}   (Nuxt/Next)
 ```
 
-**Angular:**
+**Angular (per app):**
 ```
-Glob for Angular shared patterns:
+Glob for Angular shared patterns inside the app root:
   src/app/shared/**/*.component.ts
   src/app/core/**/*.component.ts
   src/app/common/**/*.component.ts
   src/app/ui/**/*.component.ts
-  libs/shared/**/*.component.ts             (NX monorepo)
-  libs/ui/**/*.component.ts                 (NX monorepo)
 ```
+
+**Monorepo shared libs (`sharedLibPaths` from Phase 0a-mono):**
+```
+For each path in sharedLibPaths, glob for:
+  {libPath}/**/*.{tsx,jsx,vue,svelte,ts}        (React/Vue/Svelte)
+  {libPath}/**/*.component.ts                   (Angular)
+  {libPath}/src/**/*.{tsx,jsx,vue,svelte,ts}    (if lib has src/ root)
+```
+
+Components found in `sharedLibPaths` are tagged `app: "shared-lib"`
+and always receive scope `GLOBAL` — they are cross-app by definition.
 
 > **Angular file matching:** Use `*.component.ts` (not just `*.ts`)
 > to avoid matching services, guards, pipes, and other non-component
@@ -351,6 +474,7 @@ agentBatches = [
 
 ### 1e. Show discovery summary
 
+**Single-app:**
 ```
 Page Discovery Summary:
   Framework: {name}
@@ -366,6 +490,30 @@ Page Discovery Summary:
     3. [page]    Dashboard                         (12 files)
     4. [page]    Search                            (8 files)
     5. [multi]   Login + Register + ForgotPassword (5 files)
+    ...
+
+Proceed with component scan?
+```
+
+**Monorepo:**
+```
+Monorepo Discovery Summary:
+  Apps selected: {N}
+    - admin   (Angular)   → {N} pages, {M} layout routes
+    - portal  (React)     → {N} pages, {M} layout routes
+    - ...
+  Shared libs: {paths}    → {N} files
+  Total agent batches: {N} ({M} page, {K} shared/layout, {J} lib)
+  Max parallel: 5
+  Cross-app scope widening: ENABLED
+
+  Batches:
+    1. [shared-lib]  libs/ui/ + libs/shared/          (58 files)
+    2. [shared]      admin: src/app/shared/             (24 files)
+    3. [layout]      admin: AppShell + SideNav          (6 files)
+    4. [page]        admin: Dashboard                   (11 files)
+    5. [page]        portal: Home                       (9 files)
+    6. [multi]       portal: Login + Register           (5 files)
     ...
 
 Proceed with component scan?
@@ -426,6 +574,8 @@ For each component you find, return a JSON array:
   supportingComponents must have ≥ 2 MOLECULEs and/or ATOMs.
 - TEMPLATE: Layout-only, no business logic, just slots/children.
   supportingComponents must have ≥ 2 ORGANISMs.
+  ⛔ Only create TEMPLATEs that exist as actual components in the
+  codebase. Never infer or hypothesize a TEMPLATE.
 
 ## Classification Rules (Angular)
 
@@ -454,6 +604,8 @@ Angular components have SEPARATE .ts and .html files. Read BOTH.
   Examples: <mat-sidenav-container> layout, AppShellComponent
   with toolbar + sidenav + router-outlet.
   supportingComponents must have ≥ 2 ORGANISMs.
+  ⛔ Only create TEMPLATEs that exist as actual components in the
+  codebase. Never infer or hypothesize a TEMPLATE.
 
 Angular state signals (any = ORGANISM):
   signal(), computed(), effect()
@@ -464,11 +616,46 @@ Angular state signals (any = ORGANISM):
 
 Angular Material shortcuts:
   <mat-button>, <mat-icon>, <mat-checkbox> → ATOM
+  [mat-dialog-title], [mat-dialog-content], [mat-dialog-actions],
+    [mat-dialog-close], <mat-tooltip> → ATOM
   <mat-form-field> + <input matInput> → MOLECULE
+  <mat-bottom-sheet> container → MOLECULE
   <mat-table> with sort + paginator → ORGANISM
   <mat-tab-group> with content panels → ORGANISM
-  <mat-dialog> content with forms → ORGANISM
+  <mat-dialog> content component with forms/state → ORGANISM
   <mat-sidenav-container> → TEMPLATE
+
+## Modal / Dialog / Overlay / Drawer / Sheet Discovery
+
+⛔ Modals and dialogs are COMPONENTS (usually ORGANISM), NEVER Pages.
+They open over an existing route page and are parented to that page.
+
+**Discovery rules:**
+1. Grep for `MatDialog.open(`, `MatBottomSheet.open(`,
+   `this.dialog.open(`, `this.bottomSheet.open(` across the app.
+   Each opened component is a dialog/modal component to register.
+2. Grep for components in `dialogs/`, `modals/`, `overlays/`,
+   `sheets/` directories — these are dialog components by convention.
+3. Grep for `<p-dialog>`, `<p-confirmDialog>`, `<p-sidebar>`,
+   `<nz-modal>`, `<nz-drawer>` (PrimeNG / NG-Zorro patterns).
+4. For React: grep for `<Modal`, `<Dialog`, `<Drawer`, `<Sheet`,
+   `useModal`, `useDialog` patterns.
+
+**Classification:**
+- Simple confirmation dialog (title + message + buttons) → MOLECULE
+- Dialog with form, state, service injection → ORGANISM
+- Dialog wrapper/container (just renders `<ng-content>`) → MOLECULE
+- Angular Material dialog directives (mat-dialog-title,
+  mat-dialog-content, mat-dialog-actions, mat-dialog-close) → ATOM
+- Bottom sheet container → MOLECULE
+
+**supportingComponents for dialogs:**
+Always include the dialog structural atoms:
+  MatDialogTitle, MatDialogContent, MatDialogActions, MatDialogClose,
+  MatButton, MatIcon (as applicable from the template).
+
+**Naming:** Use the PascalCase class name (e.g.,
+  `DeleteConfirmationDialogComponent`, `EditUserDialogComponent`).
 
 Angular naming: Use PascalCase CLASS NAME (e.g., UserTableComponent),
 NOT the kebab-case selector (e.g., app-user-table).
@@ -528,12 +715,21 @@ ON agent completion for batch "{batchName}":
 
 | Currently | Seen again in | New scope |
 |---|---|---|
-| `PAGE` | Same feature dir | `PAGE` (no change) |
-| `PAGE` | Different feature dir | `DOMAIN` |
-| `PAGE` | 3rd distinct feature | `GLOBAL` |
-| `DOMAIN` | Any new feature | `GLOBAL` |
+| `PAGE` | Same feature dir (same app) | `PAGE` (no change) |
+| `PAGE` | Different feature dir (same app) | `DOMAIN` |
+| `PAGE` | 3rd distinct feature (same app) | `GLOBAL` |
+| `DOMAIN` | Any new feature (same app) | `GLOBAL` |
+| `PAGE` or `DOMAIN` | **Any other app** | `GLOBAL` immediately |
 | `GLOBAL` | Anywhere | `GLOBAL` (no change) |
-| From `src/components/` or `src/ui/` | — | Always `GLOBAL` |
+| From `src/components/` or `src/ui/` (per-app) | — | Always `GLOBAL` |
+| From `sharedLibPaths` (monorepo libs) | — | Always `GLOBAL` |
+
+> **Cross-app widening:** In a monorepo, if a component named `Button`
+> is found in `apps/admin` AND `apps/portal`, its scope jumps to
+> `GLOBAL` immediately — regardless of its current scope. Track the
+> `app` tag on each registry entry to detect this. The `app` field is
+> only used for scope computation; it is NOT written to
+> `existingcomponents.json` (the registry format stays flat).
 
 ### 2d. Handle agent failures
 
@@ -569,6 +765,7 @@ If an agent fails or times out:
 
 ### 3b. Show registry state
 
+**Single-app:**
 ```
 Registry built incrementally ({N} batches completed, {M} failed):
 
@@ -580,6 +777,30 @@ Registry built incrementally ({N} batches completed, {M} failed):
 
   Scope distribution:
     GLOBAL: {N}  |  DOMAIN: {N}  |  PAGE: {N}
+
+  Validation:
+    ⚠ {N} components with < 2 supportingComponents (see warnings above)
+    ⚠ {N} dangling supportingComponent references
+```
+
+**Monorepo:**
+```
+Registry built incrementally ({N} batches completed, {M} failed):
+
+  ATOM:     {N} components
+  MOLECULE: {N} components
+  ORGANISM: {N} components
+  TEMPLATE: {N} components
+  Total:    {N} components
+
+  Scope distribution:
+    GLOBAL: {N}  |  DOMAIN: {N}  |  PAGE: {N}
+    (Cross-app promoted to GLOBAL: {N})
+
+  Per-app breakdown (scope at discovery):
+    admin   → {N} components ({N} GLOBAL, {N} DOMAIN, {N} PAGE)
+    portal  → {N} components ({N} GLOBAL, {N} DOMAIN, {N} PAGE)
+    libs    → {N} components (all GLOBAL)
 
   Validation:
     ⚠ {N} components with < 2 supportingComponents (see warnings above)
@@ -657,9 +878,10 @@ END FOR
 ```
 Component Registry Complete
 
-  Framework:        {name}
+  Mode:             {single-app | monorepo ({N} apps)}
+  Framework(s):     {name(s)}
   Batches:          {N} completed, {M} failed
-  Pages scanned:    {N} (+ {M} layout routes, {K} shared dirs)
+  Pages scanned:    {N} (+ {M} layout routes, {K} shared dirs/libs)
   Total components: {N}
 
   By type:
@@ -669,9 +891,14 @@ Component Registry Complete
     TEMPLATE: {N}
 
   By scope:
-    GLOBAL: {N}
+    GLOBAL: {N}  (including {N} promoted via cross-app reuse)
     DOMAIN: {N}
     PAGE:   {N}
+
+  [Monorepo only] Per-app breakdown:
+    {appName}: {N} components
+    ...
+    shared-libs: {N} components (all GLOBAL)
 
   Validation warnings: {N}
   Upserted to graph: {yes/no}
@@ -706,6 +933,7 @@ Component Registry Complete
 | Before first run of `generate-design-from-ui` | **Yes** — pre-populates registry |
 | Component registry is empty or stale | **Yes** — rebuilds from source |
 | Want to audit component inventory | **Yes** — registry-only mode |
+| Monorepo with multiple frontend apps | **Yes** — detects and scans all apps, cross-app scope widening |
 | Need full design graph (UJ/Flow/Page/Component) | **No** — use `generate-design-from-ui` |
 | No functional graph exists yet | **Yes** — works from router alone |
 | No `.breeze.json` configured | **Yes** — registry-only mode needs no MCP |
