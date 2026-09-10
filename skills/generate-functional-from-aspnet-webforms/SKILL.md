@@ -212,7 +212,7 @@ For each UI EP in `remaining[]`, and for each `persona` in `ep.personas[]`, in p
 PERSONA: <persona>            ENTRY_POINT: { route, kind(page|control|master), title }
 SEED_FILE: <abs path to .aspx/.ascx markup>   CODE_BEHIND: <abs .aspx.cs/.ascx.cs>
 REPO: { name: <basename>, root: <abs repo path> }
-PROJECT_UUID / PROJECT_NAME / LLM_PLATFORM: AWSBEDROCK
+PROJECT_UUID / PROJECT_NAME / PLATFORM (defaults to "default") / LLM_PLATFORM: AWSBEDROCK
 OUTPUT_PATH_HUMAN / OUTPUT_PATH_SYSTEM
 API_BASE / API_KEY (never echo)
 CODE_ONTOLOGY_ID / INDEXED_REPO_NAME   SHARED_FUNCTIONAL_PATH

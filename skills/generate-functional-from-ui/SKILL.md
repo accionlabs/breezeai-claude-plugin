@@ -375,6 +375,7 @@ Then load `references/spa-flow-structuring-agent.prompt.md` and substitute the `
 | `{{repo_root_absolute_path}}` | absolute path to the UI repo |
 | `{{project_uuid}}` | `projectUuid` from `.breeze.json` |
 | `{{project_name}}` | project name cached in Bootstrap step 4 |
+| `{{platform}}` | Functional platform scope for Outcomes. Read from `.breeze.json → functionalGraph.platform` or `designGraph.platform.id`; defaults to `"default"` if absent. |
 | `{{llm_platform}}` | `"AWSBEDROCK"` (passed to upsert URL) |
 | `{{output_path}}` | the pre-computed `OUTPUT_PATH` above |
 | `{{api_base}}` | `apiBase` from Bootstrap step 2 |

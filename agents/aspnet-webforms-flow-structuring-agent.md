@@ -65,6 +65,7 @@ MOUNTED_CONTROLS:      [ { file, codeBehind, mountedVia, role } ]   # folded chi
 REPO:  { name: <basename used in citations>, root: <absolute repo path> }
 PROJECT_UUID:          <uuid>                         # Code_Graph_Search / functional reads / upsert body
 PROJECT_NAME:          <display name>
+PLATFORM:              <platform scope>               # set on every Outcome node; defaults to "default"
 LLM_PLATFORM:          AWSBEDROCK
 OUTPUT_PATH_HUMAN:     <abs path for the User payload>
 OUTPUT_PATH_SYSTEM:    <abs path for the System payload>

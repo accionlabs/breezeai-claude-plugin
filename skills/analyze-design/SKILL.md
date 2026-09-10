@@ -25,6 +25,23 @@ argument-hint: "[ui-repo-path]"
 
 This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
 
+### Resolve platform config
+
+Read `designGraph.platform` from `.breeze.json` (same config as
+`generate-design-from-ui`):
+
+- If present → set `PLATFORM_ID = designGraph.platform.id` (e.g. `"source-web"`)
+  and `APP_SUFFIX = designGraph.platform.suffix` (e.g. `" [Source Web]"`)
+- If absent → set `PLATFORM_ID = ""`, `APP_SUFFIX = ""`
+
+When `APP_SUFFIX` is set:
+- Append it to every design node name before upserting
+- Filter `Get_all_Design_By_Label` / `Design_Graph_Search` results to only
+  nodes ending with `APP_SUFFIX`
+- Set `platform` on UserJourney to `PLATFORM_ID` (children inherit)
+
+When absent, omit `platform` (backend defaults to `"default"`).
+
 ### Resolve UI repo (optional but strongly preferred)
 
 When a frontend repo is available, this skill reads the codebase to discover
@@ -822,7 +839,11 @@ TEMPLATE already exists (reused), omit it from the payload.
 - **Component supportingComponents** — ORGANISM → MOLECULE/ATOM, MOLECULE → ATOM, ATOM → `[]`
 - **Reused components** — include with `designSystemRef`; backend deduplicates via upsert
 - **Multi-modality** — separate Flow entries per modality under the same UserJourney
-- **Per-node citations** — UserJourney, Page, and Component accept a `citations` array (merged with top-level). Flow does NOT support per-node citations. Cite the source artifact each node was derived from.
+- **Per-node citations** — UserJourney, Page, and Component accept a `citations` array (merged with top-level). Flow does NOT support per-node citations. Cite the source artifact each node was derived from:
+  - **From Figma:** `{"type": "figma", "reference": "<figma-frame-url>"}`
+  - **From Jira:** `{"type": "jira", "reference": "<issue-key>"}`
+  - **From code:** `{"type": "code", "reference": "<code-node-id>"}` (look up via `Code_Graph_Search`)
+  - Skip if no source artifact exists for a node — do NOT block the upsert
 
 ### 5c. Make the Call
 

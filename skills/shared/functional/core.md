@@ -34,6 +34,23 @@ These definitions are **canonical and non-negotiable**. In particular:
 
 ---
 
+## 1b. Outcome-level `platform` and `moduleType`
+
+Two optional fields live **exclusively on the Outcome** node (not on Persona, Scenario, Step, or Action):
+
+| Field | Semantics | In uniqueness key? | Default |
+|---|---|---|---|
+| `platform` | Scopes the Outcome to a product/deployment (e.g. `"customer portal"`, `"admin dashboard"`). Normalised to trimmed lowercase by the backend. | No (Outcome is parent-scoped via `personaId`) | `"default"` |
+| `moduleType` | Free-text classifier (e.g. `"Pippen"`, `"Wizard"`). Groups related Outcomes for filtering/reporting. | No | `null` |
+
+**When to set `platform`:** When the project hosts multiple applications whose Outcomes should be separable by query filter. If the orchestrating skill has a platform config (e.g. `.breeze.json → functionalGraph.platform` or `designGraph.platform.id`), pass it through to every Outcome. If absent, omit (backend defaults to `"default"`).
+
+**When to set `moduleType`:** When the source has an explicit module/app classifier (e.g. metadata `moduleType` field, a monorepo app identifier). If absent, omit.
+
+**Scoping rule:** Platform and moduleType live on Outcome because it is the highest level with business meaning — filtering at Outcome efficiently scopes the entire subtree. Persona/Scenario/Step/Action inherit platform context through their ancestry, not through a direct field.
+
+---
+
 ## 2. Reuse-first & dedup — OUTCOME-ONLY inline, coverage-first below
 
 The upsert merges by **name** at every level, so reuse is achieved by emitting the *exact existing name*. Dedup effort is **concentrated at the Outcome level only** (the sole cross-persona shared node — see §3). Below the Outcome, **bias to coverage: never suppress a possibly-distinct flow**; below-outcome duplicates are cheap to merge later and a merge never loses data, whereas a false-positive dedup permanently drops a flow.

@@ -59,6 +59,7 @@ REPO:
   root:                <absolute repo path>          # on-disk path — used ONLY to strip into relative paths, never as the citation prefix
 PROJECT_UUID:          <uuid>                        # used by Code_Graph_Search AND upsert body
 PROJECT_NAME:          <project display name>        # used by upsert body
+PLATFORM:              <platform scope>              # set on every Outcome node (e.g. "customer portal"); defaults to "default"
 LLM_PLATFORM:          AWSBEDROCK                    # passed through to upsert URL
 OUTPUT_PATH:           <absolute path>               # WHERE you must write your output — see Phase 7
 API_BASE:              <https URL of Breeze backend> # e.g. https://isometric-backend.accionbreeze.com — used by Phase 8
@@ -393,6 +394,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` (on-dis
         "outcomes": [
           {
             "outcome": "Track Construction Project Pipeline",
+            "platform": "{{PLATFORM}}",
             "description": "Validate, enqueue, and export project pipeline data.",
             "citations": [],
             "scenarios": [

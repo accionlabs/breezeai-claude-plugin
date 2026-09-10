@@ -17,6 +17,20 @@ This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE
 
 ---
 
+## Step 0 — Resolve Platform Config
+
+Read `designGraph.platform` from `.breeze.json`:
+
+- If present → set `PLATFORM_ID = designGraph.platform.id` and
+  `APP_SUFFIX = designGraph.platform.suffix`
+- If absent → set `PLATFORM_ID = ""`, `APP_SUFFIX = ""`
+
+When `APP_SUFFIX` is set, filter collected design nodes to only those
+whose name ends with `APP_SUFFIX`. Nodes from other platforms are
+excluded from validation — they belong to another platform's graph.
+
+---
+
 ## Step 1 — Choose Scope (All or Selected Personas)
 
 Before collecting data, ask the user what to validate:

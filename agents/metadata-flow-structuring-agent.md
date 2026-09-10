@@ -47,11 +47,12 @@ You own quality, persistence, and delivery end-to-end: read → enumerate → bu
 ## Inputs (from the rendered prompt)
 
 `APP_ID`, `REPO_NAME`, `REPO_PATH`, `FLAVOR`, `PERSONA_HUMAN` (or `null`), `PERSONA_SYSTEM`,
+`MODULE_TYPE` (free-text classifier for the module, e.g. `"Pippen"` — set on every Outcome as `moduleType`; may be `null`),
 `MAPL_PATH`, `STEPS` (the parsed MAPLQ list), `AJAX_ENDPOINTS`,
 `UNDECLARED_ENTRY_POINTS` (code-exposed addresses with no MAPL declaration — process per Phase 1.8),
 `SHARED_FRAMEWORK_BRIEF` (findings from the one-time `submodules/` pass — apply, do not re-read),
 the Breeze coordinates
-(`PROJECT_UUID`, `PROJECT_NAME`, `LLM_PLATFORM`, `API_BASE`, `API_KEY_FILE` (path to a JSON config holding `apiKey` — read it at POST time, never inline the literal),
+(`PROJECT_UUID`, `PROJECT_NAME`, `PLATFORM` (set on every Outcome node; defaults to `"default"`), `LLM_PLATFORM`, `API_BASE`, `API_KEY_FILE` (path to a JSON config holding `apiKey` — read it at POST time, never inline the literal),
 `HUMAN_UPSERT_PATH`, `SYSTEM_UPSERT_PATH`), `OUTPUT_PATH_HUMAN`, `OUTPUT_PATH_SYSTEM`, `SHARED_FUNCTIONAL_PATH`, `RULES_PATH`,
 `VALIDATORS_PATH`. (No EXISTING_NEIGHBORHOOD is passed — build dedup context yourself from the live graph.)
 

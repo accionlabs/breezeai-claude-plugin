@@ -215,7 +215,7 @@ Render `references/metadata-flow-structuring-agent.prompt.md`, substituting the 
 addresses discovery found with no MAPL declaration), `shared_framework_brief` (the contents of
 `shared-framework-brief.md` from Phase 0b — inject it, do not make the agent re-read `submodules/`),
 the Breeze coordinates (`project_uuid`,
-`project_name`, `llm_platform="AWSBEDROCK"`, `api_base`, `api_key`, `human_upsert_path`,
+`project_name`, `platform` (read from `.breeze.json → functionalGraph.platform`; defaults to `"default"`), `module_type` (from the app's module classifier if available, else `null`), `llm_platform="AWSBEDROCK"`, `api_base`, `api_key`, `human_upsert_path`,
 `system_upsert_path`), the two output paths, `validators_path` (this skill's `validators/` absolute
 dir), `shared_functional_path` (the shared SSOT dir `<pluginRoot>/skills/shared/functional` — the agent
 reads `core.md` + `human-overlay.md` + `system-overlay.md` from here, same as the UI/backend passes),

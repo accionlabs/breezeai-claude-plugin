@@ -554,7 +554,22 @@ Before any `Bulk_Update_Design_Nodes` call:
 > **This is the most commonly forgotten step.** Skipping it causes
 > duplicate components across scenarios and across platforms.
 
-#### 5c. Build Payload & Call Bulk_Update_Design_Nodes
+#### 5c. Collect Citations via Code Graph
+
+Before building the payload, look up source files from the diff to get
+code ontology node IDs for per-node citations.
+
+For each **new or modified** Page and Component (ORGANISM/MOLECULE):
+
+1. Take the source file path from the diff
+2. Call `Code_Graph_Search(uuid: <projectUuid>, query: "<relative-file-path>")`
+3. If a matching code node is found, attach as citation:
+   `{"type": "code", "reference": "<code-node-id>"}`
+4. If no match, skip — do NOT block the upsert on citation failures
+
+Batch unique file paths to minimise MCP calls.
+
+#### 5d. Build Payload & Call Bulk_Update_Design_Nodes
 
 Build the nested payload per scenario and call
 `Bulk_Update_Design_Nodes` — **one call per scenario**:
@@ -614,7 +629,7 @@ Format: `{"type": "code", "reference": "<code-node-id>"}`.
 Pages with `components: []` so the backend adds `INCLUDES_FLOW` /
 `CONTAINS_PAGE` edges.
 
-#### 5d. Update Flow & Page Registries (BLOCKING GATE)
+#### 5e. Update Flow & Page Registries (BLOCKING GATE)
 
 After successful upsert:
 
@@ -646,7 +661,7 @@ After successful upsert:
    ```
    Write back to disk.
 
-#### 5e. Mark Scenarios as Design-Generated (BLOCKING GATE)
+#### 5f. Mark Scenarios as Design-Generated (BLOCKING GATE)
 
 After all registries are updated, call `Update_Functional_Node` on
 each processed scenario:
@@ -665,7 +680,7 @@ Update_Functional_Node(
 > **This must be last** — only mark complete after all registries are
 > confirmed persisted. Premature marking hides incomplete data.
 
-#### 5f. Handle Deletions (if user confirmed)
+#### 5g. Handle Deletions (if user confirmed)
 
 For each confirmed deletion, call `Delete_Design_Node` bottom-up:
 1. Delete Components (ATOMs first, then MOLECULEs, ORGANISMs, TEMPLATEs)

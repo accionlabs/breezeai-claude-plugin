@@ -250,6 +250,7 @@ Load `references/backend-flow-structuring-agent.prompt.md` and substitute the `{
 | `{{repo_root_absolute_path}}` | absolute path to the backend repo (used only to strip into relative paths) |
 | `{{project_uuid}}` | `projectUuid` from `.breeze.json` |
 | `{{project_name}}` | project name cached in Bootstrap step 6 |
+| `{{platform}}` | Functional platform scope for Outcomes. Read from `.breeze.json → functionalGraph.platform`; defaults to `"default"` if absent. |
 | `{{llm_platform}}` | `"AWSBEDROCK"` |
 | `{{output_path}}` | the pre-computed `OUTPUT_PATH` above |
 | `{{api_base}}` | `apiBase` from Bootstrap step 4 |

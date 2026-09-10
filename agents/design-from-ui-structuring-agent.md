@@ -713,6 +713,34 @@ FormPageLayout.supportingComponents = ["PageHeader", "SocialAuthPanel"]
 
 > **Read `design-ontology.md` and `reusability.md` NOW (first scenario only).**
 
+#### 3c-i. Collect Citations via Code Graph
+
+Before building the payload, look up the source files discovered in
+Phases 1-2 to get code ontology node IDs for per-node citations.
+
+**For each page in the flow's page chain:**
+
+1. Take the page's primary file path (from `allPages[route].files[0]`)
+2. Call `Code_Graph_Search(uuid: PROJECT_UUID, query: "<relative-file-path>")`
+3. If a matching code node is found, record its ID as the page's citation:
+   `{"type": "code", "reference": "<code-node-id>"}`
+4. If no match, skip the citation for this page (do NOT invent IDs)
+
+**For each component (ORGANISM and MOLECULE only — skip ATOMs and TEMPLATEs):**
+
+1. Take the component's source file path (from the import drill-down in Phase 2)
+2. Call `Code_Graph_Search` with the file path or component name
+3. If a matching code node is found, record its ID as the component's citation
+4. If no match, skip the citation
+
+**Batching:** To minimise MCP calls, collect all unique file paths first,
+then run `Code_Graph_Search` once per unique path. Cache results — the
+same file often maps to multiple components.
+
+> **Do NOT block on citation failures.** If `Code_Graph_Search` returns
+> no results or errors, build the payload without that citation. The
+> node is still valid; it just won't have a source link in the UI.
+
 **Hierarchy:**
 
 ```
