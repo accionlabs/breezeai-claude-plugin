@@ -75,8 +75,15 @@ every page is scanned exactly once.
    `/breeze:setup-project`
 3. If missing and user wants registry-only → proceed without it
 4. Extract `projectUuid` if available
-5. Check for `designGraph.appSuffix` in `.breeze.json`. If present,
-   store as `APP_SUFFIX`. If absent, set `APP_SUFFIX = ""`.
+5. Read `designGraph.platform` from `.breeze.json`:
+   - If present → set `PLATFORM_ID = designGraph.platform.id`,
+     `APP_SUFFIX = designGraph.platform.suffix`
+   - If absent → check for legacy `designGraph.appSuffix`; if present
+     use it as `APP_SUFFIX` with `PLATFORM_ID = ""`
+   - If neither → set `PLATFORM_ID = ""`, `APP_SUFFIX = ""`
+   When upserting, set `platform` on UserJourney to `PLATFORM_ID`
+   (children inherit). Use platform-scoped registry files when
+   `PLATFORM_ID` is set.
 
 > **Multi-app collision guard:** When `APP_SUFFIX` is non-empty, this
 > project shares a Breeze graph with other apps. After building the
@@ -835,6 +842,7 @@ payload with a placeholder Page wrapper:
               "name": "{PageName}",
               "pageType": "DETAIL",
               "stepIds": [],
+              "citations": [{"type": "code", "reference": "<code-node-id-for-page-file>"}],
               "components": [
                 {
                   "name": "ComponentName",
@@ -842,7 +850,8 @@ payload with a placeholder Page wrapper:
                   "description": "...",
                   "designSystemRef": "...",
                   "supportingComponents": ["ChildA", "ChildB"],
-                  "actionIds": []
+                  "actionIds": [],
+                  "citations": [{"type": "code", "reference": "<code-node-id-for-component-file>"}]
                 }
               ]
             }
@@ -852,6 +861,12 @@ payload with a placeholder Page wrapper:
     }
   ]
 }
+```
+
+**Per-node citations:** Before building the payload, look up each
+page/component source file via `Code_Graph_Search` to get the code
+ontology node ID. Attach as `{"type": "code", "reference": "<id>"}`.
+Skip if no code node is found — do NOT block the upsert.
 ```
 
 > **Note:** These are placeholder containers to get components into

@@ -49,6 +49,7 @@ SEED_FILE:             <absolute path to the .cshtml view (MVC) OR the .cshtml R
 REPO:  { name: <repo name for citations>, root: <absolute repo path> }
 PROJECT_UUID:          <uuid>                         # Code_Graph_Search AND upsert body
 PROJECT_NAME:          <project display name>        # upsert body
+PLATFORM:              <platform scope>              # set on every Outcome node; defaults to "default"
 LLM_PLATFORM:          AWSBEDROCK
 OUTPUT_PATH:           <absolute path>               # WHERE you write (Phase 7)
 API_BASE:              <https URL of Breeze backend> # Phase 8
