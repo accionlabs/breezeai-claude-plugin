@@ -28,7 +28,7 @@
               "additionalProperties": false,
               "properties": {
                 "outcome":     { "type": "string", "minLength": 1 },
-                "platform":    { "type": "string", "description": "Scope — which product/deployment (e.g. 'customer portal'). Normalised to lowercase. Defaults to 'default'." },
+                "platform":    { "type": "string", "description": "Scope — which product/deployment (e.g. 'customer portal'). Normalised to lowercase; omitted or blank → 'default'. Part of the Outcome's identity (persona + outcome name + platform): the same outcome name can exist once per platform, so use the same platform on every run for one app — a different platform creates separate Outcomes instead of updating the existing ones." },
                 "moduleType":  { "type": "string", "description": "Classifier — what kind of module (e.g. 'Pippen'). Not part of the uniqueness key." },
                 "description": { "type": ["string", "null"] },
                 "citations":   { "type": "array", "items": { "$ref": "#/$defs/citation" } },
