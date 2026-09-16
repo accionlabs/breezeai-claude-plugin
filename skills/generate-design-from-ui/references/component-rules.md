@@ -109,8 +109,8 @@ Order within `supportingComponents` reflects visual/logical order.
 
 Before creating any component, read `existingcomponents.json`:
 
-1. **Exact name match** → backend deduplicates by `projectUuid + name`
-   (case-insensitive). Same name = same node, new parent edges added.
+1. **Exact name match** → backend deduplicates by `projectUuid + name + platform`
+   (case-insensitive). Same name and platform = same node, new parent edges added.
 2. **`designSystemRef` for metadata** — still include for design system
    traceability, but NOT the dedup key.
 3. **Semantic + type match in same domain** → REUSE (same name)

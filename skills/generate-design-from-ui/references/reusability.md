@@ -20,7 +20,7 @@ via name-based dedup.
 
 ## Backend Dedup Mechanism
 
-**The backend deduplicates by `projectUuid + name` (case-insensitive).**
+**The backend deduplicates by `projectUuid + name + platform` (case-insensitive).**
 
 When a node with the same name already exists in the bulk upsert:
 

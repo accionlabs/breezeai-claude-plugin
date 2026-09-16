@@ -21,7 +21,7 @@
 | Not updating Flow/Page registries post-upsert | Next scenario can't detect existing flows/pages | Write `existingflows.json` and `existingpages.json` to disk after every upsert        |
 | Omitting reused flows from payload            | Orphaned UserJourneys with no flow        | Include reused flow by name with `pages: []` — backend dedup adds parent edge         |
 | Omitting reused pages from payload            | Orphaned Flows with no page               | Include reused page by name with `components: []` — backend dedup adds parent edge    |
-| Using `designSystemRef` as dedup key          | Backend ignores it for dedup              | Backend deduplicates by `projectUuid + name` (case-insensitive)                       |
+| Using `designSystemRef` as dedup key          | Backend ignores it for dedup              | Backend deduplicates by `projectUuid + name + platform` (case-insensitive)            |
 | Skipping greps for same-page scenarios        | All scenarios get 1 flow / 1 page         | Run greps upfront (Step 3-upfront), analyze each scenario's actions against the cache |
 | Using lowercase pageType/modality             | Backend rejects invalid enum values       | Always uppercase: `FORM`, `LIST`, `DETAIL`, `DASHBOARD`, `WEB`, `MOBILE`              |
 | Adding `actionIds` to Page payloads           | Field doesn't exist on Page entity        | Actions map to Components only, not Pages                                             |

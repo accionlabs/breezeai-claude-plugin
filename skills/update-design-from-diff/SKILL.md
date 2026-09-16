@@ -105,7 +105,7 @@ If either is missing, ask the user. Validate both with
 
    > **Why this matters:** When two platforms share a Breeze project
    > (e.g., source-web and source-mobile), the backend deduplicates
-   > design nodes by `projectUuid + name`. Without `APP_SUFFIX`,
+   > design nodes by `projectUuid + name + platform`. Without `APP_SUFFIX`,
    > `"Login Page"` from both platforms merge into one node —
    > corrupting both design graphs. Every node name created or
    > searched in this skill must be suffix-aware.
@@ -616,7 +616,7 @@ Build the nested payload per scenario and call
 }
 ```
 
-**Backend dedup:** Nodes are matched by `projectUuid + name`
+**Backend dedup:** Nodes are matched by `projectUuid + name + platform`
 (case-insensitive). Including a node by name that already exists
 appends parent edges — no duplicate is created.
 
@@ -897,7 +897,7 @@ for the complete entity model:
 - Flow multiplied per modality
 - Page types: `LIST`, `DETAIL`, `FORM`, `DASHBOARD` (uppercase only)
 - Multi-parent support via `*Ids[]` arrays
-- Backend dedup by `projectUuid + name` (case-insensitive)
+- Backend dedup by `projectUuid + name + platform` (case-insensitive)
 
 Refer to `../generate-design-from-ui/references/atomic-design-rules.md`
 for component classification:
@@ -993,7 +993,7 @@ List the files examined and why each was classified as no-impact.
 | Classifying all as ORGANISM | Flat hierarchy | Use all atomic design levels |
 | Guessing components from action names | Misses real UI | Read actual JSX/template code |
 | Not fetching steps/actions | Missing `stepIds`/`actionIds` | Always call `Get_all_steps_actions_for_a_scenario_id` |
-| Using `designSystemRef` as dedup key | Duplicates created | Backend deduplicates by `projectUuid + name` |
+| Using `designSystemRef` as dedup key | Duplicates created | Backend deduplicates by `projectUuid + name + platform` |
 | Lowercase `pageType`/`modality` | Backend rejects | Always uppercase: `FORM`, `LIST`, `WEB`, etc. |
 | Adding `actionIds` to Page | Field doesn't exist on Page | Actions map to Components only |
 | Omitting reused flows from payload | Orphaned UserJourneys | Include with `pages: []` |

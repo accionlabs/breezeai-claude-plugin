@@ -114,7 +114,7 @@ reads actual code for accurate component discovery.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `id` | Yes (multi-platform) | Unique slug for this platform. Used to scope registry files, output dirs, and checkpoint. |
-| `suffix` | Yes (multi-platform) | Appended to every design node name before upserting. Prevents backend name-based dedup from merging same-named nodes across platforms. |
+| `suffix` | Yes (multi-platform) | Appended to every design node name before upserting. Supplementary visual indicator — the backend now deduplicates by `projectUuid + name + platform`, so the `platform` field is the primary isolation mechanism. |
 | `personas` | Yes (multi-platform) | Persona names that belong to THIS platform. Only outcomes from these personas are processed. Outcomes from other personas are excluded — they belong to another platform's design graph. |
 
 - If `designGraph.platform` exists → set `PLATFORM_ID`, `APP_SUFFIX`,
@@ -129,7 +129,7 @@ reads actual code for accurate component discovery.
 >
 > | Leak vector | What goes wrong |
 > |---|---|
-> | **Backend name dedup** | "Login Page" from Web merges with "Login Page" from Mobile into one node |
+> | **Backend name dedup** | Without `platform` field, "Login Page" from Web merges with "Login Page" from Mobile into one node |
 > | **Shared registries** | Sub-agent reuses Platform A's component when building Platform B |
 > | **Shared persona outcomes** | Sub-agent processes outcomes from both platforms in one run |
 > | **MCP queries** | `Get_all_Design_By_Label` returns nodes from both platforms; sub-agent links to wrong one |
@@ -619,7 +619,7 @@ Resume: /breeze:generate-design-from-ui continue from {uiRepo}
 
 Since sub-agents run in parallel and independently create design nodes,
 check for edge-case duplicates. The backend deduplicates by
-`projectUuid + name` (case-insensitive), so most cases are handled.
+`projectUuid + name + platform` (case-insensitive), so most cases are handled.
 This catches near-name mismatches across parallel agents.
 
 > **⛔ Platform scoping (critical):** When `APP_SUFFIX` is non-empty,
