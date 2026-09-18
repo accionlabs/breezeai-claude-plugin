@@ -69,9 +69,10 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Component | `pageIds[]` | Parent Page IDs (multi-parent) |
 | Component | `actionIds[]` | Actions this component implements |
 
-- **All IDs come from `Get_all_steps_actions_for_a_scenario_id`** —
-  fetch steps + actions per scenario, extract UUIDs, then wire them
-  into the design payload
+- **All IDs come from `fetch_steps_actions.py`** (Phase 0b) —
+  the script fetches the full step/action tree per scenario via REST
+  API. Extract `stepId` and `actionId` UUIDs and wire them into the
+  design payload
 - Shared steps can appear in multiple flows' `stepIds[]`
 - Every `stepId` and `actionId` MUST appear in at least one design node
 - `scenarioId` is ALWAYS required on UserJourney

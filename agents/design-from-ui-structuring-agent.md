@@ -15,7 +15,6 @@ tools:
   - mcp__plugin_breeze_breeze-mcp__Get_all_Design_By_Label
   - mcp__plugin_breeze_breeze-mcp__Design_Graph_Search
   - mcp__plugin_breeze_breeze-mcp__Code_Graph_Search
-  - mcp__plugin_breeze_breeze-mcp__Get_all_steps_actions_for_a_scenario_id
 ---
 
 # Design-from-UI Structuring Agent
@@ -51,27 +50,30 @@ OUTCOME:
   id:                  <outcome UUID>
   name:                <outcome name>
   personaName:         <persona name>
-SCENARIOS:             <JSON array of scenarios with steps/actions>
+  personaId:           <persona UUID>
+  platform:            <platform slug, e.g. "source-web" or "">
 MODALITIES:            [<modality list, e.g. "WEB", "MOBILE">]
 FRAMEWORK:             <detected framework, e.g. "react-router", "vue-router", "angular">
 UI_REPO:               <absolute path to UI repo root>
 PROJECT_UUID:          <project UUID>
+API_BASE:              <Breeze API base URL>
+API_KEY:               <Breeze API key>
+SCRIPTS_PATH:          <absolute path to skill scripts directory>
 OUTPUT_DIR:            <absolute directory path for payload files>
 REFERENCES_PATH:       <absolute path to skill references directory>
 COMPONENT_REGISTRY:    <absolute path to existingcomponents.json, or "none">
+PAGE_REGISTRY:         <absolute path to existingpages.json, or "none">
+APP_SUFFIX:            <e.g. " [Source Web]" or "">
+PLATFORM_ID:           <e.g. "source-web" or "">
+PAGE:                  <page number, default 1>
 MODE:                  <"live" | "dry-run">
 ```
 
-**`SCENARIOS` shape (from parent — IDs and names only):**
-```json
-[
-  { "id": "scenario-uuid-1", "name": "Search for projects" },
-  { "id": "scenario-uuid-2", "name": "Save current search" }
-]
-```
-
-> **The parent does NOT pass `stepsActions`.** You must fetch them
-> yourself in Phase 0b using `Get_all_steps_actions_for_a_scenario_id`.
+> **No SCENARIOS input.** You fetch scenarios (and their steps/actions)
+> yourself in Phase 0b using `fetch_steps_actions.py` with the PAGE
+> number. For large outcomes (>50 scenarios), the parent spawns multiple
+> sub-agents with different PAGE values — each processes up to 50
+> scenarios.
 
 ---
 
@@ -135,46 +137,65 @@ When you discover a component in the UI code:
 
 ---
 
-## Phase 0b: Fetch Steps & Actions for All Scenarios
+## Phase 0b: Fetch Scenarios & Steps/Actions via Python Script
 
-> **CRITICAL — do this BEFORE Phase 1.** The parent passes only scenario
-> IDs and names. You MUST fetch the full steps/actions for each scenario
-> so you have `stepId` and `actionId` values for functional linkage in
-> the design payload.
+> **CRITICAL — do this BEFORE Phase 1.** Without scenarios, stepIds, and
+> actionIds, the entire design payload is useless.
 
-For each scenario in `SCENARIOS`:
+Run `fetch_steps_actions.py` via Bash. The script fetches one page of
+unprocessed scenarios for the outcome AND their steps/actions:
 
-1. Call `Get_all_steps_actions_for_a_scenario_id(uuid: PROJECT_UUID, parameters0_Value: "<scenario-id>")`
-2. Parse the response to extract steps and their actions
-3. Build the enriched scenario list with `stepsActions`:
-
-```json
-[
-  {
-    "id": "scenario-uuid-1",
-    "name": "Search for projects",
-    "stepsActions": [
-      {
-        "stepId": "step-uuid-1",
-        "stepName": "Navigate to search page",
-        "order": 1,
-        "actions": [
-          { "actionId": "action-uuid-1", "actionName": "Enter search query" }
-        ]
-      }
-    ]
-  }
-]
+```bash
+python3 "SCRIPTS_PATH/fetch_steps_actions.py" "API_BASE" "API_KEY" "PROJECT_UUID" "OUTCOME_ID" --page PAGE --limit 50
 ```
 
-4. Hold this enriched list in memory — it is used in ALL subsequent phases:
-   - **Phase 1** — scenario names, step names, and action names drive grep discovery
-   - **Phase 3c** — `stepIds` go on Flows and Pages, `actionIds` go on Components
-   - **Phase 3d** — validation checks that every stepId/actionId appears in at least one design node
+The `PAGE` value comes from your input (defaults to 1). The parent uses
+pagination to split large outcomes across multiple sub-agents — each
+agent gets a different page.
 
-> **If a scenario returns zero steps/actions**, log a warning and mark
-> it as `failed` with error `NO_STEPS_ACTIONS`. Do not process it
-> further — a design graph without functional linkage is invalid.
+**Output (JSON on stdout):**
+```json
+{
+  "scenarios": [
+    {
+      "id": "scenario-uuid-1",
+      "name": "Search for projects",
+      "isDesignGenerated": false,
+      "stepsActions": [
+        {
+          "stepId": "step-uuid-1",
+          "stepName": "Navigate to search page",
+          "order": 1,
+          "actions": [
+            { "actionId": "action-uuid-1", "actionName": "Enter search query" }
+          ]
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 50,
+    "total": 120,
+    "hasMore": true
+  }
+}
+```
+
+**Steps:**
+1. Run the script with the outcome ID and page number (one Bash call)
+2. Parse `scenarios` from the JSON output — this is your scenario list
+3. Any scenario with empty `stepsActions` → mark as `failed` with
+   error `NO_STEPS_ACTIONS`. Do not process it further.
+4. If zero scenarios returned → return `FAIL` summary line
+5. Hold the enriched list in memory for all subsequent phases:
+   - **Phase 1** — scenario names, step names, action names drive grep discovery
+   - **Phase 3c** — `stepIds` on Flows/Pages, `actionIds` on Components
+   - **Phase 3d** — validation that every stepId/actionId appears in a design node
+
+> **This uses the REST API with api-key auth.** No MCP tool needed.
+> The script handles `isDesignGenerated` filtering and nested
+> step/action fetching.
 
 ---
 
@@ -909,10 +930,11 @@ Update_Functional_Node(
 
 After processing all scenarios (or on early exit), write ONE file:
 
-`OUTPUT_DIR/design_{outcome_name_slug}.json`
+`OUTPUT_DIR/design_{outcome_name_slug}.json` (page 1) or
+`OUTPUT_DIR/design_{outcome_name_slug}_p{PAGE}.json` (page 2+)
 
 This is the **only file the sub-agent writes**. It contains everything:
-payloads, status, stats, and evidence for every scenario in this chunk.
+payloads, status, stats, and evidence for every scenario in this outcome.
 The parent reads this single file to update its checkpoint.
 
 ```json
@@ -953,37 +975,44 @@ The parent reads this single file to update its checkpoint.
 **Rules:**
 - **One file per sub-agent run** — no separate results manifest, no per-scenario files
 - `scenarios` is keyed by scenario UUID (not an array)
-- Every scenario from `SCENARIOS` input must appear
+- Every scenario fetched in Phase 0b must appear
 - `status`: `completed`, `failed`, or `pending` (only on `BUDGET` early exit)
 - `payload` is always present (even for failed — preserves partial work for debugging)
 - `error` is null for succeeded, error string for failed
 - `totals` aggregates across SUCCEEDED scenarios only
-- For split outcomes (multiple sub-agents for one outcome), each sub-agent
-  writes its own file with a chunk suffix: `design_{outcome_slug}_chunk{N}.json`.
-  The parent merges them.
 
 ### 4b. Return Summary Line
 
 Return ONLY a single summary line. Nothing else after this line.
 
-**Success (all scenarios succeeded):**
+**Success — all scenarios on this page succeeded, no more pages:**
 ```
-OK · outcome: "<outcomeName>" · scenarios: <N>/<total> · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
+OK · outcome: "<outcomeName>" · page: <N> · scenarios: <N>/<total> · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
 ```
 
-**Partial success (some failed):**
+**Success — all scenarios on this page succeeded, MORE pages exist:**
 ```
-PARTIAL · outcome: "<outcomeName>" · succeeded: <N> · failed: <N> (<names>) · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
+HAS_MORE · outcome: "<outcomeName>" · page: <N> · processed: <N> · nextPage: <N+1> · total: <totalScenarios> · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
+```
+
+> **When to return `HAS_MORE`:** After Phase 0b, if `pagination.hasMore`
+> is `true`, process all scenarios on this page normally, then return
+> `HAS_MORE` instead of `OK`. The parent will spawn a new sub-agent
+> for the next page.
+
+**Partial success (some failed on this page):**
+```
+PARTIAL · outcome: "<outcomeName>" · page: <N> · succeeded: <N> · failed: <N> (<names>) · hasMore: <true|false> · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
 ```
 
 **Context budget reached (early exit):**
 ```
-BUDGET · outcome: "<outcomeName>" · completed: <N> · pending: <N> (<names>) · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
+BUDGET · outcome: "<outcomeName>" · page: <N> · completed: <N> · pending: <N> (<names>) · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
 ```
 
 **Total failure:**
 ```
-FAIL · outcome: "<outcomeName>" · reason: <reason> · dir: <OUTPUT_DIR>
+FAIL · outcome: "<outcomeName>" · page: <N> · reason: <reason> · dir: <OUTPUT_DIR>
 ```
 
 ---
@@ -1004,4 +1033,4 @@ FAIL · outcome: "<outcomeName>" · reason: <reason> · dir: <OUTPUT_DIR>
 11. **Angular: read BOTH .ts AND .html** — never skip the template file
 12. **Angular: use PascalCase class name** — not kebab selector
 13. **Context budget** — after each scenario, check if ~75% consumed; if so, write manifest with pending scenarios and return `BUDGET` summary line
-14. **Fetch steps/actions yourself (Phase 0b)** — the parent only passes scenario IDs and names. You MUST call `Get_all_steps_actions_for_a_scenario_id` for every scenario before Phase 1. Without this, `stepIds` and `actionIds` will be missing from the payload and functional linkage is broken
+14. **Fetch stepsActions in Phase 0b** — run `fetch_steps_actions.py` via Bash BEFORE Phase 1. Use `stepId` values on Flows/Pages `stepIds[]` and `actionId` values on Components `actionIds[]`. Every stepId and actionId MUST appear in at least one design node. If a scenario has empty `stepsActions`, mark it as failed — do NOT proceed without linkage

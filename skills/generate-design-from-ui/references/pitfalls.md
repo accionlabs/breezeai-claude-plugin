@@ -14,7 +14,7 @@
 | Mapping step to BOTH Flow and Page            | Schema violation                          | Exclusive: Flow OR Page                                                               |
 | Missing `scenarioId` link                     | Design graph disconnected from functional | Always include from fetched scenario                                                  |
 | Guessing components from action names         | Misses real UI structure                  | Read actual JSX code                                                                  |
-| Not fetching steps/actions                    | Missing stepIds/actionIds in payload      | Always call Get_all_steps_actions_for_a_scenario_id                                   |
+| Not fetching steps/actions                    | Missing stepIds/actionIds in payload      | Always run `fetch_steps_actions.py` via Bash in Phase 0b                              |
 | Orphaned stepIds/actionIds                    | Functional IDs not linked to design       | Every ID must appear in at least one design node                                      |
 | Skipping Flow Registry check                  | Duplicate flows across scenarios          | LINK before CREATE — check (name, modality)                                           |
 | Skipping Page Registry check                  | Duplicate pages across flows              | LINK before CREATE — check (name, pageType)                                           |

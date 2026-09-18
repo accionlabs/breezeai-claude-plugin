@@ -5,8 +5,10 @@
 | Tool | Purpose |
 |---|---|
 | `Get_scenarios_by_uuid` | Fetch scenarios with pagination and filtering |
-| `Get_all_steps_actions_for_a_scenario_id` | Fetch steps + actions for one scenario |
 | `Functional_Graph_Search` | Search for matching scenarios |
+
+> **Steps/actions** are fetched via `fetch_steps_actions.py` (REST API
+> with api-key), not via MCP. See Phase 0b in the sub-agent.
 
 ## Design Graph Query Tools
 
@@ -34,7 +36,6 @@
 |---|---|---|---|
 | All Breeze MCP tools | Project ID | `uuid` | `projectId`, `projectUuid` |
 | `Get_all_Design_By_Label` | Node label | `label` | `parameters0_Value` |
-| `Get_all_steps_actions_for_a_scenario_id` | Scenario ID | `parameters0_Value` | `scenarioId`, `id` |
 
 ---
 

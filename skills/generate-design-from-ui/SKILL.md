@@ -33,9 +33,9 @@ and MCP upserting for ALL scenarios in that outcome.
 **Why outcome-per-agent?** Scenarios within an outcome almost always
 share the same target pages. The agent reads page files once and
 processes all scenarios against that shared context — far more efficient
-than one-agent-per-scenario. Large outcomes (>5 scenarios) are split
-across multiple sub-agents to avoid context budget limits. Up to 5
-sub-agents run in parallel.
+than one-agent-per-scenario. Up to 5 outcomes run as parallel
+sub-agents. If a sub-agent hits its context budget, remaining
+scenarios are retried in the next batch.
 
 ## How to Create the Design Ontology — Full Workflow
 
@@ -83,8 +83,9 @@ reads actual code for accurate component discovery.
 - **Design graph** updated via `Bulk_Update_Design_Nodes` (called by sub-agents)
 - **`design-progress.json`** -- checkpoint for multi-session resume
 - **One outcome file per sub-agent** in `{OUTPUT_BASE}/` for audit:
-  `design_{outcome_slug}.json` (or `_chunk{N}.json` for split outcomes).
-  Each file contains all scenario payloads with full functional linkage:
+  `design_{outcome_slug}.json` (page 1) or
+  `design_{outcome_slug}_p{N}.json` (page 2+).
+  Each file contains scenario payloads for that page with full functional linkage:
   `scenarioId` on UserJourneys, `stepIds` on flows/pages, `actionIds`
   on components
 
@@ -99,7 +100,11 @@ reads actual code for accurate component discovery.
 1. Read `.breeze.json` from the plugin working directory
 2. If missing or incomplete, tell the user to run `/breeze:setup-project`
 3. Extract `projectUuid`
-4. Read `designGraph.platform` from `.breeze.json`:
+4. Extract `apiKey` — **required** for sub-agent steps/actions fetching.
+   If missing, tell the user to generate one at
+   `<uiBaseUrl>/mcp/generate/key` and add it to `.breeze.json`
+5. Resolve `apiBase` from `.breeze.json` (override) or `breeze.config.json` (default)
+6. Read `designGraph.platform` from `.breeze.json`:
 
 ```json
 {
@@ -149,11 +154,6 @@ reads actual code for accurate component discovery.
 > **Parameter naming hint:** All Breeze MCP tools require the project ID
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
 > `projectUuid`). Pass `.breeze.json`'s `projectUuid` value as `uuid`.
->
-> **Scenario ID hint:** When calling
-> `Get_all_steps_actions_for_a_scenario_id`, the scenario ID parameter
-> MUST be named **`parameters0_Value`** (NOT `scenarioId`, `id`, or
-> `scenario_id`).
 
 ---
 
@@ -202,7 +202,7 @@ Ask user which processing mode to use:
 
 | Mode      | Description                                                |
 | --------- | ---------------------------------------------------------- |
-| `auto`    | Sub-agents execute full pipeline; up to 5 sub-agents in parallel (large outcomes split across multiple agents) |
+| `auto`    | Sub-agents execute full pipeline; up to 5 outcomes in parallel |
 | `outcome` | Auto within each outcome, pause between outcomes for review |
 | `dry-run` | Sub-agents write payloads to disk only; no MCP mutations   |
 
@@ -361,60 +361,29 @@ Write `{OUTPUT_BASE}/design-progress.json`:
 
 ### 3a. Fetch outcome list for current persona
 
-> **Only fetch the outcome list here — NOT scenarios or steps/actions.**
-> Sub-agents fetch their own scenarios and steps/actions to save parent
-> context. The parent only needs outcome IDs and names for dispatching.
+> **The parent fetches ONLY the outcome list — no scenarios, no
+> steps/actions.** Sub-agents handle all scenario-level fetching via
+> `fetch_steps_actions.py` (REST API + api-key). This keeps the parent
+> context minimal.
 
 For the current persona in `allowedPersonas`:
 
 1. Call `Get_all_outcomes_for_a_persona_id(uuid, personaId)`
-2. For each outcome, call `Get_all_scenarios_for_a_outcome_id` but
-   **only to get scenario count and filter `isDesignGenerated`** —
-   do NOT fetch steps/actions (sub-agent does that)
-3. Skip outcomes with zero unprocessed scenarios
-4. Build the persona's outcome list:
+2. Build the persona's outcome queue (no scenario data needed):
 
 ```json
 {
   "personaId": "...",
   "personaName": "End User",
   "outcomes": [
-    {
-      "outcomeId": "...",
-      "outcomeName": "Authentication",
-      "scenarioCount": 5,
-      "scenarioIds": ["uuid-1", "uuid-2", "uuid-3", "uuid-4", "uuid-5"]
-    }
+    { "outcomeId": "...", "outcomeName": "Authentication" },
+    { "outcomeId": "...", "outcomeName": "Search" }
   ]
 }
 ```
 
-5. Update checkpoint — add this persona's outcomes:
-
-```json
-{
-  "personas": {
-    "End User": {
-      "personaId": "persona-uuid-1",
-      "status": "in_progress",
-      "totalOutcomes": 12,
-      "outcomes": [
-        {
-          "outcomeId": "...",
-          "outcomeName": "Authentication",
-          "status": "pending",
-          "scenarioCount": 5
-        }
-      ],
-      "completed": [],
-      "remaining": ["outcome-uuid-1", "outcome-uuid-2"],
-      "failed": []
-    }
-  }
-}
-```
-
-6. Log:
+3. Update checkpoint with this persona's outcomes (all `pending`)
+4. Log:
    ```
    Persona: End User
      Outcomes: {N}
@@ -423,77 +392,57 @@ For the current persona in `allowedPersonas`:
 
 ### 3b. Batch and spawn sub-agents
 
-Take outcomes from the persona's `remaining` list, split large outcomes,
-and spawn up to 5 sub-agents in parallel.
+Take up to 5 outcomes from the persona's `remaining` list and spawn
+one sub-agent per outcome in parallel. Each sub-agent starts at
+`--page 1`.
 
-#### Scenario splitting for large outcomes
+```
+Batch 1/3: [Authentication, Search, Cart, Checkout, Profile]
+  Spawning 5 sub-agents (page 1 each)...
+```
 
-| Scenario count | Sub-agents per outcome |
+For each outcome, render the sub-agent prompt with `{{page}}` = 1
+and spawn.
+
+### 3c. Collect results and handle pagination
+
+After all agents in the batch complete, parse each summary line:
+
+| Summary prefix | Action |
 |---|---|
-| 1–5 | 1 (no split) |
-| 6–10 | 2 (split evenly) |
-| 11–15 | 3 |
-| 16+ | ceil(count / 5) — cap at 5 per outcome |
+| `OK` | Outcome done — move to `completed` |
+| `PARTIAL` | Some scenarios failed — move to `completed` (failures tracked) |
+| `BUDGET` | Hit context limit — keep in `remaining` for retry |
+| `FAIL` | Outcome-level failure — move to `failed` |
+| `HAS_MORE` | **More pages exist.** Re-queue this outcome with `page + 1` |
 
-**How to split:** divide the scenario list into roughly equal chunks.
-Each chunk gets its own sub-agent invocation with the **same outcome
-ID/name** but a different subset of scenario IDs. The sub-agent's
-`SCENARIOS` JSON only contains that chunk's scenarios.
+**The `HAS_MORE` flow:**
 
-**Example:** outcome "Authentication" has 9 scenarios →
-split into 2 sub-agents (5 + 4 scenarios each).
-
-#### Filling the batch
-
-Build a list of **agent slots** (target: up to 5 parallel):
-
-1. Take the next outcome from `remaining`
-2. If scenario count ≤ 5 → 1 slot
-3. If scenario count > 5 → split per table above, each chunk = 1 slot
-4. Keep adding outcomes until 5 slots are filled or no outcomes remain
-5. If a single outcome needs more than 5 chunks → it fills the entire
-   batch alone (rare — 25+ scenarios in one outcome)
+When a sub-agent's script returns `pagination.hasMore = true`, the
+sub-agent processes its page of scenarios (up to 50), writes the
+outcome file, and returns a summary line prefixed with `HAS_MORE`:
 
 ```
-Batch 1/3: [Authentication (9 scenarios → 2 agents), Search (3 scenarios → 1 agent), Cart (4 scenarios → 1 agent)]
-  Spawning 4 sub-agents...
-    Authentication chunk 1: scenarios 1-5
-    Authentication chunk 2: scenarios 6-9
-    Search: scenarios 1-3
-    Cart: scenarios 1-4
+HAS_MORE · outcome: "Authentication" · page: 1 · processed: 48 · nextPage: 2 · ...
 ```
 
-For each slot, render the sub-agent prompt with only that chunk's
-scenarios and spawn (see sub-agent template placeholders).
+The parent:
+1. Reads the outcome file and updates the checkpoint
+2. Re-queues the outcome with `page = nextPage`
+3. On the next batch, spawns a new sub-agent with `{{page}}` = 2
+4. Repeat until the sub-agent returns `OK`/`PARTIAL` (no more pages)
 
-### 3c. Collect results and update checkpoint
-
-After all agents in the batch complete:
-
-1. Read each agent's results manifest
-2. **Merge results for split outcomes:** if an outcome was split across
-   multiple sub-agents, combine their per-scenario results into a single
-   outcome entry. An outcome is `completed` only when ALL its chunks
-   succeed. If any chunk returns `PARTIAL` or `FAIL`, the outcome is
-   `PARTIAL` (succeeded scenarios are kept, failed ones are tracked).
-3. Update per-scenario status in the checkpoint
-4. Move completed outcomes from `remaining` to `completed`
-5. Move failed outcomes to `failed`
-6. Write checkpoint to disk
-7. Log batch summary:
-   ```
-   Batch 1/3 complete:
-     ✅ Authentication — 9/9 scenarios (2 agents)
-     ✅ Search — 3/3 scenarios
-     ⚠️ Cart — 3/4 scenarios (1 failed)
-   ```
+> **Each page's outcome file is named differently:**
+> Page 1: `design_{outcome_slug}.json`
+> Page 2+: `design_{outcome_slug}_p{N}.json`
+> The parent merges all page files for the final checkpoint.
 
 ### 3d. Next batch or next persona
 
-- **More outcomes remaining for this persona?** → go to 3b (next batch)
-- **All outcomes done for this persona?** → mark persona as `completed`
-  in checkpoint, log summary, advance `currentPersonaIndex`
-- **More personas remaining?** → go to 3a (fetch next persona's outcomes)
+- **Outcomes remaining (including `HAS_MORE` re-queued)?** → go to 3b
+- **All outcomes done for this persona?** → mark persona `completed`,
+  advance `currentPersonaIndex`
+- **More personas remaining?** → go to 3a
 - **All personas done?** → proceed to Step 4 (reconciliation)
 
 ```
@@ -511,9 +460,10 @@ If `design-progress.json` exists with in-progress data:
 
 1. Find `currentPersonaIndex` — resume from that persona
 2. For the current persona, check `remaining` outcomes
-3. For partially processed outcomes (status = `PARTIAL`), collect only
-   the failed/pending scenario IDs and re-split them using the same
-   threshold (>5 → multiple agents). Only re-process failed scenarios
+3. For partially processed outcomes (status = `PARTIAL` or `BUDGET`),
+   the sub-agent's outcome file tracks which scenarios are pending —
+   on resume the new sub-agent fetches all scenarios but only processes
+   the ones not already completed
 4. Skip fully completed personas
 5. Log:
    ```
@@ -527,7 +477,7 @@ If `design-progress.json` exists with in-progress data:
 >
 > The sub-agent writes one outcome file (`design_{outcome_slug}.json`)
 > with all scenarios keyed by UUID, each with a `status` field. For
-> split outcomes, chunk files are merged by the parent. The parent
+> The parent
 > reads these to update scenario-level status in the checkpoint.
 
 ---
@@ -572,11 +522,14 @@ Read `references/design-structuring-agent.prompt.md` and substitute:
 | `{{persona_name}}` | persona name |
 | `{{persona_id}}` | persona UUID |
 | `{{platform}}` | `PLATFORM_ID` value (e.g., `"source-web"` or `""`) |
-| `{{scenarios_json}}` | JSON array of `[{"id": "<uuid>", "name": "<name>"}, ...]` — IDs and names only. Sub-agent fetches steps/actions itself in Phase 0b. **Must use real UUIDs from `Get_all_scenarios_for_a_outcome_id`, never slugs or invented IDs.** |
+| `{{page}}` | Page number for scenario pagination (default `1`). When a sub-agent returns `HAS_MORE`, re-queue the outcome with `page + 1`. |
 | `{{modalities}}` | comma-separated: `"WEB"` or `"WEB", "MOBILE"` |
 | `{{framework}}` | detected framework from Phase 0a |
 | `{{repo_root_absolute_path}}` | absolute UI repo path |
 | `{{project_uuid}}` | from `.breeze.json` |
+| `{{api_base}}` | Breeze API base URL (from `.breeze.json` or `breeze.config.json`) |
+| `{{api_key}}` | Breeze API key (from `.breeze.json`) |
+| `{{scripts_path}}` | absolute path to `skills/generate-design-from-ui/scripts/` |
 | `{{output_dir}}` | `{OUTPUT_BASE}/` |
 | `{{skill_references_path}}` | absolute path to references directory |
 | `{{component_registry_path}}` | absolute path to `existingcomponents.json`, or `"none"` |
@@ -591,17 +544,18 @@ Read `references/design-structuring-agent.prompt.md` and substitute:
 
 | Prefix | Action |
 |---|---|
-| `OK` | All scenarios succeeded |
-| `PARTIAL` | Some scenarios failed — check outcome file |
-| `BUDGET` | Hit context budget — pending scenarios need re-processing |
+| `OK` | Page done, no more pages — outcome complete |
+| `HAS_MORE` | Page done, more pages exist — re-queue with `nextPage` |
+| `PARTIAL` | Some scenarios failed — check `hasMore` for next page |
+| `BUDGET` | Hit context budget — keep in `remaining` for retry |
 | `FAIL` | Outcome-level failure |
 
-**Read outcome file** (`{OUTPUT_DIR}/design_{outcome_slug}.json`):
+**Read outcome file:**
 
-The sub-agent writes ONE file per run containing all scenario data
-keyed by scenario UUID. For split outcomes, each chunk writes
-`design_{outcome_slug}_chunk{N}.json` — merge them by combining the
-`scenarios` objects and summing `totals`.
+Page 1: `{OUTPUT_DIR}/design_{outcome_slug}.json`
+Page 2+: `{OUTPUT_DIR}/design_{outcome_slug}_p{N}.json`
+
+Each file contains scenario data keyed by scenario UUID for that page.
 
 ```
 FOR each scenarioId, entry in file.scenarios:
@@ -780,25 +734,20 @@ Resume: /breeze:generate-design-from-ui continue from {uiRepo}
 
 # REFERENCE
 
-## Architecture: Parent + Sub-Agent (Outcome-per-Agent with Splitting)
+## Architecture: Parent + Sub-Agent (Outcome-per-Agent with Page Splitting)
 
 ```
-Parent (this skill)              Sub-Agent (per outcome or chunk)
-+---------------------------+    +-----------------------------+
-| Guard, repo resolution    |    | Phase 0b: Fetch steps/acts  |
-| Framework detection       |    | Phase 1: Grep discovery     |
-| Outcome queue building    |    |   (all chunk scenarios)     |
-| Split large outcomes      |    | Phase 2: Read UI code       |
-| Checkpoint management     |--->|   (shared pages, read once) |
-| Spawn sub-agents (≤5)     |    | Phase 3: Per-scenario loop  |
-| Merge split-outcome results|<--|   classify → build → upsert |
-| Reconciliation            |    | Phase 4: Return summary     |
-| Final summary             |    +-----------------------------+
-+---------------------------+
-
-Splitting: outcomes with >5 scenarios are divided into chunks
-(each chunk ≤5 scenarios). Each chunk = one sub-agent. Multiple
-chunks of the same outcome run in parallel; parent merges results.
+Parent (this skill)              Sub-Agent (per outcome)
++---------------------------+    +-------------------------------+
+| Guard, repo resolution    |    | Phase 0: Load registry        |
+| Framework detection       |    | Phase 0b: fetch_steps_actions |
+| Outcome queue building    |    |   .py (REST API + api-key)    |
+| Checkpoint management     |--->| Phase 1: Grep discovery       |
+| Spawn sub-agents (≤5)     |    | Phase 2: Read UI code         |
+| Parse summary lines       |<---| Phase 3: Per-scenario loop    |
+| Reconciliation            |    |   classify → build → upsert   |
+| Final summary             |    | Phase 4: Write outcome file   |
++---------------------------+    +-------------------------------+
 ```
 
 **Why outcome-per-agent?**
@@ -808,12 +757,14 @@ chunks of the same outcome run in parallel; parent merges results.
 - Cross-scenario reuse is natural within the outcome
 - Fresh context per outcome — no drift across outcomes
 
-**Why split large outcomes?**
-- Sub-agents have context budgets — too many scenarios in one agent
-  risks `BUDGET` early-exits and incomplete processing
-- Splitting keeps each agent's workload manageable (≤5 scenarios)
-- Chunks still share the same outcome so grep patterns overlap —
-  the duplicated Phase 1/2 work is a small cost vs. the reliability gain
+**Page-based splitting:** Large outcomes (>50 scenarios) are split
+across multiple sub-agents. Each gets `--page N --limit 50`. The script
+handles pagination — sub-agent 1 gets scenarios 1-50, sub-agent 2 gets
+51-100, etc. Each sub-agent independently fetches its page and processes.
+
+**Context budget handling:** If a sub-agent hits ~75% context within
+its page, it returns `BUDGET` with remaining scenarios as `pending`.
+The parent re-spawns for those on the next batch.
 
 ## What makes this different from `generate-design`
 
