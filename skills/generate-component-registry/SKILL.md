@@ -566,7 +566,8 @@ For each component you find, return a JSON array:
     "designSystemRef": "library-component-name or null",
     "supportingComponents": ["ChildA", "ChildB"],
     "scope": "GLOBAL|DOMAIN|PAGE",
-    "sourceFile": "src/path/to/file.tsx"
+    "sourceFile": "src/path/to/file.tsx",
+    "citations": [{"type": "code", "reference": "<code-node-id>"}]
   }
 ]
 
@@ -813,6 +814,35 @@ Registry built incrementally ({N} batches completed, {M} failed):
     ⚠ {N} components with < 2 supportingComponents (see warnings above)
     ⚠ {N} dangling supportingComponent references
 ```
+
+---
+
+## Step 3c: Populate Citations
+
+> **Requires a linked project with a code graph.** If `projectUuid`
+> is not available, skip this step — citations will be empty.
+
+After validation, populate `citations` on every registry entry by
+looking up source files in the code ontology graph.
+
+1. **Collect unique `sourceFile` paths** from all registry entries
+2. **Batch-query `Code_Graph_Search`** — one call per unique path:
+   ```
+   Code_Graph_Search(uuid: PROJECT_UUID, query: "<relative-file-path>")
+   ```
+3. **Cache results** — map `sourceFile → code-node-id`
+4. **Write citations back** to each registry entry:
+   ```json
+   "citations": [{"type": "code", "reference": "<code-node-id>"}]
+   ```
+   If no code node found for a `sourceFile` → set `"citations": []`
+5. **Write `existingcomponents.json` to disk** with citations populated
+
+> **Why store citations in the registry?** Downstream skills
+> (`generate-design-from-ui`) use registry entries directly in design
+> payloads. Pre-populating citations here means the design sub-agent
+> can use them as-is without re-querying `Code_Graph_Search` for every
+> component — saves hundreds of MCP calls on large projects.
 
 ---
 

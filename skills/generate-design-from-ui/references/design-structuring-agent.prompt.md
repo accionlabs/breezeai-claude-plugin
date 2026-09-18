@@ -20,6 +20,7 @@ OUTCOME:
   personaName:         {{persona_name}}
   platform:            {{platform}}
 SCENARIOS:             {{scenarios_json}}
+  (IDs and names only — agent fetches steps/actions in Phase 0b)
 MODALITIES:            [{{modalities}}]
 FRAMEWORK:             {{framework}}
 UI_REPO:               {{repo_root_absolute_path}}
@@ -30,6 +31,9 @@ COMPONENT_REGISTRY:    {{component_registry_path}}
 MODE:                  {{mode}}
 
 Begin Phase 0. Load component registry cache (if available), then
+Phase 0b: fetch steps/actions for every scenario via
+Get_all_steps_actions_for_a_scenario_id (CRITICAL — without this,
+stepIds and actionIds will be missing from the payload),
 Phase 1: run grep discovery for all scenarios, Phase 2: read UI code
 once, Phase 3: loop through each scenario (classify, build, validate,
 upsert), Phase 4: write results manifest and return summary line.

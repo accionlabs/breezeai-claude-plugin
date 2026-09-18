@@ -180,7 +180,9 @@ If validation fails, log warning and **re-run Step 3b greps** for this scenario 
    "Dashboard|dashboard|WEB": {
      "id": "<real-uuid>",
      "stepIds": ["step-3"],
-     "pageType": "dashboard"
+     "pageType": "dashboard",
+     "sourceFile": "src/pages/dashboard/dashboard.component.ts",
+     "citations": [{"type": "code", "reference": "<code-node-id>"}]
    }
    ```
 4. **Write** `existingpages.json` back to disk

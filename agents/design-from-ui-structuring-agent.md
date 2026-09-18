@@ -15,6 +15,7 @@ tools:
   - mcp__plugin_breeze_breeze-mcp__Get_all_Design_By_Label
   - mcp__plugin_breeze_breeze-mcp__Design_Graph_Search
   - mcp__plugin_breeze_breeze-mcp__Code_Graph_Search
+  - mcp__plugin_breeze_breeze-mcp__Get_all_steps_actions_for_a_scenario_id
 ---
 
 # Design-from-UI Structuring Agent
@@ -61,30 +62,16 @@ COMPONENT_REGISTRY:    <absolute path to existingcomponents.json, or "none">
 MODE:                  <"live" | "dry-run">
 ```
 
-**`SCENARIOS` shape:**
+**`SCENARIOS` shape (from parent — IDs and names only):**
 ```json
 [
-  {
-    "id": "scenario-uuid-1",
-    "name": "Search for projects",
-    "stepsActions": [
-      {
-        "stepId": "step-uuid-1",
-        "stepName": "Navigate to search page",
-        "order": 1,
-        "actions": [
-          { "actionId": "action-uuid-1", "actionName": "Enter search query" }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "scenario-uuid-2",
-    "name": "Save current search",
-    "stepsActions": [...]
-  }
+  { "id": "scenario-uuid-1", "name": "Search for projects" },
+  { "id": "scenario-uuid-2", "name": "Save current search" }
 ]
 ```
+
+> **The parent does NOT pass `stepsActions`.** You must fetch them
+> yourself in Phase 0b using `Get_all_steps_actions_for_a_scenario_id`.
 
 ---
 
@@ -126,9 +113,10 @@ ELSE:
 When you discover a component in the UI code:
 1. **Check registryCache by exact name** (case-insensitive)
 2. **Match found** → use the cached classification (type, scope,
-   supportingComponents, designSystemRef). Do NOT re-classify.
-   Still read the source file if needed for branch-tagging (Phase 2e),
-   but trust the cached type/scope.
+   supportingComponents, designSystemRef, **citations**). Do NOT
+   re-classify. Still read the source file if needed for branch-tagging
+   (Phase 2e), but trust the cached type/scope. Use the cached
+   `citations` directly in Phase 3c-i — no Code_Graph_Search needed.
 3. **No match** → classify from scratch using the decision tree
 4. **Override rule:** If you read the actual source and the cached
    classification is clearly wrong (e.g., cached as ATOM but the
@@ -139,10 +127,54 @@ When you discover a component in the UI code:
 **Benefits:**
 - Skips classification for known components (faster)
 - Consistent naming across runs (same `designSystemRef`)
+- **Pre-populated citations** — no Code_Graph_Search needed for cached components
 - Components from shared dirs (already scanned by generate-component-registry)
   don't need re-reading
 - Still reads UI files for branch-tagging and action mapping (cache
   doesn't know which branch a component belongs to)
+
+---
+
+## Phase 0b: Fetch Steps & Actions for All Scenarios
+
+> **CRITICAL — do this BEFORE Phase 1.** The parent passes only scenario
+> IDs and names. You MUST fetch the full steps/actions for each scenario
+> so you have `stepId` and `actionId` values for functional linkage in
+> the design payload.
+
+For each scenario in `SCENARIOS`:
+
+1. Call `Get_all_steps_actions_for_a_scenario_id(uuid: PROJECT_UUID, parameters0_Value: "<scenario-id>")`
+2. Parse the response to extract steps and their actions
+3. Build the enriched scenario list with `stepsActions`:
+
+```json
+[
+  {
+    "id": "scenario-uuid-1",
+    "name": "Search for projects",
+    "stepsActions": [
+      {
+        "stepId": "step-uuid-1",
+        "stepName": "Navigate to search page",
+        "order": 1,
+        "actions": [
+          { "actionId": "action-uuid-1", "actionName": "Enter search query" }
+        ]
+      }
+    ]
+  }
+]
+```
+
+4. Hold this enriched list in memory — it is used in ALL subsequent phases:
+   - **Phase 1** — scenario names, step names, and action names drive grep discovery
+   - **Phase 3c** — `stepIds` go on Flows and Pages, `actionIds` go on Components
+   - **Phase 3d** — validation checks that every stepId/actionId appears in at least one design node
+
+> **If a scenario returns zero steps/actions**, log a warning and mark
+> it as `failed` with error `NO_STEPS_ACTIONS`. Do not process it
+> further — a design graph without functional linkage is invalid.
 
 ---
 
@@ -713,29 +745,47 @@ FormPageLayout.supportingComponents = ["PageHeader", "SocialAuthPanel"]
 
 > **Read `design-ontology.md` and `reusability.md` NOW (first scenario only).**
 
-#### 3c-i. Collect Citations via Code Graph
+#### 3c-i. Collect Citations
 
-Before building the payload, look up the source files discovered in
-Phases 1-2 to get code ontology node IDs for per-node citations.
+**Every node except Flow gets citations** (Flow does not support them).
 
-**For each page in the flow's page chain:**
+Use a **registry-first** strategy: the component and page registries
+already have `citations` populated by `/breeze:generate-component-registry`.
+Only query `Code_Graph_Search` for nodes NOT found in a registry.
 
-1. Take the page's primary file path (from `allPages[route].files[0]`)
-2. Call `Code_Graph_Search(uuid: PROJECT_UUID, query: "<relative-file-path>")`
-3. If a matching code node is found, record its ID as the page's citation:
-   `{"type": "code", "reference": "<code-node-id>"}`
-4. If no match, skip the citation for this page (do NOT invent IDs)
+**Step 1: Use registry citations (no MCP calls needed).**
 
-**For each component (ORGANISM and MOLECULE only — skip ATOMs and TEMPLATEs):**
+| Node type | Registry | How |
+|---|---|---|
+| **Component** (all types) | `existingcomponents.json` | Look up by name. If entry has non-empty `citations` → use directly |
+| **Page** | `existingpages.json` | Look up by `"{name}\|{pageType}\|{modality}"`. If entry has non-empty `citations` → use directly |
 
-1. Take the component's source file path (from the import drill-down in Phase 2)
-2. Call `Code_Graph_Search` with the file path or component name
-3. If a matching code node is found, record its ID as the component's citation
-4. If no match, skip the citation
+**Step 2: Collect remaining file paths that need lookup.**
 
-**Batching:** To minimise MCP calls, collect all unique file paths first,
-then run `Code_Graph_Search` once per unique path. Cache results — the
-same file often maps to multiple components.
+Only gather paths for nodes NOT resolved from registries:
+- **UserJourney** — always needs lookup (not in any registry). Use the
+  primary page file for this scenario's target route.
+- **Component** with no registry match or empty `citations` — use its
+  `sourceFile` from Phase 2
+- **Page** with no registry match or empty `citations` — use
+  `allPages[route].files[0]`
+
+**Step 3: Batch-query Code Graph (only for unresolved nodes).**
+
+Call `Code_Graph_Search(uuid: PROJECT_UUID, query: "<relative-file-path>")`
+once per unique file path. Cache the results.
+
+**Step 4: Assign citations.**
+
+| Node type | Citation source |
+|---|---|
+| **UserJourney** | Code Graph lookup result for the target route file |
+| **Page** | Registry `citations` if available, else Code Graph lookup |
+| **Component** | Registry `citations` if available, else Code Graph lookup |
+
+- If no citation found (not in registry AND no Code Graph match) →
+  set `"citations": []` (do NOT invent IDs)
+- Flow does NOT support per-node citations — never add them
 
 > **Do NOT block on citation failures.** If `Code_Graph_Search` returns
 > no results or errors, build the payload without that citation. The
@@ -756,7 +806,7 @@ UserJourney (1:1 with scenario, scenarioId required)
 {
   "userJourneys": [{
     "name": "...", "platform": "...", "description": "...", "scenarioId": "...",
-    "citations": [{"type": "figma", "reference": "https://..."}],
+    "citations": [{"type": "code", "reference": "<code-node-id>"}],
     "flows": [{
       "name": "...", "modality": "WEB", "entryPoint": "...", "exitPoint": "...",
       "stepIds": ["..."],
@@ -764,10 +814,12 @@ UserJourney (1:1 with scenario, scenarioId required)
         "name": "...", "pageType": "FORM", "stepIds": ["..."],
         "citations": [{"type": "code", "reference": "<code-node-id>"}],
         "components": [
-          { "name": "...", "type": "TEMPLATE", "layoutType": "FLEX", "supportingComponents": ["..."] },
+          { "name": "...", "type": "TEMPLATE", "layoutType": "FLEX", "supportingComponents": ["..."],
+            "citations": [{"type": "code", "reference": "<code-node-id>"}] },
           { "name": "...", "type": "ORGANISM", "actionIds": ["..."], "supportingComponents": ["..."],
             "citations": [{"type": "code", "reference": "<code-node-id>"}] },
-          { "name": "...", "type": "ATOM", "supportingComponents": [] }
+          { "name": "...", "type": "ATOM", "supportingComponents": [],
+            "citations": [{"type": "code", "reference": "<code-node-id>"}] }
         ]
       }]
     }]
@@ -775,11 +827,10 @@ UserJourney (1:1 with scenario, scenarioId required)
 }
 ```
 
-**Per-node citations:** UserJourney, Page, and Component accept a
-`citations` array. Each node's citations are merged with top-level
-citations (shared default). Flow does NOT support per-node citations.
-Cite the source artifact the node was derived from (component file,
-route definition, design doc). Format:
+**Per-node citations:** UserJourney, Page, and ALL Component types
+(ORGANISM, MOLECULE, ATOM, TEMPLATE) get a `citations` array. Flow
+does NOT support per-node citations — never add them to flows.
+Cite the source file the node was derived from. Format:
 `{"type": "code", "reference": "<code-node-id>"}` or other types
 (`document`, `exDoc`, `figma`, `jira`, `confluence`, `prompt`).
 
@@ -810,24 +861,16 @@ Before writing/upserting this scenario's payload:
 4. **Template check** — every Page has a TEMPLATE
 5. **supportingComponents minimum** — >= 2 for non-ATOMs
 6. **Pitfall check** — repo names (not invented), UPPERCASE enums, no actionIds on Pages
+7. **Citation check** — UserJourney, Page, and every Component (all types) should have `citations` array. Flow must NOT have citations. Missing citations are a warning (not a blocker) — log but don't fail
 
 Repair in-place (max 2 passes). If still failing → log error for
 this scenario, continue to next.
 
-### 3e. Write Payload to Disk
+### 3e. Accumulate Scenario Result
 
-Write to `OUTPUT_DIR/design_{slugified_scenario_name}.json`:
-
-```json
-{
-  "scenario": { "id": "...", "name": "..." },
-  "outcomeId": "...",
-  "outcomeName": "...",
-  "payload": { "userJourneys": [...] },
-  "stats": { "flows": N, "pages": N, "components": N },
-  "evidence": "<flow evidence summary>"
-}
-```
+Do NOT write individual files per scenario. Instead, accumulate each
+scenario's result in memory for the single outcome file written in
+Phase 4.
 
 ### 3f. Upsert via MCP
 
@@ -860,43 +903,46 @@ Update_Functional_Node(
 
 ---
 
-## Phase 4: Write Results Manifest & Return Summary
+## Phase 4: Write Outcome File & Return Summary
 
-### 4a. Write Results Manifest
+### 4a. Write Single Outcome File
 
-After processing all scenarios, write a results manifest to
-`OUTPUT_DIR/results_{outcome_name_slug}.json`. The parent reads this
-to update its checkpoint with per-scenario status and stats.
+After processing all scenarios (or on early exit), write ONE file:
+
+`OUTPUT_DIR/design_{outcome_name_slug}.json`
+
+This is the **only file the sub-agent writes**. It contains everything:
+payloads, status, stats, and evidence for every scenario in this chunk.
+The parent reads this single file to update its checkpoint.
 
 ```json
 {
   "outcomeId": "<outcome UUID>",
   "outcomeName": "<outcome name>",
   "personaName": "<persona name>",
-  "scenarios": [
-    {
-      "id": "scenario-uuid-1",
+  "scenarios": {
+    "scenario-uuid-1": {
       "name": "Login with Email",
       "status": "completed",
-      "payloadPath": "design_login-with-email.json",
-      "flowsCreated": 2,
-      "pagesCreated": 3,
-      "componentsCreated": 12,
-      "completedAt": "2026-08-10T14:30:00Z"
+      "payload": { "userJourneys": [...] },
+      "stats": { "flows": 2, "pages": 3, "components": 12 },
+      "evidence": "<flow evidence summary>",
+      "error": null
     },
-    {
-      "id": "scenario-uuid-2",
+    "scenario-uuid-2": {
       "name": "Social Login",
       "status": "failed",
-      "error": "FAIL_UPSERT · http: 422",
-      "payloadPath": "design_social-login.json",
-      "completedAt": null
+      "payload": { "userJourneys": [...] },
+      "stats": { "flows": 0, "pages": 0, "components": 0 },
+      "evidence": "<flow evidence summary>",
+      "error": "FAIL_UPSERT · http: 422"
     }
-  ],
+  },
   "totals": {
     "scenarios": 5,
     "succeeded": 4,
     "failed": 1,
+    "pending": 0,
     "flows": 8,
     "pages": 10,
     "components": 34
@@ -905,12 +951,16 @@ to update its checkpoint with per-scenario status and stats.
 ```
 
 **Rules:**
-- Write the manifest AFTER all scenarios are processed (or attempted)
-- Every scenario in `SCENARIOS` input must appear in the manifest
-- `status` is `completed`, `failed`, or `pending` (only on `BUDGET` early exit)
-- `payloadPath` is relative to `OUTPUT_DIR`
-- `error` is null for succeeded scenarios, error string for failed ones
-- `totals` aggregates across all SUCCEEDED scenarios only
+- **One file per sub-agent run** — no separate results manifest, no per-scenario files
+- `scenarios` is keyed by scenario UUID (not an array)
+- Every scenario from `SCENARIOS` input must appear
+- `status`: `completed`, `failed`, or `pending` (only on `BUDGET` early exit)
+- `payload` is always present (even for failed — preserves partial work for debugging)
+- `error` is null for succeeded, error string for failed
+- `totals` aggregates across SUCCEEDED scenarios only
+- For split outcomes (multiple sub-agents for one outcome), each sub-agent
+  writes its own file with a chunk suffix: `design_{outcome_slug}_chunk{N}.json`.
+  The parent merges them.
 
 ### 4b. Return Summary Line
 
@@ -954,3 +1004,4 @@ FAIL · outcome: "<outcomeName>" · reason: <reason> · dir: <OUTPUT_DIR>
 11. **Angular: read BOTH .ts AND .html** — never skip the template file
 12. **Angular: use PascalCase class name** — not kebab selector
 13. **Context budget** — after each scenario, check if ~75% consumed; if so, write manifest with pending scenarios and return `BUDGET` summary line
+14. **Fetch steps/actions yourself (Phase 0b)** — the parent only passes scenario IDs and names. You MUST call `Get_all_steps_actions_for_a_scenario_id` for every scenario before Phase 1. Without this, `stepIds` and `actionIds` will be missing from the payload and functional linkage is broken
