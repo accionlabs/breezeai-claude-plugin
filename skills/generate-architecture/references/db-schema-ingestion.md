@@ -259,9 +259,13 @@ database is wider. Do not treat the thin row count as a parsing failure.
 
 ## 9. Verify — never trust the 202
 
+The table and column totals come in one call: the DataLake's `schemaSummary`
+(`Get_Architecture_Nodes_By_Label(label="DataLake")` → `{"relational": {"tables": N, "columns": M}}`,
+ES / NoSQL families alongside). Compare them with what you extracted; list only what the summary
+does not count:
+
 ```
-Get_DB_Schema_Nodes_By_Label(data_lake_id, label="table"      )  → total
-Get_DB_Schema_Nodes_By_Label(data_lake_id, label="column"     )  → total
+Get_Architecture_Nodes_By_Label(uuid, label="DataLake")          → schemaSummary: tables, columns
 Get_DB_Schema_Nodes_By_Label(data_lake_id, label="constraint",
     filters={"constraintType": {"$eq": "FOREIGN_KEY"}})          → FK edges exist?
 Get_DB_Schema_Nodes_By_Label(data_lake_id, label="procedure"  )  → total

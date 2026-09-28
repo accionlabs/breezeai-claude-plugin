@@ -41,21 +41,47 @@ Do not produce both a summary and a detailed document in the same invocation.
 
 ## Step 2 — Read All Four Graphs (in parallel)
 
-First, call `Call_List_Repositories_` to enumerate the project's repositories. Cache the inventory (name + id + metadata). You'll use it for two things: (a) scoping `Code_Graph_Search` per-repo when the prompt clearly maps to one or two subsystems, and (b) anchoring code hits back to their parent repo when reasoning about cross-repo coordination in Step 2.3, Step 3.1, and the final output.
+First, call `Call_List_Repositories_` to enumerate the project's repositories. If it fails, take each repository's id and name from the `codeOntologyId` / `repositoryName` on the `Code_Graph_Search` hits instead. Cache the inventory (name + id + metadata). You'll use it for two things: (a) scoping `Code_Graph_Search` per-repo when the prompt clearly maps to one or two subsystems, and (b) anchoring code hits back to their parent repo when reasoning about cross-repo coordination in Step 2.3, Step 3.1, and the final output.
 
 Then run these four calls simultaneously using queries derived from the user's prompt:
 
 1. **Functional Graph Search** (`Functional_Graph_Search`)
    Search for related personas, outcomes, scenarios, steps, and actions.
 
+1b. **Exact-text sweep** (`Get_Functional_Nodes_By_Label`) — in the same parallel batch
+   A ticket and the graph rarely share words, and ranked search misses a field that is plainly there. For each concrete
+   noun the prompt names (a field, a screen, an entity — never a persona, and never a quality or state such as
+   "stale" or "faster", which matches unrelated nodes), call
+   `Get_Functional_Nodes_By_Label(label="Action", filters={"embedText": {"$containsi": "<noun>"}})`. `embedText` holds
+   the node's name, description AND its whole ancestry (Persona › Outcome › Scenario › Step), so one call returns every
+   action that names the thing, each with the scenario it sits in — and a word the SCENARIO uses finds the actions under it.
+   - **Count first.** Call it with `limit=1` and read `total` before fetching rows. Fetch the rows (`limit` up to 60) only
+     when `total` ≤ 60. A noun that is also the product's own domain word ("code ontology" matched 1,142 actions,
+     "artifact" 257) places nothing and costs ~100K characters — note it as too common and use a more specific noun
+     from the prompt (the field or screen name) instead.
+   - Nothing back? Retry once with the word cut short ("licen" for licence/license, "schedul" for scheduled/scheduling).
+   - Still over 60 but the noun is the right one? Narrow to the roles you need with a second condition on the same field:
+     `{"embedText": {"$containsi": "<noun>", "$regexi": "(?s).*Persona: (Owner|Admin)\n.*"}}` — only after an unscoped
+     call, never to skip a role: the same change usually has a copy under each role and a System half. **Count again
+     after narrowing:** still over 60 → list the matching Scenarios instead (`label="Scenario"`, same filters, names
+     only) and read the few relevant ones with `Get_all_steps_actions_for_a_scenario_id`, rather than fetching the actions.
+   - There is no `name` field on functional labels: `{"name": …}` returns 0 rows silently.
+
 2. **Design Graph Search** (`Design_Graph_Search`)
    Search for related user journeys, flows, pages, and components.
+   Then, once Step 2.1 has the touched scenarios' steps and actions, ask the design graph directly what already covers
+   them — the page or flow shared with another scenario is the one search misses:
+   `Get_all_Design_By_Label(label="Page" | "Flow", filters={"stepIds": {"$eq": "<step id>"}})` and
+   `Get_all_Design_By_Label(label="Component", filters={"actionIds": {"$eq": "<action id>"}})` (array-aware: `$eq`
+   matches an element). A covering page is where the change lands; only propose a new page when none does.
+   Many projects link only some steps to pages: if the first two or three lookups return 0 rows, stop looking up by id
+   and use the `Design_Graph_Search` hits and page names instead — do not repeat the lookup for every step.
 
 3. **Code Graph Search** (`Code_Graph_Search`)
    Search for related code files, classes, methods, and modules. If the prompt strongly implies one or two repos from the inventory above (e.g., a frontend-only change → the `frontendweb_*` repo, a search-feature change → `backend_*_search_*`), issue parallel `code_ontology_id=`-scoped searches per repo (the repo's integer `_id` from `Call_List_Repositories_`) instead of one broad call. Otherwise do one broad call.
 
 4. **Architecture Graph read — per label, in parallel** (`Get_Architecture_Nodes_By_Label`)
-   Issue 8 parallel `Get_Architecture_Nodes_By_Label` calls, one per layer: `UserExperience`, `ApiGateway`, `ObservabilityMonitoring`, `Agents`, `Services`, `EventQueue`, `DataLake`, `Infrastructure`. **This tool is an enumeration, not a search** — it takes only `uuid` and `label` (no `query` parameter) and returns every node in that label. Step 2.2's intersection logic filters them down by relevance. Splitting per-label avoids the token-overflow that `Get_All_architecture_Graph` hits on populated projects (per-layer payloads can still be sizeable — e.g., DataLake with many DB schemas). Do NOT use `Architecture_Graph_Search` — that's similarity-filtered search and will silently drop anchors whose embedding doesn't match the prompt.
+   Issue 8 parallel `Get_Architecture_Nodes_By_Label` calls, one per layer, **each with `limit=100`** (the default is 10, which silently cuts off a layer with more nodes — page until you reach `total`): `UserExperience`, `ApiGateway`, `ObservabilityMonitoring`, `Agents`, `Services`, `EventQueue`, `DataLake`, `Infrastructure`. **This tool is an enumeration, not a search** — it takes only `uuid` and `label` (no `query` parameter) and returns every node in that label. Step 2.2's intersection logic filters them down by relevance. Splitting per-label avoids the token-overflow that `Get_All_architecture_Graph` hits on populated projects (per-layer payloads can still be sizeable — e.g., DataLake with many DB schemas). Do NOT use `Architecture_Graph_Search` — that's similarity-filtered search and will silently drop anchors whose embedding doesn't match the prompt.
 
 If a search returns no results, note "No matches found" for that graph. If the Architecture Graph is empty (all 8 layer counts are 0), note "Architecture Graph not populated" and skip Step 2.2.
 
@@ -138,38 +164,46 @@ This step surfaces DDL-level impact — columns, procedures, triggers, materiali
 
 ### Stage 1 — Broad DDL Discovery (always when triggered)
 
-**Trigger:** Step 2.2 surfaced ≥1 touched DataLake. Run Stage 1 against ALL touched DataLakes — non-relational lakes (ES, Redis, Kafka) naturally produce zero DDL hits and drop out. Do NOT pre-filter by `category` field — the field is AI-generated and may vary across projects.
+**Trigger:** Step 2.2 surfaced ≥1 touched DataLake. Read each touched DataLake's **`schemaSummary`** (returned on every DataLake by `Get_Architecture_Nodes_By_Label(label="DataLake")`): counts of the schema ingested under it by family, e.g. `{"relational": {"tables": 87, "columns": 681}}`; `{}` means no schema has been ingested. Skip a lake whose summary is `{}` (object storage, a graph store): it has nothing to list. Each DataLake row also carries **`schemaTools`** — the exact follow-up call for each family it holds (e.g. `{"relational": "Get_DB_Schema_Nodes_By_Label(data_lake_id=\"…\", label=\"table\")"}`); use it. Pick the tool by family: `relational` → `Get_DB_Schema_Nodes_By_Label` (below); `elasticsearch` → `Get_ES_Nodes_By_Label(data_lake_id, label="es-index" | "es-field" | "es-alias")`; `nosql` → `List_NoSQL_Collections(data_lake_id)`. Run the name filters below against the family's tool, so a change to a search index or a document collection is found too. If a lake carries no `schemaSummary` at all (older backend), run the relational Stage 1 against it as before. Do NOT pre-filter by `category` field — the field is AI-generated and may vary across projects.
 
-**Action:** 5 parallel `Architecture_Graph_Search` calls, one per DDL label.
+**Action:** list, don't search. `DDLColumn`, `DDLConstraint`, `DDLIndex` and `DDLSequence` have no embedding, so
+`Architecture_Graph_Search` refuses them — which used to drop the whole Data Layer section. (The searchable schema
+labels are `DDLTable`, `DDLView`, `DDLProcedure`, `ESIndex`, `ESField`, `ESAlias`, `NoSQLCollection`, `NoSQLField`,
+`NoSQLIndex`; a search is fine for those, but a listing by name is exact and cannot miss.) Use `Get_DB_Schema_Nodes_By_Label` per touched
+DataLake instead, with `$containsi` on the names the prompt uses:
 
 ```
-parallel:
-  Architecture_Graph_Search(uuid, query=<prompt>, include_labels=["DDLColumn"],     threshold=0.4)
-  Architecture_Graph_Search(uuid, query=<prompt>, include_labels=["DDLProcedure"],  threshold=0.4)
-  Architecture_Graph_Search(uuid, query=<prompt>, include_labels=["DDLView"],       threshold=0.4)
-  Architecture_Graph_Search(uuid, query=<prompt>, include_labels=["DDLConstraint"], threshold=0.4)
-  Architecture_Graph_Search(uuid, query=<prompt>, include_labels=["DDLIndex"],      threshold=0.4)
+parallel, per touched DataLake, per concrete noun in the prompt (entity, field, record):
+  Get_DB_Schema_Nodes_By_Label(data_lake_id, label="table",  filters={"name": {"$containsi": "<noun>"}})
+  Get_DB_Schema_Nodes_By_Label(data_lake_id, label="column", filters={"name": {"$containsi": "<noun>"}})
 ```
+
+Labels: `table`, `column`, `constraint`, `index`, `view`, `sequence`, `procedure` (the graph labels `DDLTable`,
+`DDLColumn` … are accepted too). This tool takes `data_lake_id` — the DataLake row's `id`, or `dbOntologyId` on a
+search hit — not `uuid`.
 
 **Filter & gate:**
-- Drop hits whose `dbOntologyId ∉ touched_datalakes` (filter to the subset surfaced in Step 2.2)
-- If total surviving hits < 3 → **suppress the Data Context block** in the summary AND **the Data Layer table** in the detailed doc (change isn't schema-touching)
+- The tables and columns returned are the schema the change touches. A ticket that ADDS a field hits the table it goes
+  on by the entity's name ("code ontology" → `code-ontology`) even though the new column itself cannot be found.
+- If no table and no column matches any noun in any touched DataLake → **suppress the Data Context block** in the
+  summary AND **the Data Layer table** in the detailed doc (change isn't schema-touching)
 - Otherwise proceed
 
 ### Stage 2 — Focus-Table Detail (selective, default cost = 0)
 
-**Identify focus tables:** cluster Stage 1 hits by `tableId`. A focus table has ≥2 hits across any DDL labels. **Cap at 5 focus tables.** If more than 5, surface this in the output as a scope-too-broad signal — do not fan out.
+**Identify focus tables:** the Stage 1 tables, plus the `tableId` of every Stage 1 column. Every Stage 1 table is a focus table, whatever its hit count — a table found once is still the table the change lands on. **Cap at 5 focus tables.** If more than 5, surface this in the output as a scope-too-broad signal — do not fan out.
 
 **For each focus table, in order, stop when you have enough:**
 
-1. **Parse `ddlText` from the Stage 1 table hit (default, 0 extra calls).** Every `DDLTable` returned by Stage 1 includes the full `CREATE TABLE` statement. Parse for columns + types + lengths + nullability + defaults + inline PK + inline constraints. Covers ~80% of impact-analysis questions.
+1. **List the table's columns (1 call per focus table).** Table rows from this tool carry no `ddlText`, so read the
+   columns directly:
+   ```
+   Get_DB_Schema_Nodes_By_Label(data_lake_id, label="column", filters={"tableId": {"$eq": "<table id>"}})
+   ```
+   Names, types, nullability and key flags — enough for ~80% of impact-analysis questions.
 
-2. **Targeted semantic column search (1 call, only if needed).** When the prompt implies cross-table column comparison (e.g. "find all `STATUS_TEXT` columns"):
-   ```
-   Architecture_Graph_Search(uuid, query="<TABLE_NAME> columns",
-                             include_labels=["DDLColumn"], threshold=0.3)
-   ```
-   Approximate but cheap. May miss generic columns (CREATED_AT, IS_DELETED).
+2. **Constraints and indexes of that table (only if the change touches keys or lookups).** Same call with
+   `label="constraint"` or `label="index"` and the same `tableId` filter.
 
 3. **DataLake-wide bulk fetch (last resort, amortized per DataLake).** Only when ≥2 focus tables share a parent DataLake AND structured column nodes are essential:
    ```
@@ -200,7 +234,7 @@ For the output, classify each touched DataLake by combining its writability with
 | **✓ Confirmed (RO)** | DataLake is read-only AND Stage 1 only surfaced EXISTING columns the prompt references — no DDL needed | One-line summary: "RO ✓ — columns X, Y already present, no DDL required" |
 | **— Tangential** | DataLake had < 3 hits all with score 0.40-0.45 (weak match) | **Skip entirely from output** |
 
-Detect writability via the DataLake's `pattern` array (e.g., `"rmsowned-readonly"` → read-only; `"full-crud-v1-and-v2"`, `"v2-modifies-via-migration"` → writable). Pattern strings are project-specific but consistently descriptive.
+An empty `pattern` array means nothing was declared: treat the store as application-owned (● V2-writable) unless its description says another team owns it. Otherwise detect writability via the DataLake's `pattern` array (e.g., `"rmsowned-readonly"` → read-only; `"full-crud-v1-and-v2"`, `"v2-modifies-via-migration"` → writable). Pattern strings are project-specific but consistently descriptive.
 
 ### Verdict
 
@@ -216,11 +250,10 @@ The Verdict is the most actionable single piece of output from this step. It bel
 
 | Scenario | Calls |
 |---|---|
-| UI-only ticket (Stage 1 < 3 hits) | 5 (Stage 1 only, then skip) |
-| Schema-touching, additive, 3 focus tables | 5 (Stage 1) + 0 (ddlText parse) = **5** |
-| Cross-table column comparison needed | 5 + 3 = **8** |
-| Drop/rename, 1 DataLake, full dependency scan | 5 + 0 + 3 = **8** |
-| Heavy: drop/rename across 2 DataLakes | 5 + 0 + 6 = **11** |
+| UI-only ticket (no table or column matches) | 2 per noun per DataLake (Stage 1 only, then skip) |
+| Schema-touching, additive, 3 focus tables | Stage 1 + 3 column listings |
+| Keys / lookups touched | + 1–2 per focus table (constraints, indexes) |
+| Drop/rename, 1 DataLake, full dependency scan | + 3 (Stage 3) |
 
 Bounded in every realistic case. Compare to a naive "always bulk fetch every DataLake" approach which could hit 50+ calls per analysis.
 
@@ -287,14 +320,14 @@ Architecture Context:
   - Observability: <log / metric surfaces for this flow>
   - Infrastructure: <compute / networking substrate>
 
-Data Context (conditional — only emit when Step 2.4 Stage 1 returned ≥3 hits):
+Data Context (conditional — only emit when Step 2.4 Stage 1 matched at least one table or column):
   - 🚨 Cross-team (RO): <list RO DataLakes where DDL is needed but V2 can't ship it — name DataLake + 1-line "what needs to change + who owns it">
   - ● V2 work: <list V2-writable DataLakes where DDL changes are needed — name DataLake + 1-line summary>
   - ✓ Confirmed (RO): <list RO DataLakes where existing columns/structures suffice — single-line "RO ✓ — columns X, Y already present">
   - Verdict: <🔴 BLOCKING / 🟡 V2 WORK / 🟢 NO DDL> — <one-line justification>
 
   Omit any of the three lines (Cross-team / V2 work / Confirmed) that have no entries.
-  Omit the whole Data Context block if Step 2.4 was suppressed (< 3 Stage 1 hits).
+  Omit the whole Data Context block if Step 2.4 was suppressed (no table or column matched in Stage 1).
 
 Impact on touched nodes:
   <2–4 bullets: SPOFs for this flow, source-of-truth vs. cache data roles,
@@ -410,7 +443,7 @@ In DETAILED mode this entire document is written to a Markdown file (per Step 1b
 
 ## Data Layer (Schema-Side)
 
-*(Conditional — include only when Step 2.4 Stage 1 returned ≥3 hits. One block per touched DataLake. Ordering: 🚨 Blocking → ● V2-writable → ✓ Confirmed → skip Tangential entirely.)*
+*(Conditional — include only when Step 2.4 Stage 1 matched at least one table or column. One block per touched DataLake. Ordering: 🚨 Blocking → ● V2-writable → ✓ Confirmed → skip Tangential entirely.)*
 
 ### <tier-marker> `<DataLake name>` — <tier label> *(patterns: `<pattern1>`, `<pattern2>`)*
 
@@ -676,8 +709,8 @@ Headline findings:
      - *Design Layer table* — columns: `Marker | Type (Page/Component/UserJourney/Flow) | Name | Notes`
      - *Code Layer table* — columns: `Marker | Repo | File | Endpoint / Page | Current | Adds` (same shape as the summary's Code Context table, plus the marker column up front — see Step 4 for column meanings)
      - *Architecture Layer table* — columns: `Marker | Layer | Node | Touched because…`
-     - *Data Layer (Schema-Side) section* — **conditional on Step 2.4 Stage 1 returning ≥3 hits.** Render as one block per touched DataLake (not a flat table — the per-DataLake grouping is the point). Each block uses the tier classification from Step 2.4:
-       * 🚨 Blocking (RO) blocks appear FIRST. Include: DataLake name + access pattern; tables touched with current `ddlText`-parsed column summary; what DDL is being requested; dependent procedures / materialized views / triggers / incoming FKs; the "RMS-or-equivalent coordination ticket needed" callout.
+     - *Data Layer (Schema-Side) section* — **conditional on Step 2.4 Stage 1 matching at least one table or column.** Render as one block per touched DataLake (not a flat table — the per-DataLake grouping is the point). Each block uses the tier classification from Step 2.4:
+       * 🚨 Blocking (RO) blocks appear FIRST. Include: DataLake name + access pattern; tables touched with their current columns (from the Stage 2 column listing); what DDL is being requested; dependent procedures / materialized views / triggers / incoming FKs; the "RMS-or-equivalent coordination ticket needed" callout.
        * ● V2-writable blocks appear second. Same content shape; framed as work V2 can ship via its migration repo.
        * ✓ Confirmed (RO) blocks appear last as one-liners: "<DataLake> (RO): <columns> already present, no DDL required".
        * Skip — Tangential entirely.

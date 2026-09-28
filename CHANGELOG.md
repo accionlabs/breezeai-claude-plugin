@@ -10,6 +10,34 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+## [3.10.0] — 2026-09-28
+
+`impact-analysis` and `search` brought up to date with the Breeze MCP tools, checked against a live project (BreezeAI_V1)
+and graded on four tickets. `generate-architecture` reads the new DataLake `schemaSummary`.
+
+### Added
+- **Exact-text sweep** (`impact-analysis`, `search`): `Get_Functional_Nodes_By_Label(label="Action",
+  filters={"embedText": {"$containsi": "<noun>"}})` finds every action that names a field, screen or entity, with its full
+  ancestry. Count first (`limit=1`), fetch only when 60 or fewer; narrow by persona with a `$regexi` on the same field;
+  count again after narrowing and fall back to scenario names.
+- **Design coverage lookup:** `Get_all_Design_By_Label` filtered by `stepIds` / `actionIds` finds the page, flow or
+  component that already covers a step or action; stops after a few empty lookups.
+- **DataLake `schemaSummary` / `schemaTools`** (backend #745): read before any schema lookup — skip lakes with `{}`, pick
+  the tool by family, answer "which stores have schema and how big" in one call. `generate-architecture` checks the target
+  lake is empty before ingesting and verifies table / column totals from it.
+- **Elasticsearch and NoSQL stores:** `Get_ES_Nodes_By_Label` (`es-index` / `es-field` / `es-alias`) and
+  `List_NoSQL_Collections`, where only relational schema was covered before.
+
+### Fixed
+- **Data Layer section never produced** (`impact-analysis`): Stage 1 searched `DDLColumn` / `DDLConstraint` / `DDLIndex`,
+  which have no embedding and are refused, so it always fell under the 3-hit gate. It now lists with
+  `Get_DB_Schema_Nodes_By_Label` by name; the gate is "matched at least one table or column" everywhere; every Stage 1
+  table gets its columns listed (tables carry no `ddlText`); an empty DataLake `pattern` counts as application-owned.
+- **Search routing** (`search`): column / constraint / index / sequence questions went to unsearchable labels; routes are
+  found in `Function.decorators`, not Statement text; single-layer questions no longer fan out to all five layers.
+- `Get_Architecture_Nodes_By_Label` is called with `limit=100` (the default page is 10 and cuts layers off silently).
+- A failed `Call_List_Repositories_` no longer stalls a run: repo ids come from `Code_Graph_Search` hits.
+
 ## [3.9.0] — 2026-07-29
 
 Metadata pass: three silent-failure modes found while regenerating a ~100-repo Vert.x/MAPL tree.
