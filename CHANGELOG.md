@@ -10,6 +10,16 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+## [3.10.2] — 2026-10-15
+
+### Changed
+- `impact-analysis` Step 2.3 maps the top hits' files with `Get_Code_Nodes_By_Label(children=false)` (names and line
+  ranges, no bodies) and keeps `children=true` for the 1–3 pinpointed Functions/Classes. It now says to always pass
+  `children` explicitly and what each value returns. On a large C# file the lean map was 22 KB against 5.1 MB.
+
+### Fixed
+- `impact-analysis` no longer tells the model to fall back to `embedText` on code nodes, which the API does not return.
+
 ## [3.10.1] — 2026-10-15
 
 ### Changed
