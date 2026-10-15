@@ -66,7 +66,7 @@ breeze-plugin/
 | `Call_Get_Project_Details_` | init |
 | `Functional_Graph_Search` | search, update-graph, requirements, design |
 | `Code_Graph_Search` | search, codegen, architecture |
-| `Get_Code_File_Details` | search, codegen, architecture |
+| `Get_Code_Nodes_By_Label` | search, codegen, architecture, impact-analysis, backend functional extraction |
 | `Documents` | requirements, design, architecture, validate-graph |
 | `Get_complete_functional_graph` | generate-doc, validate-graph |
 | `Get_all_personas` | search, update-graph, requirements |
@@ -271,7 +271,7 @@ Examples: "how does login work", "what does admin do"
 Examples: "who manages invoices", "what roles exist"
 
 **Code structure, implementations:**
-→ `Code_Graph_Search`, then `Get_Code_File_Details` to drill into specific files
+→ `Code_Graph_Search`, then `Get_Code_Nodes_By_Label` to drill into specific files, classes or functions
 Examples: "find auth middleware", "where is validation"
 
 **Both (feature → code):**
@@ -289,7 +289,7 @@ Examples: "NAV tolerance threshold", "acceptance criteria for X"
 2. **Hierarchy drill-down** (Get_all_personas → Get_all_outcomes →
    Get_all_scenarios → Get_all_steps_actions) — for structured
    traversal of a specific persona or feature
-3. **Code_Graph_Search** — for implementation/code questions; follow up with **Get_Code_File_Details** for file-level detail
+3. **Code_Graph_Search** — for implementation/code questions; follow up with **Get_Code_Nodes_By_Label** (`label="File"`, `children=true`) for file-level detail
 4. **Documents** — ONLY when functional graph lacks detail (formulas,
    thresholds, acceptance criteria)
 
@@ -762,7 +762,7 @@ Call `Code_Graph_Search` with architecture-relevant queries:
 - Broad queries like "controllers", "services", "middleware",
   "routes"
 
-Then call `Get_Code_File_Details` on key files from the results to
+Then call `Get_Code_Nodes_By_Label(label="File", filters={"path": <path>, "codeOntologyId": <id>}, children=true)` on key files from the results to
 understand API routes (from decorator statements), class structure,
 and method implementations.
 
