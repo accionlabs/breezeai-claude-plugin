@@ -10,6 +10,12 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+## [3.10.1] — 2026-10-15
+
+### Changed
+- `breeze-plugin-skills.qmd`: the skills overview names `Get_Code_Nodes_By_Label` instead of the retired File-only
+  `Get_Code_File_Details` (tool table, routing notes, architecture walkthrough). BREEZEAI-363.
+
 ## [3.10.0] — 2026-09-28
 
 `impact-analysis` and `search` brought up to date with the Breeze MCP tools, checked against a live project (BreezeAI_V1)
