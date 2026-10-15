@@ -25,3 +25,6 @@
 | Skipping greps for same-page scenarios        | All scenarios get 1 flow / 1 page         | Run greps upfront (Step 3-upfront), analyze each scenario's actions against the cache |
 | Using lowercase pageType/modality             | Backend rejects invalid enum values       | Always uppercase: `FORM`, `LIST`, `DETAIL`, `DASHBOARD`, `WEB`, `MOBILE`              |
 | Adding `actionIds` to Page payloads           | Field doesn't exist on Page entity        | Actions map to Components only, not Pages                                             |
+| Processing the same scenario twice            | Two UJs share the same `scenarioId`       | Maintain `processedScenarioIds` set in Phase 3 loop — skip on duplicate              |
+| Leaving old payload files on fresh re-run     | Old `design_*.json` + new files → cross-file scenarioId collisions | Delete/archive all `design_*.json` in OUTPUT_BASE before starting fresh (Step 1)    |
+| No cross-file scenarioId dedup in parent      | Collision between two outcome files invisible until validate | Parent maintains `globalScenarioIdRegistry`; logs collision on first detection      |

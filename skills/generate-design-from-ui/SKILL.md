@@ -241,6 +241,24 @@ In `outcome` mode:
 
 Look for `{OUTPUT_BASE}/design-progress.json`.
 
+> **⛔ Stale file cleanup (fresh run only):** If the user chooses NOT
+> to resume (or no checkpoint exists), archive or delete ALL existing
+> `design_*.json` files in `OUTPUT_BASE` before starting. Leaving old
+> files alongside new ones is the primary cause of duplicate-scenarioId
+> pollution — old payload files contain UJs whose scenarioIds are then
+> re-generated in the new run, producing two files claiming the same IDs.
+>
+> Steps:
+> 1. Glob `{OUTPUT_BASE}/design_*.json` — list all existing payload files
+> 2. If any exist → tell the user: "Found {N} existing payload files from
+>    a previous run. Delete them before starting fresh? (y/n)"
+> 3. If yes → delete them, then proceed
+> 4. If no → warn: "Keeping old files. Cross-file scenarioId collisions
+>    are likely. Run /breeze:validate-design-graph after completion."
+>
+> In `auto` mode: delete automatically and log `"Cleared {N} stale
+> payload files from previous run"`. Never silently skip this.
+
 - **If it exists and has remaining outcomes** -> show detailed status
   and offer to resume:
 
@@ -566,6 +584,40 @@ FOR each scenarioId, entry in file.scenarios:
   IF entry.status == "pending":
     → keep in remaining for re-processing
 ```
+
+**⛔ Cross-file scenarioId collision check (parent-side guard):**
+
+The parent maintains a `globalScenarioIdRegistry` dict in memory
+(persisted in the checkpoint as `seenScenarioIds`):
+
+```
+globalScenarioIdRegistry = {}   ← scenarioId → { outcomeName, ujName, file }
+
+FOR each scenarioId, entry in file.scenarios WHERE entry.status == "completed":
+  FOR each uj in entry.payload.userJourneys:
+    sid = uj.scenarioId
+    IF sid IN globalScenarioIdRegistry:
+      existing = globalScenarioIdRegistry[sid]
+      IF existing.ujName != uj.name OR existing.outcomeName != current outcome:
+        Log WARNING: "CROSS-FILE scenarioId COLLISION: '{sid}'"
+        Log: "  First seen:  [{existing.outcomeName}] {existing.ujName} in {existing.file}"
+        Log: "  Now seen:    [{current outcome}] {uj.name} in {current file}"
+        Log: "  This is a functional graph UUID collision — the scenario must be"
+        Log: "  re-created in the functional graph with a unique ID."
+      ELSE:
+        Log WARNING: "DUPLICATE OUTCOME FILE: scenarioId '{sid}' for '{uj.name}'"
+        Log: "  First seen:  {existing.file}"
+        Log: "  Now seen:    {current file}"
+        Log: "  Delete the older/superseded file."
+    ELSE:
+      globalScenarioIdRegistry[sid] = { outcomeName: ..., ujName: uj.name, file: current file }
+
+After full scan: if ANY collision found → log total count and advise
+running /breeze:validate-design-graph for full report.
+```
+
+Persist `seenScenarioIds` to `design-progress.json` so cross-session
+runs detect collisions introduced in earlier sessions.
 
 **⛔ Hierarchy completeness check (parent-side guard):**
 

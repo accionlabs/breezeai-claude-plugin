@@ -114,6 +114,8 @@ def _similarity(name_a, name_b):
 def _find_near_duplicates(nodes, name_key="name", group_keys=None, threshold=0.6):
     """
     Find near-duplicate nodes by fuzzy name matching.
+    Only compares nodes on the SAME platform — cross-platform name
+    similarities are expected and not flagged.
 
     Args:
         nodes: list of node dicts
@@ -126,33 +128,39 @@ def _find_near_duplicates(nodes, name_key="name", group_keys=None, threshold=0.6
     near_dupes = []
     seen_exact = set()
 
-    # Build (name, node) pairs, skip empty names
-    named = [(n.get(name_key, ""), n) for n in nodes if n.get(name_key)]
+    # Group nodes by platform, then only compare within each group
+    by_platform = defaultdict(list)
+    for n in nodes:
+        if n.get(name_key):
+            platform = n.get("platform", "")
+            by_platform[platform].append((n.get(name_key, ""), n))
 
-    for (name_a, node_a), (name_b, node_b) in combinations(named, 2):
-        # Skip exact duplicates (caught by CHECK 3)
-        if name_a.lower() == name_b.lower():
-            continue
-
-        sim = _similarity(name_a, name_b)
-        if sim >= threshold:
-            pair_key = tuple(sorted([name_a.lower(), name_b.lower()]))
-            if pair_key in seen_exact:
+    for platform, named in by_platform.items():
+        for (name_a, node_a), (name_b, node_b) in combinations(named, 2):
+            # Skip exact duplicates (caught by CHECK 3)
+            if name_a.lower() == name_b.lower():
                 continue
-            seen_exact.add(pair_key)
 
-            entry = {
-                "name_a": name_a,
-                "name_b": name_b,
-                "id_a": node_a.get("id"),
-                "id_b": node_b.get("id"),
-                "similarity": round(sim, 2),
-            }
-            if group_keys:
-                for gk in group_keys:
-                    entry[f"{gk}_a"] = node_a.get(gk)
-                    entry[f"{gk}_b"] = node_b.get(gk)
-            near_dupes.append(entry)
+            sim = _similarity(name_a, name_b)
+            if sim >= threshold:
+                pair_key = (platform, tuple(sorted([name_a.lower(), name_b.lower()])))
+                if pair_key in seen_exact:
+                    continue
+                seen_exact.add(pair_key)
+
+                entry = {
+                    "name_a": name_a,
+                    "name_b": name_b,
+                    "id_a": node_a.get("id"),
+                    "id_b": node_b.get("id"),
+                    "platform": platform,
+                    "similarity": round(sim, 2),
+                }
+                if group_keys:
+                    for gk in group_keys:
+                        entry[f"{gk}_a"] = node_a.get(gk)
+                        entry[f"{gk}_b"] = node_b.get(gk)
+                near_dupes.append(entry)
 
     # Sort by similarity descending
     near_dupes.sort(key=lambda x: x["similarity"], reverse=True)
@@ -495,39 +503,49 @@ def run_checks(nodes_by_label, functional_graph=None):
         "items": (empty_journeys + empty_flows + empty_pages)[:30],
     }
 
-    # === CHECK 3: Duplicate Names ===
-    uj_name_counts = Counter(uj.get("name", "") for uj in user_journeys)
+    # === CHECK 3: Duplicate Names (keyed on name + platform + persona) ===
+    # Two nodes with the same name on different platforms are NOT duplicates.
+    # Two UJs with the same name on the same platform but different personas
+    # are NOT duplicates (e.g., same scenario for Anonymous Visitor and
+    # Authenticated User).
+    uj_name_counts = Counter(
+        (uj.get("name", ""), uj.get("platform", ""), uj.get("personaName", ""))
+        for uj in user_journeys
+    )
     dup_journeys = [
-        {"name": name, "count": count}
-        for name, count in uj_name_counts.items()
-        if count > 1 and name
+        {"name": nm, "platform": plat, "persona": persona, "count": count}
+        for (nm, plat, persona), count in uj_name_counts.items()
+        if count > 1 and nm
     ]
 
     flow_name_modal = Counter(
-        (f.get("name", ""), f.get("modality", ""))
+        (f.get("name", ""), f.get("modality", ""), f.get("platform", ""))
         for f in flows
     )
     dup_flows = [
-        {"name": nm, "modality": mod, "count": count}
-        for (nm, mod), count in flow_name_modal.items()
+        {"name": nm, "modality": mod, "platform": plat, "count": count}
+        for (nm, mod, plat), count in flow_name_modal.items()
         if count > 1 and nm
     ]
 
     page_name_type = Counter(
-        (p.get("name", ""), p.get("pageType", ""))
+        (p.get("name", ""), p.get("pageType", ""), p.get("platform", ""))
         for p in pages
     )
     dup_pages = [
-        {"name": nm, "pageType": pt, "count": count}
-        for (nm, pt), count in page_name_type.items()
+        {"name": nm, "pageType": pt, "platform": plat, "count": count}
+        for (nm, pt, plat), count in page_name_type.items()
         if count > 1 and nm
     ]
 
-    comp_names = Counter(c.get("name", "") for c in components)
+    comp_name_type_plat = Counter(
+        (c.get("name", ""), c.get("type", ""), c.get("platform", ""))
+        for c in components
+    )
     dup_components = [
-        {"name": name, "count": count}
-        for name, count in comp_names.items()
-        if count > 1 and name
+        {"name": nm, "type": tp, "platform": plat, "count": count}
+        for (nm, tp, plat), count in comp_name_type_plat.items()
+        if count > 1 and nm
     ]
 
     report["checks"]["duplicate_names"] = {
@@ -582,6 +600,49 @@ def run_checks(nodes_by_label, functional_graph=None):
         "severity": "P0",
         "count": len(missing_scenario_id),
         "items": missing_scenario_id[:20],
+    }
+
+    # === CHECK 4b: Duplicate scenarioId across UserJourneys ===
+    # A scenarioId must be 1:1 with a UserJourney. Two UJs sharing the
+    # same scenarioId means either: (a) the outcome was processed twice
+    # from different payload files, (b) the functional graph reused the
+    # same UUID for two different scenarios, or (c) the same scenario was
+    # regenerated without cleaning the old payload.
+    scenario_id_to_ujs = defaultdict(list)
+    for uj in user_journeys:
+        sid = uj.get("scenarioId")
+        if sid:
+            scenario_id_to_ujs[sid].append({
+                "name": uj.get("name", "N/A"),
+                "id": uj.get("id"),
+                "platform": uj.get("platform", ""),
+                "personaName": uj.get("personaName", ""),
+            })
+
+    dup_scenario_ids = [
+        {
+            "scenarioId": sid,
+            "count": len(ujs),
+            "userJourneys": ujs,
+            "issue": (
+                "Same scenarioId on UJs with different names — functional graph UUID collision"
+                if len({u["name"] for u in ujs}) > 1
+                else "Same scenarioId on UJs with same name — outcome processed/upserted more than once"
+            ),
+        }
+        for sid, ujs in scenario_id_to_ujs.items()
+        if len(ujs) > 1
+    ]
+
+    report["checks"]["duplicate_scenario_ids"] = {
+        "severity": "P0",
+        "count": len(dup_scenario_ids),
+        "note": (
+            "Each scenarioId must map to exactly one UserJourney. "
+            "Duplicates indicate duplicate payload files, re-processed outcomes, "
+            "or functional graph UUID collisions."
+        ),
+        "items": dup_scenario_ids[:20],
     }
 
     # === CHECK 5: Invalid Enum Values ===
@@ -919,6 +980,7 @@ def run_checks(nodes_by_label, functional_graph=None):
     p0_count = (
         report["checks"]["empty_hierarchy"]["total"]
         + report["checks"]["missing_scenario_id"]["count"]
+        + report["checks"]["duplicate_scenario_ids"]["count"]
         + report["checks"]["invalid_enums"]["invalid_count"]
         + report["checks"]["template_compliance"]["pages_missing_template"]
         + report["checks"]["dangling_parent_refs"]["count"]

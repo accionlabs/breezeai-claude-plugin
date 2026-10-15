@@ -73,7 +73,12 @@ When a parent is deleted, shared children are NOT cascade-deleted:
   the script fetches the full step/action tree per scenario via REST
   API. Extract `stepId` and `actionId` UUIDs and wire them into the
   design payload
-- Shared steps can appear in multiple flows' `stepIds[]`
+- **Shared steps** — stepIds can appear on multiple Flows and/or
+  Pages simultaneously. The same step can be referenced by multiple
+  design nodes.
+- **Shared actions** — actionIds can appear on multiple Components
+  simultaneously. The same action can be referenced by multiple
+  design nodes.
 - Every `stepId` and `actionId` MUST appear in at least one design node
 - `scenarioId` is ALWAYS required on UserJourney
 

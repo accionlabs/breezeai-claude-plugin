@@ -610,7 +610,17 @@ components for `/register`, plus all `/verify-email` components.
 Process each scenario in `SCENARIOS` sequentially:
 
 ```
+processedScenarioIds = {}   ← scenarioId → scenario name (built up as you go)
+
 FOR each scenario in SCENARIOS:
+  ⛔ DUPLICATE GUARD — before any processing:
+    IF scenario.id IN processedScenarioIds:
+      Log: "DUPLICATE_SCENARIO_ID: '{name}' shares scenarioId with
+            '{processedScenarioIds[id]}' — skipping to prevent duplicate UJ"
+      Mark as failed with error "DUPLICATE_SCENARIO_ID"
+      CONTINUE to next scenario
+    ADD scenario.id → scenario.name to processedScenarioIds
+
   3a. Produce flow discovery evidence block
   3b. Classify components for this scenario's actions
   3c. Build design payload
@@ -622,6 +632,13 @@ FOR each scenario in SCENARIOS:
   Track: succeeded[], failed[], pending[]
 END FOR
 ```
+
+> **Why the duplicate guard matters:** `fetch_steps_actions.py` may
+> return the same scenario on a pagination boundary, or the functional
+> graph may have issued the same UUID to two different scenarios. Without
+> this guard, two UJs claiming the same `scenarioId` enter the graph —
+> the backend deduplicates nodes by `name + platform`, NOT by
+> `scenarioId`, so both UJs survive and corrupt the design graph.
 
 ### 3h. Context Budget Check
 
@@ -829,17 +846,17 @@ UserJourney (1:1 with scenario, scenarioId required)
     "name": "...", "platform": "...", "description": "...", "scenarioId": "...",
     "citations": [{"type": "code", "reference": "<code-node-id>"}],
     "flows": [{
-      "name": "...", "modality": "WEB", "entryPoint": "...", "exitPoint": "...",
+      "name": "...", "platform": "...", "modality": "WEB", "entryPoint": "...", "exitPoint": "...",
       "stepIds": ["..."],
       "pages": [{
-        "name": "...", "pageType": "FORM", "stepIds": ["..."],
+        "name": "...", "platform": "...", "pageType": "FORM", "stepIds": ["..."],
         "citations": [{"type": "code", "reference": "<code-node-id>"}],
         "components": [
-          { "name": "...", "type": "TEMPLATE", "layoutType": "FLEX", "supportingComponents": ["..."],
+          { "name": "...", "platform": "...", "type": "TEMPLATE", "layoutType": "FLEX", "supportingComponents": ["..."],
             "citations": [{"type": "code", "reference": "<code-node-id>"}] },
-          { "name": "...", "type": "ORGANISM", "actionIds": ["..."], "supportingComponents": ["..."],
+          { "name": "...", "platform": "...", "type": "ORGANISM", "actionIds": ["..."], "supportingComponents": ["..."],
             "citations": [{"type": "code", "reference": "<code-node-id>"}] },
-          { "name": "...", "type": "ATOM", "supportingComponents": [],
+          { "name": "...", "platform": "...", "type": "ATOM", "supportingComponents": [],
             "citations": [{"type": "code", "reference": "<code-node-id>"}] }
         ]
       }]
@@ -857,7 +874,7 @@ Cite the source file the node was derived from. Format:
 
 **Rules:**
 - One `Bulk_Update_Design_Nodes` call PER SCENARIO (not per outcome)
-- Set `platform` on UserJourney from the outcome's platform (defaults to "default"). Children inherit it.
+- Set `platform` on **EVERY node** — UserJourney, Flow, Page, and Component. Use the value from the OUTCOME `platform` input (defaults to `"default"`). Do NOT omit it on children — the backend uses `projectUuid + name + platform` for dedup, so missing `platform` on any node breaks uniqueness.
 - Include reused nodes by name — backend dedup handles linking (by projectUuid + name + platform)
 - `pageType` and `modality` MUST be UPPERCASE
 - Pages have NO `actionIds` — actions map to Components only
@@ -883,6 +900,7 @@ Before writing/upserting this scenario's payload:
 5. **supportingComponents minimum** — >= 2 for non-ATOMs
 6. **Pitfall check** — repo names (not invented), UPPERCASE enums, no actionIds on Pages
 7. **Citation check** — UserJourney, Page, and every Component (all types) should have `citations` array. Flow must NOT have citations. Missing citations are a warning (not a blocker) — log but don't fail
+8. **scenarioId uniqueness** — the `scenarioId` on the UserJourney must match this scenario's UUID exactly and must NOT already be present in `processedScenarioIds` (already caught by the loop guard above, but re-verify here as a safety net)
 
 Repair in-place (max 2 passes). If still failing → log error for
 this scenario, continue to next.

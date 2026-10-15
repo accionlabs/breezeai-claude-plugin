@@ -41,20 +41,38 @@ bulk upsert handles everything.
 ### Flows — INCLUDE by name
 
 1. Check Flow Registry for match by `(name, modality)`
-2. Match found → include flow by name in payload with `pages: []`.
-   Backend finds existing flow, adds `INCLUDES_FLOW` edge to new UJ,
-   appends new UJ ID to `userJourneyIds[]`.
-   **DO NOT omit reused flows** — the backend needs them in the
-   payload to create the parent edge.
-3. No match → create in bulk payload → add to registry after upsert
+2. **Match found → reuse payload** — include the flow by name with
+   `pages: []`. The backend creates the `INCLUDES_FLOW` edge and
+   appends the new UJ ID to `userJourneyIds[]`.
+   **DO NOT omit reused flows** — the backend needs the name present
+   in the payload to create the parent edge.
+3. No match → create in bulk payload with full stepIds → add to registry after upsert
+
+```json
+// Reuse — parent edge only:
+{ "name": "Email Login Flow", "modality": "WEB", "pages": [] }
+
+// Create — first time, full stepIds:
+{ "name": "Email Login Flow", "modality": "WEB", "stepIds": ["step-1","step-2"], "pages": [...] }
+```
 
 ### Pages — INCLUDE by name
 
 1. Check Page Registry for match by `(name, pageType)`
-2. Match found → include page by name in payload with `components: []`.
-   Backend finds existing page, adds `CONTAINS_PAGE` edge to new flow,
-   appends new flow ID to `flowIds[]`.
-3. No match → create in bulk payload → add to registry after upsert
+2. **Match found → reuse payload** — include the page by name with
+   `components: []`. The backend creates the `CONTAINS_PAGE` edge
+   and appends the new Flow ID to `flowIds[]`.
+   **DO NOT omit reused pages** — the backend needs the name present
+   in the payload to create the parent edge.
+3. No match → create in bulk payload with full stepIds → add to registry after upsert
+
+```json
+// Reuse — parent edge only:
+{ "name": "LoginPage", "pageType": "FORM", "components": [] }
+
+// Create — first time, full stepIds:
+{ "name": "LoginPage", "pageType": "FORM", "stepIds": ["step-3"], "components": [...] }
+```
 
 ### Components — INCLUDE by name
 
