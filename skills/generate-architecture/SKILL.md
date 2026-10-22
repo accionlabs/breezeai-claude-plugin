@@ -197,7 +197,7 @@ The essentials, in order:
    so the 1000-char cap carries logic, not the signature.
 5. **Verify** (§9) — the 202 is only a parse receipt; nodes land ~10 s later.
 
-> ⛔ **Never loop `Create_DB_Schema_Column`.** Per-object column writes trigger a server-side
+> ⛔ **Never loop `Create_DataLake_Schema_Node(label="DDLColumn")`.** Per-object column writes trigger a server-side
 > re-embed of the table *and every column already on it* (O(n²)) — it stalls, and it cannot
 > create FK edges at all. Bulk is the only correct path for tables/columns.
 

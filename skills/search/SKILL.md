@@ -136,7 +136,7 @@ All tools below are read-only. Pass `projectUuid` (or `project_uuid` / `uuid`, p
 - `Get_Design_Nodes_by_Ids` — fetch specific design nodes by ID.
 
 ### Architecture + DB-schema graph
-- `Architecture_Graph_Search` — semantic search across architecture-layer nodes (UserExperience, ApiGateway, ObservabilityMonitoring, Agents, Services, EventQueue, DataLake, Infrastructure) and the **embedded** schema labels only: `DDLTable`, `DDLView`, `DDLProcedure` (and ES labels). **`DDLColumn`, `DDLConstraint`, `DDLIndex` and `DDLSequence` are not embedded** — asking for them returns an error ("exists but is not embedded, so it cannot be searched"); list them with `Get_DB_Schema_Nodes_By_Label` instead. Search hits carry no `ddlText`. Filter via `include_labels=[...]` and tune `threshold` (default ~0.4). **Embedding-filtered — silently drops nodes whose name/description doesn't match the query.** For *enumeration* questions ("list every service", "every table in DataLake X"), fall back to the by-label tools below — those don't filter.
+- `Architecture_Graph_Search` — semantic search across architecture-layer nodes (UserExperience, ApiGateway, ObservabilityMonitoring, Agents, Services, EventQueue, DataLake, Infrastructure) and the **embedded** schema labels only: `DDLTable`, `DDLView`, `DDLProcedure` (and ES labels). **`DDLColumn`, `DDLConstraint`, `DDLIndex` and `DDLSequence` are not embedded** — asking for them returns an error ("exists but is not embedded, so it cannot be searched"); list them with `Get_DataLake_Schema_Nodes` instead. Search hits carry no `ddlText`. Filter via `include_labels=[...]` and tune `threshold` (default ~0.4). **Embedding-filtered — silently drops nodes whose name/description doesn't match the query.** For *enumeration* questions ("list every service", "every table in DataLake X"), fall back to the by-label tools below — those don't filter.
   **An empty architecture layer is NORMAL and is not evidence the project lacks architecture data.**
   On many projects all 8 layers are empty or near-empty while the data layer hanging off `DataLake`
   holds the full schema. Probe once with a by-label call at `limit=1` before investing further
@@ -147,10 +147,10 @@ All tools below are read-only. Pass `projectUuid` (or `project_uuid` / `uuid`, p
   A `DDLTable` hit returns metadata only (schema, name, tableType, columnCount, hasPrimaryKey), not
   its columns; a `DDLView` returns its SQL with an empty columns array; a `DDLProcedure` returns its
   body and typed parameter list.
-- `Get_ES_Nodes_By_Label(data_lake_id, label="es-index" | "es-field" | "es-alias")` — list an Elasticsearch store's indices, fields and aliases (for lakes whose `schemaSummary` has `elasticsearch`).
-- `List_NoSQL_Collections(data_lake_id)` — list a document store's collections (for lakes whose `schemaSummary` has `nosql`).
+- `Get_DataLake_Schema_Nodes(data_lake_id, label="ESIndex" | "ESField" | "ESAlias")` — list an Elasticsearch store's indices, fields and aliases (for lakes whose `schemaSummary` has `elasticsearch`).
+- `Get_DataLake_Schema_Nodes(data_lake_id, label="NoSQLCollection")` — list a document store's collections (for lakes whose `schemaSummary` has `nosql`).
 - `Get_Architecture_Nodes_By_Label` — enumerate every architecture node in one layer (no semantic filter, no silent drops). Use for "list all services / queues / data stores". Each **DataLake** row carries `schemaSummary` — the schema ingested under it by family (`{"relational": {"tables": 87, "columns": 681}}`, `elasticsearch`, `nosql`; `{}` = none ingested). Read it before any schema lookup: it says which lake holds tables at all, and answers "which data stores have schema, and how big are they" for the whole project in one call (pass `limit=100`: the default page is 10).
-- `Get_DB_Schema_Nodes_By_Label` — list DDL entities under one DataLake by label (`table`, `column`, `constraint`, `index`, `view`, `sequence`, `procedure`). Accepts the lowercase labels or the graph labels (`DDLTable` = `table`). Takes `data_lake_id` — the DataLake row's `id` from `Get_Architecture_Nodes_By_Label(label="DataLake")`, or `dbOntologyId` on a search hit — not `uuid`; the DataLake row's `schemaTools` gives the exact call per family. Name lookups: `filters={"name": {"$containsi": "<x>"}}`; a table's columns: `label="column", filters={"tableId": {"$eq": "<table id>"}}`. Supports pagination, sort, equality/regex filters (e.g. `{"tableId": {"$eq": "<uuid>"}}`), parent/child tree walks. Use for "all tables in DataLake X", "FKs referencing table Y", "columns of table Z".
+- `Get_DataLake_Schema_Nodes` — list schema nodes under one DataLake by graph label: SQL `DDLTable`, `DDLView`, `DDLProcedure`, `DDLSequence`, `DDLColumn`, `DDLConstraint`, `DDLIndex`; Elasticsearch `ESIndex`, `ESField`, `ESAlias`; NoSQL `NoSQLCollection`, `NoSQLField`, `NoSQLIndex`. Short names like `table` / `column` also work, but `index` and `field` are ambiguous and rejected. Takes `data_lake_id` — the DataLake row's `id` from `Get_Architecture_Nodes_By_Label(label="DataLake")`, or `dbOntologyId` on a search hit — not `uuid`; the DataLake row's `schemaTools` gives the exact call per family. Name lookups: `filters={"name": {"$containsi": "<x>"}}`; a table's columns: `label="DDLColumn", parent_id="<table id>"`. Supports pagination, sort, equality/regex filters (e.g. `{"tableId": {"$eq": "<uuid>"}}`), parent/child tree walks. Use for "all tables in DataLake X", "FKs referencing table Y", "columns of table Z".
 
   **Always set `limit`.** The server default is 100 with no field projection, so a `procedure` or
   `view` page arrives with the stored body/definition attached (~165 KB for 100 procedures). Use
@@ -187,17 +187,17 @@ Pick `include_labels` by query intent — narrow when you can, omit when truly a
 | "which API / route / gateway handles X" | `["ApiGateway"]` |
 | "which agent / LLM workflow runs X" | `["Agents"]` |
 | "find tables for X" / "which tables store Y" | `["DDLTable"]` |
-| "find columns named X" | not searchable → `Get_DB_Schema_Nodes_By_Label(label="column", filters={"name": {"$containsi": "X"}})` per DataLake |
-| "FKs referencing X" / "unique constraint on Y" | not searchable → `Get_DB_Schema_Nodes_By_Label(label="constraint")` + filter |
-| "indexes on X" | not searchable → `Get_DB_Schema_Nodes_By_Label(label="index", filters={"tableId": {"$eq": …}})` |
+| "find columns named X" | not searchable → `Get_DataLake_Schema_Nodes(label="DDLColumn", filters={"name": {"$containsi": "X"}})` per DataLake |
+| "FKs referencing X" / "unique constraint on Y" | not searchable → `Get_DataLake_Schema_Nodes(label="DDLConstraint")` + filter |
+| "indexes on X" | not searchable → `Get_DataLake_Schema_Nodes(label="DDLIndex", filters={"tableId": {"$eq": …}})` |
 | "views / materialized views including X" | `["DDLView"]` |
 | "stored procs / triggers doing X" | `["DDLProcedure"]` |
-| "sequences for X" | not searchable → `Get_DB_Schema_Nodes_By_Label(label="sequence")` |
-| "everything related to the auth schema" | `["DDLTable","DDLView","DDLProcedure"]`, then list the tables' columns with `Get_DB_Schema_Nodes_By_Label` |
+| "sequences for X" | not searchable → `Get_DataLake_Schema_Nodes(label="DDLSequence")` |
+| "everything related to the auth schema" | `["DDLTable","DDLView","DDLProcedure"]`, then list the tables' columns with `Get_DataLake_Schema_Nodes` |
 | "what stores AND schema back X" | `["DataLake","DDLTable","DDLView"]` |
 | Truly ambiguous one-word queries | omit `include_labels` |
 
-When a question demands completeness ("are these ALL the services / tables?"), don't rely on this tool — use `Get_Architecture_Nodes_By_Label` or `Get_DB_Schema_Nodes_By_Label`.
+When a question demands completeness ("are these ALL the services / tables?"), don't rely on this tool — use `Get_Architecture_Nodes_By_Label` or `Get_DataLake_Schema_Nodes`.
 
 ---
 
@@ -243,7 +243,7 @@ Stop at the first match:
 | Targeted deployment question — "which service handles X", "what queue carries Y", "what data store holds Z" | `Architecture_Graph_Search` with matching `include_labels` (see routing table above) |
 | Enumerate one architecture layer — "list every service / queue / data store / topic" | `Get_Architecture_Nodes_By_Label` |
 | Targeted DDL question — "find tables for X", "columns named Y", "FKs to Z", "views including W" | `Architecture_Graph_Search` with DDL `include_labels` |
-| Enumerate schema under one DataLake — "all tables in DataLake X", "every view in Y" | `Get_DB_Schema_Nodes_By_Label` (find the DataLake's id first via `Architecture_Graph_Search` or `Get_Architecture_Nodes_By_Label`) |
+| Enumerate schema under one DataLake — "all tables in DataLake X", "every view in Y" | `Get_DataLake_Schema_Nodes` (find the DataLake's id first via `Architecture_Graph_Search` or `Get_Architecture_Nodes_By_Label`) |
 
 ### 1b. Multi-graph triggers
 
@@ -270,7 +270,7 @@ If the query doesn't fit a single-graph fast-path, pick the layers it implies an
 
 There is one output shape: the **per-ontology view** (Phase 4). Every synthesized answer is an exhaustive summary, then one native-hierarchy tree per graph. There is no separate "woven narrative" mode, and no trailing comparison section.
 
-- Search **all five layers by default** — Functional, Design, Code, Architecture, and **Data (DDL)** — unless the query is a single-layer lookup (Phase 1a fast-paths, e.g. "columns of table X", "which stores have schema") or explicitly scoped to a subset. Covering every layer the question actually touches is the point, so favor breadth. Always include the DDL fetch (`Architecture_Graph_Search` with DDL `include_labels` and/or `Get_DB_Schema_Nodes_By_Label` on the touched DataLake) so the Data layer renders when the schema is onboarded.
+- Search **all five layers by default** — Functional, Design, Code, Architecture, and **Data (DDL)** — unless the query is a single-layer lookup (Phase 1a fast-paths, e.g. "columns of table X", "which stores have schema") or explicitly scoped to a subset. Covering every layer the question actually touches is the point, so favor breadth. Always include the DDL fetch (`Architecture_Graph_Search` with DDL `include_labels` and/or `Get_DataLake_Schema_Nodes` on the touched DataLake) so the Data layer renders when the schema is onboarded.
 - The output shape does **not** change *which* graphs you search — Phase 1a/1b scoping and Phase 3 drill-down still apply; this only fixes how Phase 4 renders.
 - For an obviously single-layer lookup (e.g. "where is function X"), still use the per-ontology shape — just render the one relevant block; never pad with empty trees.
 
@@ -316,8 +316,8 @@ For "how does X work" questions, drill all the way to Steps/Actions. For "who do
 
 ### Architecture + DDL drill-down
 - **Top hits are architecture nodes** → already self-contained (name, description, technologies, pattern, regions); use directly in synthesis.
-- **Top hits are DDL nodes (DDLTable / DDLView / DDLProcedure)** → search hits carry no `ddlText`; list the table's columns with `Get_DB_Schema_Nodes_By_Label(data_lake_id, label="column", filters={"tableId": {"$eq": <table id>}})`. For a complete schema picture under one DataLake — every column of a table, every FK pointing at it, every view that references it — call `Get_DB_Schema_Nodes_By_Label` with the matching `data_lake_id` and the appropriate label + `filters`.
-- **Enumeration follow-up** — if the semantic search returned an incomplete set and the question demands completeness ("are these ALL the tables?"), fall back to `Get_Architecture_Nodes_By_Label` (one architecture layer) or `Get_DB_Schema_Nodes_By_Label` (schema-side, one DataLake).
+- **Top hits are DDL nodes (DDLTable / DDLView / DDLProcedure)** → search hits carry no `ddlText`; list the table's columns with `Get_DataLake_Schema_Nodes(data_lake_id, label="DDLColumn", filters={"tableId": {"$eq": <table id>}})`. For a complete schema picture under one DataLake — every column of a table, every FK pointing at it, every view that references it — call `Get_DataLake_Schema_Nodes` with the matching `data_lake_id` and the appropriate label + `filters`.
+- **Enumeration follow-up** — if the semantic search returned an incomplete set and the question demands completeness ("are these ALL the tables?"), fall back to `Get_Architecture_Nodes_By_Label` (one architecture layer) or `Get_DataLake_Schema_Nodes` (schema-side, one DataLake).
 
 ### Cross-Persona Drill-Down
 
@@ -355,7 +355,7 @@ End the summary with a one-line **Coverage:** list naming only the layers that r
 - **🎨 Design** — `UserJourney → Flow → Page → Component`.
 - **💻 Code** — `Repo → File → Class/Function → key statement`, every leaf tagged `repo: path:line`. Show the real call chain / route decorator / DTO / enum literal, not just symbol names.
 - **🏗️ Architecture** — the deployed path across layers (`UserExperience → ApiGateway → Services → Agents → DataLake`), naming concrete nodes and the read/write direction on stores.
-- **🗄️ Data (DDL)** — `DataLake → Table → (Columns / Constraints / Indexes / Views / Procedures)`. Source columns by listing them (`Get_DB_Schema_Nodes_By_Label(data_lake_id, label="column", filters={"tableId": {"$eq": …}})`) — tables carry no `ddlText`; use the same tool for a complete FK/view set. Omit silently if the schema layer isn't onboarded for the project.
+- **🗄️ Data (DDL)** — `DataLake → Table → (Columns / Constraints / Indexes / Views / Procedures)`. Source columns by listing them (`Get_DataLake_Schema_Nodes(data_lake_id, label="DDLColumn", filters={"tableId": {"$eq": …}})`) — tables carry no `ddlText`; use the same tool for a complete FK/view set. Omit silently if the schema layer isn't onboarded for the project.
 
 Keep each tree compact but **preserve depth** — never flatten a 5-level functional chain into a single arrow line. Use real node names/IDs for existing nodes.
 
@@ -388,7 +388,7 @@ A single search returns an incomplete picture for process questions — always f
 - **Don't narrate the search.** No "Excellent!", no "I now have enough data", no "Let me compose the output", no "All 6 searches are complete". The answer opens with the `Direct Answer` paragraph and nothing before it.
 - **Don't present raw search results as the final answer.** Always drill down and synthesize.
 - **Don't claim a feature doesn't exist** from one failed search — try a rephrase or widen to another graph first.
-- **Don't trust an empty `Architecture_Graph_Search` result for an enumeration question.** Embedding-filtered search silently drops nodes — if the user asked to enumerate (all services, all tables), use `Get_Architecture_Nodes_By_Label` / `Get_DB_Schema_Nodes_By_Label` instead.
+- **Don't trust an empty `Architecture_Graph_Search` result for an enumeration question.** Embedding-filtered search silently drops nodes — if the user asked to enumerate (all services, all tables), use `Get_Architecture_Nodes_By_Label` / `Get_DataLake_Schema_Nodes` instead.
 - **Don't mention empty layers or graph-completeness gaps** in user-visible output (e.g., "the architecture graph has 0 Agents"). Silently fall back; present what you do have.
 - **Don't append a cross-ontology / reconciliation section.** No "agreements vs divergences", no layer-by-layer comparison, no gap analysis. The answer is the summary, the trees and the anchor appendix — nothing after it. A genuine conflict between two layers belongs inline, in a clause, next to the fact it concerns.
 - **Don't duplicate `/breeze:impact-analysis`.** `search` reads and synthesizes across layers. It does **not** do scenario-ID → architecture-node anchoring, blast-radius scoring, risk levels, tier classification, or templated Context blocks. If the user asks for impact assessment, blast radius, or a detailed analysis doc, point them at `/breeze:impact-analysis`.

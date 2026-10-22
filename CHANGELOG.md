@@ -10,6 +10,16 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+## [3.11.0] — 2026-10-22
+
+### Changed
+- Skills use the four consolidated Data Lake schema MCP tools (BREEZEAI-1279): `Get_DataLake_Schema_Nodes`,
+  `Create_DataLake_Schema_Node`, `Update_DataLake_Schema_Node`, `Delete_DataLake_Schema_Node`. They replace the 26
+  per-entity tools (`Create_DB_Schema_*`, `Get_DB_Schema_Nodes_By_Label`, `Get_ES_Nodes_By_Label`,
+  `List_NoSQL_Collections`, the ES / NoSQL create-update-delete tools). Labels are the graph labels (`DDLTable`,
+  `DDLColumn`, `ESIndex`, `NoSQLCollection`, …); `parent_id` narrows a listing to one table, ES index or collection.
+  Needs breezeai-mcp-backend with BREEZEAI-1279 deployed.
+
 ## [3.10.2] — 2026-10-15
 
 ### Changed

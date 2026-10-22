@@ -169,18 +169,18 @@ This step surfaces DDL-level impact — columns, procedures, triggers, materiali
 
 ### Stage 1 — Broad DDL Discovery (always when triggered)
 
-**Trigger:** Step 2.2 surfaced ≥1 touched DataLake. Read each touched DataLake's **`schemaSummary`** (returned on every DataLake by `Get_Architecture_Nodes_By_Label(label="DataLake")`): counts of the schema ingested under it by family, e.g. `{"relational": {"tables": 87, "columns": 681}}`; `{}` means no schema has been ingested. Skip a lake whose summary is `{}` (object storage, a graph store): it has nothing to list. Each DataLake row also carries **`schemaTools`** — the exact follow-up call for each family it holds (e.g. `{"relational": "Get_DB_Schema_Nodes_By_Label(data_lake_id=\"…\", label=\"table\")"}`); use it. Pick the tool by family: `relational` → `Get_DB_Schema_Nodes_By_Label` (below); `elasticsearch` → `Get_ES_Nodes_By_Label(data_lake_id, label="es-index" | "es-field" | "es-alias")`; `nosql` → `List_NoSQL_Collections(data_lake_id)`. Run the name filters below against the family's tool, so a change to a search index or a document collection is found too. If a lake carries no `schemaSummary` at all (older backend), run the relational Stage 1 against it as before. Do NOT pre-filter by `category` field — the field is AI-generated and may vary across projects.
+**Trigger:** Step 2.2 surfaced ≥1 touched DataLake. Read each touched DataLake's **`schemaSummary`** (returned on every DataLake by `Get_Architecture_Nodes_By_Label(label="DataLake")`): counts of the schema ingested under it by family, e.g. `{"relational": {"tables": 87, "columns": 681}}`; `{}` means no schema has been ingested. Skip a lake whose summary is `{}` (object storage, a graph store): it has nothing to list. Each DataLake row also carries **`schemaTools`** — the exact follow-up call for each family it holds (e.g. `{"relational": "Get_DataLake_Schema_Nodes(data_lake_id=\"…\", label=\"table\")"}`); use it. Pick the tool by family: `relational` → `Get_DataLake_Schema_Nodes` (below); `elasticsearch` → `Get_DataLake_Schema_Nodes(data_lake_id, label="ESIndex" | "ESField" | "ESAlias")`; `nosql` → `Get_DataLake_Schema_Nodes(data_lake_id, label="NoSQLCollection")`. Run the name filters below against the family's tool, so a change to a search index or a document collection is found too. If a lake carries no `schemaSummary` at all (older backend), run the relational Stage 1 against it as before. Do NOT pre-filter by `category` field — the field is AI-generated and may vary across projects.
 
 **Action:** list, don't search. `DDLColumn`, `DDLConstraint`, `DDLIndex` and `DDLSequence` have no embedding, so
 `Architecture_Graph_Search` refuses them — which used to drop the whole Data Layer section. (The searchable schema
 labels are `DDLTable`, `DDLView`, `DDLProcedure`, `ESIndex`, `ESField`, `ESAlias`, `NoSQLCollection`, `NoSQLField`,
-`NoSQLIndex`; a search is fine for those, but a listing by name is exact and cannot miss.) Use `Get_DB_Schema_Nodes_By_Label` per touched
+`NoSQLIndex`; a search is fine for those, but a listing by name is exact and cannot miss.) Use `Get_DataLake_Schema_Nodes` per touched
 DataLake instead, with `$containsi` on the names the prompt uses:
 
 ```
 parallel, per touched DataLake, per concrete noun in the prompt (entity, field, record):
-  Get_DB_Schema_Nodes_By_Label(data_lake_id, label="table",  filters={"name": {"$containsi": "<noun>"}})
-  Get_DB_Schema_Nodes_By_Label(data_lake_id, label="column", filters={"name": {"$containsi": "<noun>"}})
+  Get_DataLake_Schema_Nodes(data_lake_id, label="DDLTable",  filters={"name": {"$containsi": "<noun>"}})
+  Get_DataLake_Schema_Nodes(data_lake_id, label="DDLColumn", filters={"name": {"$containsi": "<noun>"}})
 ```
 
 Labels: `table`, `column`, `constraint`, `index`, `view`, `sequence`, `procedure` (the graph labels `DDLTable`,
@@ -203,7 +203,7 @@ search hit — not `uuid`.
 1. **List the table's columns (1 call per focus table).** Table rows from this tool carry no `ddlText`, so read the
    columns directly:
    ```
-   Get_DB_Schema_Nodes_By_Label(data_lake_id, label="column", filters={"tableId": {"$eq": "<table id>"}})
+   Get_DataLake_Schema_Nodes(data_lake_id, label="DDLColumn", filters={"tableId": {"$eq": "<table id>"}})
    ```
    Names, types, nullability and key flags — enough for ~80% of impact-analysis questions.
 
@@ -212,7 +212,7 @@ search hit — not `uuid`.
 
 3. **DataLake-wide bulk fetch (last resort, amortized per DataLake).** Only when ≥2 focus tables share a parent DataLake AND structured column nodes are essential:
    ```
-   Get_DB_Schema_Nodes_By_Label(data_lake_id, label="column")  ← one call per DataLake
+   Get_DataLake_Schema_Nodes(data_lake_id, label="DDLColumn")  ← one call per DataLake
    → cache result, client-side filter by tableId for each focus table
    ```
    One expensive call (~thousands of nodes) reused across all focus tables in that DataLake.
@@ -223,9 +223,9 @@ search hit — not `uuid`.
 
 **Action per affected DataLake (parallel, cached per DataLake):**
 ```
-Get_DB_Schema_Nodes_By_Label(data_lake_id, label="constraint")  → filter incoming FKs by referenced table
-Get_DB_Schema_Nodes_By_Label(data_lake_id, label="view")        → grep definition for table name (word-boundary)
-Get_DB_Schema_Nodes_By_Label(data_lake_id, label="procedure")   → grep body for table name (word-boundary)
+Get_DataLake_Schema_Nodes(data_lake_id, label="DDLConstraint")  → filter incoming FKs by referenced table
+Get_DataLake_Schema_Nodes(data_lake_id, label="DDLView")        → grep definition for table name (word-boundary)
+Get_DataLake_Schema_Nodes(data_lake_id, label="DDLProcedure")   → grep body for table name (word-boundary)
 ```
 
 ### Classify each touched DataLake into one of three tiers
