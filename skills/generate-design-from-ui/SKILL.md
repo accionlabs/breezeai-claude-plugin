@@ -139,7 +139,7 @@ reads actual code for accurate component discovery.
 > | **Backend name dedup** | Without `platform` field, "Login Page" from Web merges with "Login Page" from Mobile into one node |
 > | **Shared registries** | Sub-agent reuses Platform A's component when building Platform B |
 > | **Shared persona outcomes** | Sub-agent processes outcomes from both platforms in one run |
-> | **MCP queries** | `Get_all_Design_By_Label` returns nodes from both platforms; sub-agent links to wrong one |
+> | **MCP queries** | `Get_Design_Nodes_By_Label` returns nodes from both platforms; sub-agent links to wrong one |
 > | **Reconciliation** | Merges same-name nodes across platforms (destroys both) |
 > | **Checkpoint** | Progress file mixes scenarios from both platforms |
 >
@@ -674,14 +674,14 @@ This catches near-name mismatches across parallel agents.
 
 > **⛔ Platform scoping (critical):** When `APP_SUFFIX` is non-empty,
 > reconciliation MUST only operate on nodes belonging to this platform.
-> After fetching all nodes via `Get_all_Design_By_Label`, **filter to
+> After fetching all nodes via `Get_Design_Nodes_By_Label`, **filter to
 > keep only nodes whose name ends with `APP_SUFFIX`** before grouping
 > and merging. Never merge a node from this platform with a node from
 > another platform — that destroys both graphs.
 
 ### 4a. Flow Reconciliation
 
-1. `Get_all_Design_By_Label(uuid, label: "Flow")` (paginate)
+1. `Get_Design_Nodes_By_Label(uuid, label: "Flow")` (paginate)
 2. **Filter:** keep only nodes matching this platform (name ends with
    `APP_SUFFIX`, or all nodes if `APP_SUFFIX` is empty)
 3. Group by `(name, modality)` — find groups with >1 entry

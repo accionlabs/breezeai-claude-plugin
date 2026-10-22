@@ -19,6 +19,10 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
   `List_NoSQL_Collections`, the ES / NoSQL create-update-delete tools). Labels are the graph labels (`DDLTable`,
   `DDLColumn`, `ESIndex`, `NoSQLCollection`, …); `parent_id` narrows a listing to one table, ES index or collection.
   Needs breezeai-mcp-backend with BREEZEAI-1279 deployed.
+- Design reads use `Get_Design_Nodes_By_Label`, which replaces `Get_all_Design_By_Label` and `Get_Design_Nodes_by_Ids`
+  (fetch by id with `filters={"id": {"$in": [...]}}`); `design-from-ui-structuring-agent`'s tool list is updated.
+- MCP tool cleanup in the same release: `Create_Master_Citation` replaces the deprecated
+  `Call_Create_Citation_Functional_`, the old citation aliases and `Get_Code_File_Details` are removed. No skill used them.
 
 ## [3.10.2] — 2026-10-15
 

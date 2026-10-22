@@ -129,11 +129,11 @@ All tools below are read-only. Pass `projectUuid` (or `project_uuid` / `uuid`, p
 
 ### Design graph
 - `Design_Graph_Search` — semantic search across design nodes (journeys, flows, pages, components).
-- `Get_all_Design_By_Label` — list design nodes filtered by label type. `filters` also answers "which page / flow /
+- `Get_Design_Nodes_By_Label` — list design nodes filtered by label type. `filters` also answers "which page / flow /
   component covers this step or action": `{"stepIds": {"$eq": "<step id>"}}` on Page or Flow, `{"actionIds": {"$eq":
   "<action id>"}}` on Component (array-aware). Not every project links steps to pages — after two or three empty
   lookups, fall back to `Design_Graph_Search`.
-- `Get_Design_Nodes_by_Ids` — fetch specific design nodes by ID.
+  Fetch specific nodes by id with `filters={"id": {"$in": ["<id>", ...]}}`.
 
 ### Architecture + DB-schema graph
 - `Architecture_Graph_Search` — semantic search across architecture-layer nodes (UserExperience, ApiGateway, ObservabilityMonitoring, Agents, Services, EventQueue, DataLake, Infrastructure) and the **embedded** schema labels only: `DDLTable`, `DDLView`, `DDLProcedure` (and ES labels). **`DDLColumn`, `DDLConstraint`, `DDLIndex` and `DDLSequence` are not embedded** — asking for them returns an error ("exists but is not embedded, so it cannot be searched"); list them with `Get_DataLake_Schema_Nodes` instead. Search hits carry no `ddlText`. Filter via `include_labels=[...]` and tune `threshold` (default ~0.4). **Embedding-filtered — silently drops nodes whose name/description doesn't match the query.** For *enumeration* questions ("list every service", "every table in DataLake X"), fall back to the by-label tools below — those don't filter.
@@ -238,7 +238,7 @@ Stop at the first match:
 |---|---|
 | Pure code lookup — "where is X implemented", "find function/class/file Y", "show me the route handler for Z" | `Code_Graph_Search` → then `Get_Code_Nodes_By_Label(label="File", filters={path + codeOntologyId \| id}, children=true)` on top hits. If the query names or implies a single repo, list repos via `Call_List_Repositories_` first and scope the search via `code_ontology_id=` (the repo's integer `_id`). |
 | Repo inventory — "which codebases", "list the repos", "what languages does this project use", "what's the repo for X" | `Call_List_Repositories_` |
-| Pure UI — "what page shows X", "which component", "what does the settings screen look like" | `Design_Graph_Search` → optionally `Get_Design_Nodes_by_Ids` for detail |
+| Pure UI — "what page shows X", "which component", "what does the settings screen look like" | `Design_Graph_Search` → optionally `Get_Design_Nodes_By_Label(filters={"id": {"$in": [...]}})` for detail |
 | Personas / roles only — "who manages X", "what roles exist" | `Get_all_personas` → drill down (see Phase 3) |
 | Targeted deployment question — "which service handles X", "what queue carries Y", "what data store holds Z" | `Architecture_Graph_Search` with matching `include_labels` (see routing table above) |
 | Enumerate one architecture layer — "list every service / queue / data store / topic" | `Get_Architecture_Nodes_By_Label` |
@@ -312,7 +312,7 @@ For "how does X work" questions, drill all the way to Steps/Actions. For "who do
 - **Top hits are Functions or Classes** → their source and call chain are already in the search payload. To see the whole surrounding file, call `Get_Code_Nodes_By_Label(label="File", filters={"path": <hit.path>, "codeOntologyId": <hit.codeOntologyId>}, children=true)` — you can fetch the full file straight from the hit's `path` + `codeOntologyId`, no need to resolve the File id first.
 
 ### Design drill-down
-- **Top hits are design nodes** → if the search payload is thin, call `Get_Design_Nodes_by_Ids` on the top IDs for full detail, or `Get_all_Design_By_Label` to widen within a label type.
+- **Top hits are design nodes** → if the search payload is thin, call `Get_Design_Nodes_By_Label` with `filters={"id": {"$in": [<top ids>]}}` for full detail, or without the id filter to widen within a label type.
 
 ### Architecture + DDL drill-down
 - **Top hits are architecture nodes** → already self-contained (name, description, technologies, pattern, regions); use directly in synthesis.

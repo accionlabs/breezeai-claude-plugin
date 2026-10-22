@@ -71,8 +71,8 @@ Then run these four calls simultaneously using queries derived from the user's p
    Search for related user journeys, flows, pages, and components.
    Then, once Step 2.1 has the touched scenarios' steps and actions, ask the design graph directly what already covers
    them — the page or flow shared with another scenario is the one search misses:
-   `Get_all_Design_By_Label(label="Page" | "Flow", filters={"stepIds": {"$eq": "<step id>"}})` and
-   `Get_all_Design_By_Label(label="Component", filters={"actionIds": {"$eq": "<action id>"}})` (array-aware: `$eq`
+   `Get_Design_Nodes_By_Label(label="Page" | "Flow", filters={"stepIds": {"$eq": "<step id>"}})` and
+   `Get_Design_Nodes_By_Label(label="Component", filters={"actionIds": {"$eq": "<action id>"}})` (array-aware: `$eq`
    matches an element). A covering page is where the change lands; only propose a new page when none does.
    Many projects link only some steps to pages: if the first two or three lookups return 0 rows, stop looking up by id
    and use the `Design_Graph_Search` hits and page names instead — do not repeat the lookup for every step.

@@ -975,7 +975,7 @@ List the files examined and why each was classified as no-impact.
 10. **Platform isolation** — when `APP_SUFFIX` is set:
     - Append suffix to EVERY node name (UJ, Flow, Page, Component)
       before upserting
-    - Filter ALL `Design_Graph_Search` / `Get_all_Design_By_Label`
+    - Filter ALL `Design_Graph_Search` / `Get_Design_Nodes_By_Label`
       results by suffix before reusing any node
     - Read/write ONLY the platform-scoped registry files
     - Never touch design nodes whose name ends with a different suffix
