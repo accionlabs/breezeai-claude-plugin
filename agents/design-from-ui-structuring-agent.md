@@ -12,7 +12,7 @@ tools:
   - mcp__plugin_breeze_breeze-mcp__Bulk_Update_Design_Nodes
   - mcp__plugin_breeze_breeze-mcp__Update_Functional_Node
   - mcp__plugin_breeze_breeze-mcp__Update_Design_Node
-  - mcp__plugin_breeze_breeze-mcp__Get_all_Design_By_Label
+  - mcp__plugin_breeze_breeze-mcp__Get_Design_Nodes_By_Label
   - mcp__plugin_breeze_breeze-mcp__Design_Graph_Search
   - mcp__plugin_breeze_breeze-mcp__Code_Graph_Search
 ---

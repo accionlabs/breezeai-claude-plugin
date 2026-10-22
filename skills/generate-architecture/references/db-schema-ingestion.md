@@ -13,7 +13,7 @@ Read this before Phase 5 whenever the source tree contains `.sql` files or ES ma
 There are **two write paths** and they are NOT interchangeable. Picking wrong costs hours
 and produces a graph with no relationships.
 
-| | `POST /db-ontology/stream-ingest` (bulk) | `Create_DB_Schema_*` (MCP, per object) |
+| | `POST /db-ontology/stream-ingest` (bulk) | `Create_DataLake_Schema_Node` (MCP, per object) |
 |---|---|---|
 | Tables / columns / indexes / views | ✅ | ✅ |
 | PK / UNIQUE constraints | ✅ | ✅ |
@@ -31,13 +31,13 @@ tables · columns · indexes · constraints · views   →  stream-ingest   (bul
 procedures · functions · triggers                  →  POST /db-ontology/procedure
 ```
 
-> ⚠ **Never loop `Create_DB_Schema_Column`.** Each column write triggers a server-side
+> ⚠ **Never loop `Create_DataLake_Schema_Node(label="DDLColumn")`.** Each column write triggers a server-side
 > `refreshTable` that re-reads the table and **re-embeds it plus every column already
 > attached** — O(n²). 3,029 columns ⇒ ~32,563 embedding operations (10.8×). This is what
 > makes the per-object path stall, and it can take the backend pod down.
 
 MCP is still the right tool for **reads, the DataLake node itself, and cleanup**:
-`Create_Architecture_Node`, `Get_DB_Schema_Nodes_By_Label`, `Delete_Architecture_Node`.
+`Create_Architecture_Node`, `Get_DataLake_Schema_Nodes`, `Delete_Architecture_Node`.
 
 ---
 
@@ -219,7 +219,7 @@ classifies it and routes to the ES analyzer. Produces `ESIndex → ESField` (sel
 | `ALTER TABLE … ADD COLUMN` | ✅ | |
 | **CHECK constraint** | ❌ | table parses, constraint dropped, no error |
 | **PROCEDURE / FUNCTION / TRIGGER** | ❌ | hardcoded `[]` — use §5.2 |
-| **SEQUENCE** | ❌ | use `Create_DB_Schema_Sequence` if present |
+| **SEQUENCE** | ❌ | use `Create_DataLake_Schema_Node(label="DDLSequence")` if present |
 
 **Known parser bug:** `nullable` may come back `false` for **every** column (the analyzer
 treats an explicit `NULL` as `NOT NULL`). If the deployed parser still has it, either fix it
@@ -266,9 +266,9 @@ does not count:
 
 ```
 Get_Architecture_Nodes_By_Label(uuid, label="DataLake")          → schemaSummary: tables, columns
-Get_DB_Schema_Nodes_By_Label(data_lake_id, label="constraint",
+Get_DataLake_Schema_Nodes(data_lake_id, label="DDLConstraint",
     filters={"constraintType": {"$eq": "FOREIGN_KEY"}})          → FK edges exist?
-Get_DB_Schema_Nodes_By_Label(data_lake_id, label="procedure"  )  → total
+Get_DataLake_Schema_Nodes(data_lake_id, label="DDLProcedure"  )  → total
 ```
 
 Sanity checks before declaring success:

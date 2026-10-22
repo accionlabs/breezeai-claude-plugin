@@ -14,9 +14,8 @@
 
 | Tool | Purpose |
 |---|---|
-| `Get_all_Design_By_Label` | Paginate existing design nodes by type |
+| `Get_Design_Nodes_By_Label` | Paginate existing design nodes by type, or fetch by id / relationship via `filters` (`{"id": {"$in": [...]}}`, `{"flowIds": "<flow id>"}`) |
 | `Design_Graph_Search` | Semantic search for dedup |
-| `Get_Design_Nodes_by_Ids` | Query nodes by relationships |
 
 ## Mutation Tools
 
@@ -35,7 +34,7 @@
 | Tool | Parameter | Correct Name | Wrong Names |
 |---|---|---|---|
 | All Breeze MCP tools | Project ID | `uuid` | `projectId`, `projectUuid` |
-| `Get_all_Design_By_Label` | Node label | `label` | `parameters0_Value` |
+| `Get_Design_Nodes_By_Label` | Node label | `label` | `parameters0_Value` |
 
 ---
 

@@ -83,7 +83,7 @@ nodes are collected:
 FOR label IN ["UserJourney", "Flow", "Page", "Component"]:
   page = 1
   LOOP:
-    result = Get_all_Design_By_Label(uuid: <projectUuid>, label: label, page: page, limit: 100)
+    result = Get_Design_Nodes_By_Label(uuid: <projectUuid>, label: label, page: page, limit: 100)
     append items to collection
     IF collected >= total → EXIT
     page += 1

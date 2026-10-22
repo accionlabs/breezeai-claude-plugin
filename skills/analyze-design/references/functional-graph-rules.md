@@ -180,7 +180,7 @@ Order within `supportingComponents` reflects visual/logical order.
 ## Component Reuse Resolution (Priority Order)
 
 Before creating any component, search the design graph via
-`Get_all_Design_By_Label` or `Design_Graph_Search`:
+`Get_Design_Nodes_By_Label` or `Design_Graph_Search`:
 
 1. **Exact `designSystemRef` match** → REUSE
 2. **Semantic + type match in same domain** → REUSE
@@ -272,13 +272,13 @@ if semantically the same**.
 ### Reuse Decision per Level
 
 **Flows — LINK before CREATE:**
-1. Check existing Flows via `Get_all_Design_By_Label(label: "Flow")` for match by `(name, modality)`
+1. Check existing Flows via `Get_Design_Nodes_By_Label(label: "Flow")` for match by `(name, modality)`
 2. Match found → `Update_Design_Node` to append `stepIds[]` → omit
    from bulk payload (flow + all its pages/components already exist)
 3. No match → create in bulk payload
 
 **Pages — LINK before CREATE:**
-1. Check existing Pages via `Get_all_Design_By_Label(label: "Page")` for match by `(name, pageType, modality)`
+1. Check existing Pages via `Get_Design_Nodes_By_Label(label: "Page")` for match by `(name, pageType, modality)`
 2. Match found → `Update_Design_Node` to append `stepIds[]` /
    `actionIds[]` → omit from payload (page + components already exist)
 3. No match → create in bulk payload
@@ -327,9 +327,8 @@ if semantically the same**.
 
 | Tool | Purpose |
 |---|---|
-| `Get_all_Design_By_Label` | Paginate existing design nodes by type |
+| `Get_Design_Nodes_By_Label` | Paginate existing design nodes by type, or fetch by id / relationship via `filters` (`{"id": {"$in": [...]}}`, `{"flowIds": "<flow id>"}`) |
 | `Design_Graph_Search` | Semantic search for dedup |
-| `Get_Design_Nodes_by_Ids` | Query nodes by relationships |
 
 ### Mutation Tools
 
@@ -346,7 +345,7 @@ if semantically the same**.
 | Tool | Parameter | Correct Name | Wrong Names |
 |---|---|---|---|
 | All Breeze MCP tools | Project ID | `uuid` | `projectId`, `projectUuid` |
-| `Get_all_Design_By_Label` | Node label | `label` | `parameters0_Value` |
+| `Get_Design_Nodes_By_Label` | Node label | `label` | `parameters0_Value` |
 | `Get_all_steps_actions_for_a_scenario_id` | Scenario ID | `parameters0_Value` | `scenarioId`, `id` |
 
 ---

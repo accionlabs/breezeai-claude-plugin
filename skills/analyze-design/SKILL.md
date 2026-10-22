@@ -36,7 +36,7 @@ Read `designGraph.platform` from `.breeze.json` (same config as
 
 When `APP_SUFFIX` is set:
 - Append it to every design node name before upserting
-- Filter `Get_all_Design_By_Label` / `Design_Graph_Search` results to only
+- Filter `Get_Design_Nodes_By_Label` / `Design_Graph_Search` results to only
   nodes ending with `APP_SUFFIX`
 - Set `platform` on UserJourney to `PLATFORM_ID` (children inherit)
 
@@ -82,7 +82,7 @@ says "skip" or no repo is found, set `uiRepoAvailable = false` and continue.
 > It maps to `filters[id][$eq]` on the backend. Using any other name fails
 > with `Required → at parameters0_Value`.
 >
-> **Design-by-label hint:** When calling `Get_all_Design_By_Label`, pass
+> **Design-by-label hint:** When calling `Get_Design_Nodes_By_Label`, pass
 > the node label as **`label`** (e.g., `label: "Component"`), NOT as
 > `parameters0_Value`. The `parameters0_Value` naming is specific to
 > `Get_all_steps_actions_for_a_scenario_id` — do not generalize it. Using
@@ -485,10 +485,10 @@ LINK instead of duplicating.
 
 Build the reuse registries once for this run (not per-scenario):
 
-- **Flow registry** — `Get_all_Design_By_Label(label: "Flow")`,
+- **Flow registry** — `Get_Design_Nodes_By_Label(label: "Flow")`,
   indexed by `(name, modality, routeSignature)` where
   `routeSignature` is the ordered list of route paths in the flow
-- **Page registry** — `Get_all_Design_By_Label(label: "Page")`,
+- **Page registry** — `Get_Design_Nodes_By_Label(label: "Page")`,
   indexed by `(name, pageType, modality, routePath,
 designSystemRef)`
 
@@ -612,20 +612,20 @@ Query existing design nodes to find what's already mapped:
 
 **Flow Registry:**
 
-If not already cached from Step 1.5d, query `Get_all_Design_By_Label`
+If not already cached from Step 1.5d, query `Get_Design_Nodes_By_Label`
 (label=`Flow`). Index by `(name, modality)` AND `routeSignature`. Used
 in Step 3b to avoid duplicating flows across scenarios.
 
 **Page Registry:**
 
-If not already cached from Step 1.5d, query `Get_all_Design_By_Label`
+If not already cached from Step 1.5d, query `Get_Design_Nodes_By_Label`
 (label=`Page`). Index by `(name, pageType, modality)` AND
 `(routePath, modality)`. Used in Step 3b to avoid duplicating pages
 across scenarios.
 
 **Component Registry:**
 
-Query `Get_all_Design_By_Label` (label=`Component`). Search by name,
+Query `Get_Design_Nodes_By_Label` (label=`Component`). Search by name,
 `designSystemRef`, or `componentType` to find existing components for reuse.
 Used in Step 3c for component reuse decisions — reuse if found, create new
 if not.
@@ -725,7 +725,7 @@ when multiple scenarios reference it.
 
 ### 3c. Component Reuse Resolution (REUSE FIRST)
 
-> **Always search existing components via `Get_all_Design_By_Label(label: "Component")`
+> **Always search existing components via `Get_Design_Nodes_By_Label(label: "Component")`
 > or `Design_Graph_Search` before creating any component.**
 
 Walk this priority order, stop at the first match:
@@ -765,7 +765,7 @@ current scenario, apply this for each Page:
    name from its structure (e.g., `SettingsPageLayout`). Never name a template
    after a specific page — use the layout pattern name.
 
-2. **Search existing TEMPLATEs** via `Get_all_Design_By_Label(label: "Component")`
+2. **Search existing TEMPLATEs** via `Get_Design_Nodes_By_Label(label: "Component")`
    or `Design_Graph_Search` for a TEMPLATE with the matching `designSystemRef`.
    If found → REUSE it (do not create a duplicate). Add the Page's ORGANISMs
    to its `supportingComponents` if not already present.
