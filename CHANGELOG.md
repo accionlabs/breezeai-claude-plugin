@@ -10,6 +10,13 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+## [3.12.1] — 2026-10-29
+
+### Changed
+- `generate-functional-from-backend` sets `platform` on every Outcome like the UI skills: `functionalGraph.platform`,
+  else `designGraph.platform.id`, else a name confirmed once (suggesting the repo name, or the UI it serves) and saved
+  to `.breeze.json`, so UI and backend runs on one application share it. It no longer falls back to `"default"`.
+
 ## [3.12.0] — 2026-10-29
 
 ### Changed

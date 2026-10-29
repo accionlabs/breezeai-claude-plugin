@@ -43,7 +43,7 @@ Two optional fields live **exclusively on the Outcome** node (not on Persona, Sc
 | `platform` | Scopes the Outcome to a product/deployment (e.g. `"customer portal"`, `"admin dashboard"`). Normalised to trimmed lowercase by the backend. | No (Outcome is parent-scoped via `personaId`) | `"default"` |
 | `moduleType` | Free-text classifier (e.g. `"Pippen"`, `"Wizard"`). Groups related Outcomes for filtering/reporting. | No | `null` |
 
-**When to set `platform`:** When the project hosts multiple applications whose Outcomes should be separable by query filter. If the orchestrating skill has a platform config (e.g. `.breeze.json → functionalGraph.platform` or `designGraph.platform.id`), pass it through to every Outcome. **UI-sourced runs** (`generate-functional-from-ui`, `generate-functional-from-aspnet-webforms`) always set it — to the UI application's platform name, resolved and confirmed by the skill. Otherwise, if absent, omit (backend defaults to `"default"`).
+**When to set `platform`:** When the project hosts multiple applications whose Outcomes should be separable by query filter. If the orchestrating skill has a platform config (e.g. `.breeze.json → functionalGraph.platform` or `designGraph.platform.id`), pass it through to every Outcome. **UI and backend runs** (`generate-functional-from-ui`, `generate-functional-from-aspnet-webforms`, `generate-functional-from-backend`) always set it — resolved and confirmed by the skill, and shared via `functionalGraph.platform` so both halves of one application match. Otherwise, if absent, omit (backend defaults to `"default"`).
 
 **When to set `moduleType`:** When the source has an explicit module/app classifier (e.g. metadata `moduleType` field, a monorepo app identifier). If absent, omit.
 

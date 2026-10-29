@@ -59,7 +59,7 @@ REPO:
   root:                <absolute repo path>          # on-disk path — used ONLY to strip into relative paths, never as the citation prefix
 PROJECT_UUID:          <uuid>                        # used by Code_Graph_Search AND upsert body
 PROJECT_NAME:          <project display name>        # used by upsert body
-PLATFORM:              <platform scope>              # set on every Outcome node (e.g. "customer portal"); defaults to "default"
+PLATFORM:              <platform scope>              # platform name (e.g. "customer portal"), resolved by the skill — set on EVERY Outcome node
 LLM_PLATFORM:          AWSBEDROCK                    # passed through to upsert URL
 OUTPUT_PATH:           <absolute path>               # WHERE you must write your output — see Phase 7
 API_BASE:              <https URL of Breeze backend> # e.g. https://isometric-backend.accionbreeze.com — used by Phase 8
@@ -474,6 +474,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` (on-dis
 
 - `payload.personas` MUST be an array with exactly one element.
 - `payload.personas[0].persona` MUST equal the `PERSONA` input (verbatim) AND MUST be either `System` or `External System` — never a human role.
+- Every `outcomes[i]` MUST carry `"platform": PLATFORM`. Never omit it or write `"default"`.
 - Every `scenarios[i]` MUST have a non-empty `description`.
 - Every System action MUST have a non-empty `description` (null only for trivial glue like "Log completion").
 - Every `actions[i].apis[i]` MUST have all five fields: `type`, `method`, `url`, `request`, `response`.
@@ -493,6 +494,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` (on-dis
 Confirm in your own reasoning (do not include the check in output):
 
 1. ✅ `payload.personas[0].persona` matches the `PERSONA` input exactly AND is `System` or `External System` — no human role invented?
+1b. ✅ Every outcome has `platform` == the `PLATFORM` input?
 2. ✅ Every request DTO / args / message-shape field enumerated (Pattern A) and every response/enum set enumerated (Pattern B) — never collapsed into "validate input" / "build response"?
 3. ✅ Every side-effect-verb action satisfies Rule A (apis[] OR DB/ES/S3 identifier)?
 4. ✅ Every constructor-injected service/repository/client was `Read` (Rule B) — or justified in `audit.skippedDependencies[]`?

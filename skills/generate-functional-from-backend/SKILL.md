@@ -146,6 +146,19 @@ inventory in context; it reads a single summary line back from each sub-agent.
 
 Then set **`OUTPUT_BASE = f"{backendRepo}/.breeze-output"`** and `mkdir -p` it — every artifact (`entrypoints.json` + per-EP payloads) goes under `OUTPUT_BASE`, never the repo root. Ensure `.breeze-output/` is in the target repo's `.gitignore` (append if missing; do not touch the plugin's).
 
+### Resolve `PLATFORM` (Outcome scope) ⛔
+
+Every Outcome this skill writes carries `platform` — the same value the UI skills use, so the human and System halves of one application filter together. Never a silent `"default"`. Resolve once, in order:
+
+1. `.breeze.json → functionalGraph.platform` — use as-is (set by an earlier `generate-functional-from-ui` run, or by hand).
+2. `.breeze.json → designGraph.platform.id` — use it.
+3. Otherwise ask once, suggesting the backend repo's name humanised (e.g. `orders-service` → `Orders Service`):
+   > Outcomes will be scoped to platform **`<name>`**. If this backend serves a UI, use that UI's platform name instead so both halves match. OK, or give another name?
+
+   Save the answer to `.breeze.json → functionalGraph.platform` so later runs (and the UI skills on this project) reuse it.
+
+Cache it as `PLATFORM`. The backend normalises it to trimmed lowercase.
+
 > **Rules:** see [rules.md](references/rules.md) → "Backend repo detection"
 
 ---
@@ -250,7 +263,7 @@ Load `references/backend-flow-structuring-agent.prompt.md` and substitute the `{
 | `{{repo_root_absolute_path}}` | absolute path to the backend repo (used only to strip into relative paths) |
 | `{{project_uuid}}` | `projectUuid` from `.breeze.json` |
 | `{{project_name}}` | project name cached in Bootstrap step 6 |
-| `{{platform}}` | Functional platform scope for Outcomes. Read from `.breeze.json → functionalGraph.platform`; defaults to `"default"` if absent. |
+| `{{platform}}` | `PLATFORM` resolved in Phase -1 — set on every Outcome. Never `"default"`. |
 | `{{llm_platform}}` | `"AWSBEDROCK"` |
 | `{{output_path}}` | the pre-computed `OUTPUT_PATH` above |
 | `{{api_base}}` | `apiBase` from Bootstrap step 4 |
