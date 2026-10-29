@@ -10,6 +10,20 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+## [3.12.0] — 2026-10-29
+
+### Changed
+- UserJourneys are keyed by `projectUuid + scenarioId + platform` to match the backend (BREEZEAI-1436): two personas'
+  same-named scenarios each keep their own UJ. `generate-design-from-ui`, `update-design-from-diff` and the
+  design-from-ui agent drop the `"{Scenario} for {Persona}"` naming workaround and describe the new dedup rule.
+- `generate-functional-from-ui` and `generate-functional-from-aspnet-webforms` set `platform` on every Outcome to the
+  UI application's platform name: `functionalGraph.platform`, else `designGraph.platform.id`, else the app's name,
+  confirmed once and saved to `.breeze.json`. They no longer fall back to `"default"`.
+
+### Fixed
+- `validate-design-graph` no longer flags same-named UJs of different personas as duplicates, and its duplicate-scenarioId
+  check groups by `(scenarioId, platform)`, so one scenario designed on two platforms is no longer a P0.
+
 ## [3.11.0] — 2026-10-22
 
 ### Changed
