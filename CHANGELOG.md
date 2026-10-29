@@ -10,6 +10,12 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+### Added
+- `generate-page-registry` skill: scans the router, names each page (no "Page" suffix) and types it LIST / DETAIL /
+  FORM / DASHBOARD, and writes `existingpages.json` keyed `name|pageType|modality` for `generate-design-from-ui`.
+  Scans every route, or only the screens of an outcome or chosen scenarios; merge mode keeps node IDs; citations
+  from the code graph when a project is linked.
+
 ## [3.12.1] — 2026-10-29
 
 ### Changed
