@@ -164,6 +164,7 @@ The script performs these checks automatically:
 | **Structural — P0** | | |
 | Empty hierarchy | P0 | UserJourneys with no Flows, Flows with no Pages, Pages with no Components |
 | Missing scenarioId | P0 | UserJourneys without a linked functional Scenario |
+| Duplicate scenarioId | P0 | More than one UserJourney for the same `(scenarioId, platform)` — legacy data from before the backend enforced it |
 | Invalid enums | P0 | Invalid `modality`, `pageType`, `type`, `layoutType` values |
 | Template compliance | P0 | Pages missing a TEMPLATE component |
 | Dangling parent refs | P0 | Flow's `userJourneyIds` references a UserJourney that doesn't exist, Page's `flowIds` references a missing Flow, Component's `pageIds` references a missing Page |
@@ -172,7 +173,7 @@ The script performs these checks automatically:
 | Orphan nodes | P1 | Flows/Pages/Components with empty parent ID arrays (no parent at all) |
 | Duplicate linkage | P1 | Same parent ID appearing multiple times in a node's array (e.g., same flowId twice in a Page's `flowIds`, same pageId twice in a Component's `pageIds`, same stepId twice in a Flow's `stepIds`) |
 | **Naming — P1** | | |
-| Duplicate names | P1 | Exact same name within a node type (considering modality/pageType) |
+| Duplicate names | P1 | Exact same name within a Flow/Page/Component type on one platform (considering modality/pageType). UserJourneys are excluded — two personas may each own a same-named UJ |
 | Near-duplicate names | P1 | Fuzzy name matches — e.g., "LoginForm" vs "SignInForm", "UserListPage" vs "User List Page" (token-set similarity with synonym expansion) |
 | **Component rules — P1** | | |
 | supportingComponents | P1 | Below minimum count, references to non-existent components, TEMPLATEs referencing non-ORGANISMs |
@@ -427,14 +428,17 @@ UserJourney (1:1 with functional Scenario, scenarioId required)
 - Full chain UserJourney → Flow → Page → Component must be unbroken
 - No duplicate IDs in parent/link arrays
 
-**UJ naming (persona disambiguation):**
-- UJ names follow the format `"{ScenarioName} for {PersonaName}"` (with
-  optional platform suffix). This prevents the backend from merging UJs
-  across personas that share the same outcome/scenario name.
-- The scenario↔UJ 1:1 check compares **total human scenario count** to
-  **UJ count** — they must be equal. A mismatch indicates the generation
-  skill failed to create separate UJs per persona (likely missing the
-  `for {PersonaName}` qualifier).
+**UJ identity:**
+- A UserJourney is keyed by `(projectUuid, scenarioId, platform)`, not by
+  name. UJ names may repeat — two personas may each own a scenario of the
+  same name, and each gets its own UJ. No persona qualifier is needed.
+- More than one UJ for a `(scenarioId, platform)` is legacy data from
+  before the backend enforced this key — keep one, merge or delete the rest.
+- Scenario coverage matches human scenarios to UJs by `scenarioId`.
+  Uncovered scenarios have no design yet — re-run
+  `/breeze:generate-design-from-ui continue`. Scenarios unlinked by the
+  backend's UJ-key migration have `isDesignGenerated=false`, so the
+  generator picks them up again.
 
 **Hierarchy:**
 - Every UserJourney must have at least one Flow

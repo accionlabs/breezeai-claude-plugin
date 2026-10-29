@@ -111,6 +111,11 @@ def _similarity(name_a, name_b):
     return max(direct, synonym)
 
 
+def _platform_key(platform):
+    """Canonical platform, as the backend stores it: trimmed, lowercase, blank → 'default'."""
+    return (platform or "").strip().lower() or "default"
+
+
 def _find_near_duplicates(nodes, name_key="name", group_keys=None, threshold=0.6):
     """
     Find near-duplicate nodes by fuzzy name matching.
@@ -503,21 +508,11 @@ def run_checks(nodes_by_label, functional_graph=None):
         "items": (empty_journeys + empty_flows + empty_pages)[:30],
     }
 
-    # === CHECK 3: Duplicate Names (keyed on name + platform + persona) ===
+    # === CHECK 3: Duplicate Names (keyed on name + platform) ===
     # Two nodes with the same name on different platforms are NOT duplicates.
-    # Two UJs with the same name on the same platform but different personas
-    # are NOT duplicates (e.g., same scenario for Anonymous Visitor and
-    # Authenticated User).
-    uj_name_counts = Counter(
-        (uj.get("name", ""), uj.get("platform", ""), uj.get("personaName", ""))
-        for uj in user_journeys
-    )
-    dup_journeys = [
-        {"name": nm, "platform": plat, "persona": persona, "count": count}
-        for (nm, plat, persona), count in uj_name_counts.items()
-        if count > 1 and nm
-    ]
-
+    # UserJourneys are not checked here: a UJ is keyed by its Scenario, not its
+    # name, so two personas may each own a same-named UJ (BREEZEAI-1436).
+    # Duplicate UJs are caught by CHECK 4b (scenarioId + platform).
     flow_name_modal = Counter(
         (f.get("name", ""), f.get("modality", ""), f.get("platform", ""))
         for f in flows
@@ -550,13 +545,11 @@ def run_checks(nodes_by_label, functional_graph=None):
 
     report["checks"]["duplicate_names"] = {
         "severity": "P1",
-        "duplicate_journeys": len(dup_journeys),
         "duplicate_flows": len(dup_flows),
         "duplicate_pages": len(dup_pages),
         "duplicate_components": len(dup_components),
-        "total": len(dup_journeys) + len(dup_flows) + len(dup_pages) + len(dup_components),
+        "total": len(dup_flows) + len(dup_pages) + len(dup_components),
         "items": {
-            "userJourneys": dup_journeys[:10],
             "flows": dup_flows[:10],
             "pages": dup_pages[:10],
             "components": dup_components[:10],
@@ -603,34 +596,33 @@ def run_checks(nodes_by_label, functional_graph=None):
     }
 
     # === CHECK 4b: Duplicate scenarioId across UserJourneys ===
-    # A scenarioId must be 1:1 with a UserJourney. Two UJs sharing the
-    # same scenarioId means either: (a) the outcome was processed twice
-    # from different payload files, (b) the functional graph reused the
-    # same UUID for two different scenarios, or (c) the same scenario was
-    # regenerated without cleaning the old payload.
+    # A scenarioId is 1:1 with a UserJourney PER PLATFORM — the backend's
+    # (projectUuid, scenarioId, platform) unique key (BREEZEAI-1436). The same
+    # scenario on two platforms legitimately has two UJs. Two UJs sharing
+    # (scenarioId, platform) predate that constraint — the project needs the
+    # userJourneyScenarioUniqueKey migration (merge or delete the extras).
     scenario_id_to_ujs = defaultdict(list)
     for uj in user_journeys:
         sid = uj.get("scenarioId")
         if sid:
-            scenario_id_to_ujs[sid].append({
+            scenario_id_to_ujs[(sid, _platform_key(uj.get("platform")))].append({
                 "name": uj.get("name", "N/A"),
                 "id": uj.get("id"),
                 "platform": uj.get("platform", ""),
-                "personaName": uj.get("personaName", ""),
             })
 
     dup_scenario_ids = [
         {
             "scenarioId": sid,
+            "platform": plat,
             "count": len(ujs),
             "userJourneys": ujs,
             "issue": (
-                "Same scenarioId on UJs with different names — functional graph UUID collision"
-                if len({u["name"] for u in ujs}) > 1
-                else "Same scenarioId on UJs with same name — outcome processed/upserted more than once"
+                "Several UJs for one scenario on one platform — created before the "
+                "(projectUuid, scenarioId, platform) constraint; keep one, merge or delete the rest"
             ),
         }
-        for sid, ujs in scenario_id_to_ujs.items()
+        for (sid, plat), ujs in scenario_id_to_ujs.items()
         if len(ujs) > 1
     ]
 
@@ -638,9 +630,9 @@ def run_checks(nodes_by_label, functional_graph=None):
         "severity": "P0",
         "count": len(dup_scenario_ids),
         "note": (
-            "Each scenarioId must map to exactly one UserJourney. "
-            "Duplicates indicate duplicate payload files, re-processed outcomes, "
-            "or functional graph UUID collisions."
+            "Each scenarioId must map to exactly one UserJourney per platform. "
+            "The backend now enforces this; duplicates are legacy data that the "
+            "userJourneyScenarioUniqueKey migration refuses to run over."
         ),
         "items": dup_scenario_ids[:20],
     }

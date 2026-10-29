@@ -49,7 +49,7 @@ SEED_FILE:             <absolute path to the .cshtml view (MVC) OR the .cshtml R
 REPO:  { name: <repo name for citations>, root: <absolute repo path> }
 PROJECT_UUID:          <uuid>                         # Code_Graph_Search AND upsert body
 PROJECT_NAME:          <project display name>        # upsert body
-PLATFORM:              <platform scope>              # set on every Outcome node; defaults to "default"
+PLATFORM:              <platform scope>              # UI app platform name, resolved by the skill — set on EVERY Outcome node
 LLM_PLATFORM:          AWSBEDROCK
 OUTPUT_PATH:           <absolute path>               # WHERE you write (Phase 7)
 API_BASE:              <https URL of Breeze backend> # Phase 8
@@ -161,6 +161,7 @@ Build `payload` + `audit` per the schema. Hold in reasoning; do NOT write/POST y
 ## Output schema (strict — output ONLY this JSON object)
 Same schema as the SPA/aspx agents — `{ "payload": { "personas": [ ONE persona → outcomes → scenarios → steps → actions[{action, description, apis[]}] ] }, "audit": {...} }`. Key rules (you self-validate in Phase 6):
 - `payload.personas` length 1; `personas[0].persona` == `PERSONA` verbatim.
+- Every Outcome carries `"platform": PLATFORM` — the UI application's platform name. Never omit it or write `"default"`.
 - Every scenario has a non-empty `description`.
 - Every `apis[i]` has all 5 fields (`type`, `method`, `url`, `request`, `response`); `type` is free text (use `REST`; `GraphQL`/`gRPC`/`WebSocket`/`Event` also fine).
 - `citations[i].reference` starts with `<REPO.name>/`.

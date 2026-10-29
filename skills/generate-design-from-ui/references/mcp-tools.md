@@ -22,7 +22,7 @@
 | Tool | Purpose |
 |---|---|
 | `Bulk_Update_Design_Nodes` | **PRIMARY** — create entire UserJourney tree per scenario |
-| `Create_Design_Node` | Create a single node with per-node citations (not idempotent — 400 on duplicate name) |
+| `Create_Design_Node` | Create a single node with per-node citations (not idempotent — 400 on duplicate name; for a UserJourney with `scenarioId`, 400 when that scenario already has a UJ on the platform) |
 | `Update_Design_Node` | Update metadata fields on existing nodes |
 | `Update_Functional_Node` | Mark scenario as processed (`isDesignGenerated=true`) |
 | `Delete_Design_Node` | Remove nodes when replacing |

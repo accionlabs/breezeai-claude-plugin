@@ -670,6 +670,8 @@ Resume: /breeze:generate-design-from-ui continue from {uiRepo}
 Since sub-agents run in parallel and independently create design nodes,
 check for edge-case duplicates. The backend deduplicates by
 `projectUuid + name + platform` (case-insensitive), so most cases are handled.
+UserJourneys are keyed by `projectUuid + scenarioId + platform` and are
+never reconciled here.
 This catches near-name mismatches across parallel agents.
 
 > **⛔ Platform scoping (critical):** When `APP_SUFFIX` is non-empty,

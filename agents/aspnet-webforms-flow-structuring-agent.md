@@ -65,7 +65,7 @@ MOUNTED_CONTROLS:      [ { file, codeBehind, mountedVia, role } ]   # folded chi
 REPO:  { name: <basename used in citations>, root: <absolute repo path> }
 PROJECT_UUID:          <uuid>                         # Code_Graph_Search / functional reads / upsert body
 PROJECT_NAME:          <display name>
-PLATFORM:              <platform scope>               # set on every Outcome node; defaults to "default"
+PLATFORM:              <platform scope>               # UI app platform name, resolved by the skill — set on EVERY Outcome node
 LLM_PLATFORM:          AWSBEDROCK
 OUTPUT_PATH_HUMAN:     <abs path for the User payload>
 OUTPUT_PATH_SYSTEM:    <abs path for the System payload>
@@ -109,6 +109,7 @@ handler  →  façade/service method (<Class>.<Method>)  →  {
 3. **Evidence unreadable → default A1 `InProcess`** on `<Class>.<Method>` and add `audit.warnings[] {type:"seam_type_unverified", op:"<Class>.<Method>"}`. Never label a seam `SOAP` on a naming hunch (a `*Service`/`*Stub` name is not proof). Record the chosen `seamType` per op in `audit.seams[] { op, seamType:"InProcess|SOAP", evidence:"<file:line of the binding/proxy/config>" }`.
 
 ## Phase 4 — Structure both halves under ONE shared Outcome
+- **Every Outcome, in BOTH halves, carries `"platform": PLATFORM`** — the UI application's platform name. The two halves must use the identical value or they won't join on the same Outcome. Never omit it or write `"default"`.
 - **User half** (`persona = <PERSONA>`): Outcome → Scenario(s) → Steps → per-field atomic Actions. An action that hits an interface carries `apis[]` (`type` + `method` + literal `url` + `request` + `response`). Record the façade/service `<Class>.<Method>` in the action `description` (the in-process seam) — platform-agnostic, no forbidden UI words.
   - Set `apis[].type`/`url` from the Phase-3 **seam classification** (`audit.seams[]`), per call: an **A1 in-process** façade/service call → `type:"InProcess"`, `url:"<Class>.<Method>"`; an **A2 WCF/ASMX wire** call → `type:"SOAP"`, `url:"<endpoint address>/<Op>"` (resolved to a literal). Do not hard-code `SOAP` — a direct/DI-bound service call is `InProcess`.
   - **Autocomplete / AJAX lookups** → whichever the call resolves to: an ASMX/WCF wire op → `type:"SOAP"`, `url:"/<Service>.asmx/<Op>"`; an in-process handler → `type:"InProcess"`, `url:"<Class>.<Method>"`.

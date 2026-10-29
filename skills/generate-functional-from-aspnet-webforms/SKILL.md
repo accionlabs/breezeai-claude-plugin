@@ -125,6 +125,8 @@ Resolve the path (argument → `.breeze.json.targetRepos.monolith` → cwd → a
 - **Confirm an in-process business tier:** classes named `*Facade`/`*Service`/`*Manager` (often `I*` interfaces with constructor-injected repositories).
 - **If instead** it's a modern split (a SPA router + a separate REST/GraphQL API repo, no `.aspx`): **stop** and redirect the user to `generate-functional-from-ui` (+ `generate-functional-from-backend`). Don't force the monolith flow onto a split app.
 
+**Resolve `PLATFORM`** (the Outcome scope) the same way as `generate-functional-from-ui` → Phase -1 → *Resolve `PLATFORM`*: `.breeze.json → functionalGraph.platform` → `designGraph.platform.id` → else the application's name (Web project / `.sln` name, else the repo basename), humanised and confirmed once with the user, then saved to `functionalGraph.platform`. Never fall back to `"default"`.
+
 ## Phase 0 — Discover entry points & personas
 
 If `OUTPUT_BASE/entrypoints.json` already exists: read it, show a resume summary, and jump to the per-EP loop (do not overwrite). *(Also check the legacy repo-root location once for back-compat; if found there, move it into `OUTPUT_BASE`.)*
@@ -212,7 +214,7 @@ For each UI EP in `remaining[]`, and for each `persona` in `ep.personas[]`, in p
 PERSONA: <persona>            ENTRY_POINT: { route, kind(page|control|master), title }
 SEED_FILE: <abs path to .aspx/.ascx markup>   CODE_BEHIND: <abs .aspx.cs/.ascx.cs>
 REPO: { name: <basename>, root: <abs repo path> }
-PROJECT_UUID / PROJECT_NAME / PLATFORM (defaults to "default") / LLM_PLATFORM: AWSBEDROCK
+PROJECT_UUID / PROJECT_NAME / PLATFORM (resolved in Phase -1 — set on every Outcome) / LLM_PLATFORM: AWSBEDROCK
 OUTPUT_PATH_HUMAN / OUTPUT_PATH_SYSTEM
 API_BASE / API_KEY (never echo)
 CODE_ONTOLOGY_ID / INDEXED_REPO_NAME   SHARED_FUNCTIONAL_PATH

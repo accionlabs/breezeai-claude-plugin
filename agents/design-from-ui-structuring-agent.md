@@ -636,9 +636,9 @@ END FOR
 > **Why the duplicate guard matters:** `fetch_steps_actions.py` may
 > return the same scenario on a pagination boundary, or the functional
 > graph may have issued the same UUID to two different scenarios. Without
-> this guard, two UJs claiming the same `scenarioId` enter the graph —
-> the backend deduplicates nodes by `name + platform`, NOT by
-> `scenarioId`, so both UJs survive and corrupt the design graph.
+> this guard, the second payload for a `scenarioId` is merged into the
+> first UJ — the backend keys UserJourneys by `scenarioId + platform` — so
+> the UJ is renamed and collects another scenario's flows and pages.
 
 ### 3h. Context Budget Check
 
@@ -874,8 +874,9 @@ Cite the source file the node was derived from. Format:
 
 **Rules:**
 - One `Bulk_Update_Design_Nodes` call PER SCENARIO (not per outcome)
-- Set `platform` on **EVERY node** — UserJourney, Flow, Page, and Component. Use the value from the OUTCOME `platform` input (defaults to `"default"`). Do NOT omit it on children — the backend uses `projectUuid + name + platform` for dedup, so missing `platform` on any node breaks uniqueness.
+- Set `platform` on **EVERY node** — UserJourney, Flow, Page, and Component. Use the value from the OUTCOME `platform` input (defaults to `"default"`). Do NOT omit it on children — the backend uses `projectUuid + name + platform` for dedup (`projectUuid + scenarioId + platform` for UserJourneys), so missing `platform` on any node breaks uniqueness.
 - Include reused nodes by name — backend dedup handles linking (by projectUuid + name + platform)
+- UserJourney names may repeat across personas — the UJ is keyed by its `scenarioId`, so use the scenario name as-is (no persona qualifier)
 - `pageType` and `modality` MUST be UPPERCASE
 - Pages have NO `actionIds` — actions map to Components only
 - Every stepId/actionId must appear in at least one design node

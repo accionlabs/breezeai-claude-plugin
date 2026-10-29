@@ -50,7 +50,7 @@ REPO:
   root:                <absolute repo path>          # for stripping into relative paths
 PROJECT_UUID:          <uuid>                        # used by Code_Graph_Search AND upsert body
 PROJECT_NAME:          <project display name>        # used by upsert body
-PLATFORM:              <platform scope>              # set on every Outcome node (e.g. "customer portal"); defaults to "default"
+PLATFORM:              <platform scope>              # UI app platform name (e.g. "customer portal"), resolved by the skill — set on EVERY Outcome node
 LLM_PLATFORM:          AWSBEDROCK                    # passed through to upsert URL
 OUTPUT_PATH:           <absolute path>               # WHERE you must write your output — see Phase 7
 API_BASE:              <https URL of Breeze backend> # e.g. https://isometric-backend.accionbreeze.com — used by Phase 8
@@ -435,6 +435,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` prefix,
 
 - `payload.personas` MUST be an array with exactly one element.
 - `payload.personas[0].persona` MUST equal the `PERSONA` input (verbatim).
+- Every `outcomes[i]` MUST carry `"platform": PLATFORM` — the UI application's platform name. Never omit it or write `"default"`.
 - Every `scenarios[i]` MUST have a non-empty `description`.
 - Every `actions[i].apis[i]` MUST have all five fields: `type`, `method`, `url`, `request`, `response`.
 - `apis[i].type` is **free text** (the backend does not enforce an enum) — prefer a recommended protocol: `REST`, `GraphQL`, `gRPC`, `WebSocket`, `Event`, `SOAP` (use `SOAP` for ASP.NET Web Forms / WCF / ASMX service calls). New protocol values are allowed; never block on an unknown one.
@@ -456,6 +457,7 @@ To build `reference`: take the absolute file path, strip the `REPO.root` prefix,
 Confirm in your own reasoning (do not include the check in output):
 
 1. ✅ `payload.personas[0].persona` matches the `PERSONA` input exactly?
+1b. ✅ Every outcome has `platform` == the `PLATFORM` input?
 2. ✅ Every form's fields **AND** every card / row / info-section / detail-cluster's displayed fields are listed as separate actions (`Provide …` for inputs, `Observe …` for displays) — never collapsed into a combined comma-separated description?
 3. ✅ Every network-verb action has a non-empty `apis[]`?
 4. ✅ Every `useMutation`/`useQuery` you grep'd was followed to a service file?

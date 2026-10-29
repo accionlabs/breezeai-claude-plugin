@@ -38,7 +38,11 @@ Flows, Pages, and Components support **multi-parent relationships**:
 
 ### Backend Dedup Mechanism
 
-**The backend deduplicates by `projectUuid + name + platform` (case-insensitive).**
+**The backend deduplicates Flows, Pages and Components by `projectUuid + name + platform` (case-insensitive).**
+**UserJourneys are the exception:** they are keyed by `projectUuid + scenarioId + platform`.
+Re-upserting a scenario updates (and renames, if the name changed) its own UJ; two personas'
+same-named scenarios each get their own UJ; a UJ is never moved to another scenario. A UJ
+sent without `scenarioId` falls back to matching by name.
 When a node with the same name already exists:
 1. A new parent relationship edge is created (e.g. `INCLUDES_FLOW`)
 2. The new parent ID is appended to the parent ID array

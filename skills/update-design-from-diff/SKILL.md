@@ -399,7 +399,7 @@ For each page/feature group, determine the design graph operations:
    before writing:
 
    ```
-   [CREATE] UserJourney: <scenario name> for <persona name>{APP_SUFFIX}
+   [CREATE] UserJourney: <scenario name>{APP_SUFFIX}
      scenarioId: <scenario UUID>
      [CREATE] Flow: <flow name>{APP_SUFFIX}
        modality: WEB
@@ -892,12 +892,15 @@ Refer to `../generate-design-from-ui/references/design-ontology.md`
 for the complete entity model:
 
 - UserJourney ↔ Scenario (1:1 link via `scenarioId`)
-- UJ naming: `"{ScenarioName} for {PersonaName}{APP_SUFFIX}"` — persona
-  qualifier prevents backend dedup from merging UJs across personas
+- UJ naming: `"{ScenarioName}{APP_SUFFIX}"` — no persona qualifier; the
+  backend keys UJs by `projectUuid + scenarioId + platform`, so two
+  personas' same-named scenarios each keep their own UJ. To rename a UJ,
+  re-upsert it with its `scenarioId` and the new name.
 - Flow multiplied per modality
 - Page types: `LIST`, `DETAIL`, `FORM`, `DASHBOARD` (uppercase only)
 - Multi-parent support via `*Ids[]` arrays
-- Backend dedup by `projectUuid + name + platform` (case-insensitive)
+- Backend dedup by `projectUuid + name + platform` (case-insensitive) for
+  Flows/Pages/Components; by `projectUuid + scenarioId + platform` for UJs
 
 Refer to `../generate-design-from-ui/references/atomic-design-rules.md`
 for component classification:
