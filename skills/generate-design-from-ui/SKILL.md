@@ -48,6 +48,7 @@ reads actual code for accurate component discovery.
 | 1 | `/breeze:setup-project` | Link Breeze project, create `.breeze.json` | None |
 | 2 | `/breeze:generate-functional-from-ui` | Build functional graph (Persona → Outcome → Scenario → Step → Action) from the UI codebase | Step 1 |
 | 3 | `/breeze:generate-component-registry` | Pre-scan UI repo, classify all components (ATOM/MOLECULE/ORGANISM/TEMPLATE), write `existingcomponents.json` | Step 1 + UI repo |
+| 3b | `/breeze:generate-page-registry` *(optional)* | Scan the router, name and type every page (or only the pages of chosen outcomes / scenarios), write `existingpages.json` | Step 1 + UI repo |
 | 4 | **`/breeze:generate-design-from-ui`** ← this skill | Generate design graph from functional graph + UI code. Uses component registry cache from Step 3 for faster, consistent classification | Steps 2 + 3 |
 | 5 | `/breeze:analyze-design-deviations` *(optional)* | Compare generated design graph components against Figma design system — find drift, missing components, type mismatches | Step 4 + Figma export |
 
@@ -520,9 +521,13 @@ All registries are **platform-scoped** when `PLATFORM_ID` is set:
 - **Missing or empty** → STOP. Run `/breeze:generate-component-registry`
   first. Components must come from the registry (Critical Rule 16).
 
-**Page registry** (`existingpages.json` / scoped variant):
+**Page registry** (`existingpages.json` / scoped variant, pre-populated by
+`/breeze:generate-page-registry` or by earlier runs):
 - **Exists and non-empty** → set `pageRegistryPath` to absolute path.
 - **Missing or empty** → set `pageRegistryPath` to `"none"`.
+- Entries with `"id": null` are registered but not yet in the graph:
+  include them by name in the bulk payload (create), then write the real
+  ID back in blocking gate 5.
 
 > **⛔ Component registry is REQUIRED.** The sub-agent selects
 > components from the registry — it does not classify from scratch.
