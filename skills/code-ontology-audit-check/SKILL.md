@@ -16,7 +16,9 @@ If no repo is specified, audit all repos in sequence.
 
 ## Conventions
 
-- **Frontend repos** (`source-platform`, `source-web`): HTML and CSS/SCSS files are **not indexed** by Breeze — intentional. Only TS, JS, JSON, MD, YAML, and similar code-bearing files count.
+- **Templates:** markup/view files (`.html`, `.cshtml`, `.aspx`, `.ascx`, `.razor`, `.vue`) are indexed **only** when the repo was parsed with template capture (`--capture-templates` locally, `BREEZEAI_COG_CAPTURE_TEMPLATES=true` on the server). UI repos need them for the functional pass — if they are missing, say so and recommend re-onboarding with capture on. CSS/SCSS are never indexed.
+- **Status first:** for repos connected by git link, check `fileGraphStatus` is `active` (`GET /code-ontology?filters[projectUuid][$eq]=<uuid>`) before auditing — an ingest that is still running looks like missing files.
+- `/breeze:onboard-repository` runs a light version of this audit for every repo it onboards; use this skill for a deep audit of one repo.
 - **Each audit must end with the Final Ontology Completeness Check** (step 7 below).
 - After completing an audit, **create a verdict file** named after the repo (e.g. `source-platform.md`) in the `mds/` folder, and **update `mds/audit-checks.md`** with the results.
 
@@ -30,7 +32,7 @@ Compare Breeze-indexed file count against actual files on disk.
 
 - Paginate `Get_Code_Nodes_By_Label` (label=`File`) to get total indexed file count
 - Run `find <repo>/ -type f` on disk, filtered to indexable types (TS, JS, MJS, JSON, YAML, MD, Docker)
-- Explain any delta (HTML/SCSS excluded for frontend; test dirs excluded for backend)
+- Explain any delta (templates excluded unless captured; tests excluded by default; ignore patterns)
 
 ### 2. Function, Class & LOC Count Verification
 
@@ -56,7 +58,7 @@ Investigate any gap between Breeze LOC and raw `wc -l`.
 
 Confirm and document files/directories that Breeze intentionally skips:
 
-- Frontend repos: HTML, SCSS/CSS templates
+- Frontend repos: markup templates (unless captured), SCSS/CSS
 - Backend repos: `test/` directory, `.njk` Nunjucks templates (notifications), auto-generated migration snapshots
 
 ### 5. Ghost File Detection
