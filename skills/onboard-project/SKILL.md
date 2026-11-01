@@ -171,6 +171,11 @@ gate or a missing input). The log gets one line per transition:
    - partly done → call the same skill again; it resumes from its own checkpoint (all generation skills
      do). Do **not** delete its outputs;
    - P1 (code graph) → re-run `git_onboard.py status`/`run`; connected repos are never re-created.
+   - Any later phase, when resuming after the code may have moved (another day, or the user says so) →
+     `git_onboard.py sync --dry-run` first. If a repo is **behind** its branch, tell the user (indexed vs
+     branch commit, files changed) and ask: re-sync now (`git_onboard.py sync --only <key>`, wait until
+     indexed, refresh that source's working copy and `commitId`) or carry on against the indexed commit.
+     Record the choice in the log.
 3. `failed` steps: show the error; retry once automatically if the error looks transient (HTTP 5xx,
    timeout, 409 "already running"), otherwise ask.
 4. Never re-run a `done` step unless the user asks (`rerun`).
@@ -208,13 +213,19 @@ Record results in the plan; stop only on hard failures.
 Invoke `/breeze:onboard-repository` with all sources (it handles git link vs local, triage, ignore
 patterns, status polling, retries and audit, with its own state in `.breeze/onboarding/`). Mark P1
 `done` when every selected repo is `indexed`, `unsupported` or explicitly skipped. Copy the repo list,
-statuses, **indexed repo names** and code ontology ids into `sources` — P4 passes them to every skill
-(citations must use the indexed repo name, not the folder name).
+statuses, **indexed repo names**, code ontology ids and each repo's indexed **`commitId`** into `sources` —
+P4 passes them to every skill (citations must use the indexed repo name, not the folder name), and the
+commit says which code the functional, design and architecture graphs were built from.
+
+Repo maintenance during onboarding (a wrong branch, a duplicate, a repo to drop) goes through
+onboard-repository's "Re-sync, remove or re-add" rules: never delete to retry, one repo at a time, only
+with the user's explicit yes.
 
 **Working copies.** The generation skills write `.breeze-output/` (and a `.gitignore` line) into the repo
 they read, and a git-linked repo may have no local clone. Give each source a working copy under the
-workspace — `.breeze/src/<key with / as __>` (a `git clone --depth 1` of the branch, or a copy of the
-user's folder) — and point every skill at that, never at the user's own checkout. Apply the confirmed
+workspace — `.breeze/src/<key with / as __>` (a clone of the branch checked out at the indexed
+`commitId`, so the files match the code graph; or a copy of the user's folder) — and point every skill at
+that, never at the user's own checkout. Apply the confirmed
 ignore patterns as its `.repoignore`.
 
 ## P2 — Units and routing ⛔
