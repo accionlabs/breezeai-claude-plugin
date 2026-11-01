@@ -38,6 +38,7 @@ Step 3  triage (batches): pick what is in scope
 Step 4  ignore patterns: propose per repo from its file list → confirm (one approval per batch)
 Step 5  ingest: git link → connect + server sync · local → COG run + upload
 Step 6  status: poll until every repo is indexed / errored; retry errored + stalled
+        (later: re-sync new commits, remove or re-add a repo — see "Re-sync, remove or re-add")
 Step 7  audit: counts, templates, unsupported languages, empty repos
 Step 8  report + next steps
 ```
@@ -125,7 +126,7 @@ Accept any of these; several can be combined:
 
 | Input | Git link | Local |
 |---|---|---|
-| One repo URL | `git_onboard.py add --url <url> [--branch B]` | — |
+| One repo URL | `git_onboard.py add --url <url> [--branch B]` (no `--branch` = the repo's real default branch; a private repo needs its token first) | — |
 | List of URLs (file or pasted) | `add` once per line (`url[,branch]`) | — |
 | GitHub org / user | `git_onboard.py discover --provider github --org <org>` | — |
 | GitLab group (incl. subgroups, self-hosted via `--host`) | `git_onboard.py discover --provider gitlab --org <group path>` | — |
@@ -196,6 +197,16 @@ python3 <skill dir>/scripts/git_onboard.py run --project <uuid> --max-inflight 5
 Run it in the background for large batches and report progress from `log.jsonl`. If the session stops,
 re-running the same command resumes: connected repos are never re-created.
 
+Before connecting, the script checks the project's existing repositories: a repo with the **same URL and
+branch** (for example one added earlier in the UI or with the `Manage_Repository` MCP tool) is **adopted**
+(its id goes into the state, nothing is created). A different repo with the **same name** is reported as
+`connect_failed` — give it another `displayName` in `repos.json`.
+
+**One or two repos without the script:** the `Manage_Repository` MCP tool (`action="create"`) connects a
+git repo with no Breeze API key and no shell — useful when the user has only the MCP tools. Pass a git
+token only if the user offers one; prefer the script (token from `gh` / env, never seen by the model) for
+private repos and for anything more than a handful.
+
 ### Local
 
 Prerequisites: Python 3.10+, `uvx` (from uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`), git.
@@ -225,8 +236,9 @@ wrong project UUID. Surface errors verbatim.
 
 ## Step 6 — Status, stalls and retries
 
-Status comes from `GET <apiBase>/code-ontology?filters[projectUuid][$eq]=<uuid>&selectFields=_id,name,fileGraphStatus,statusMessage,failedStep,fileCount,classCount,functionCount,updatedAt`
-(`git_onboard.py status` wraps it and updates `repos.json`).
+Status comes from `GET <apiBase>/code-ontology?filters[projectUuid][$eq]=<uuid>` (full rows — the
+`selectFields` allowlist drops `gitBranch`, `commitId` and `progressAt`). `git_onboard.py status` wraps it
+and updates `repos.json`; without the script, `Call_List_Repositories_` returns the same fields.
 
 | `fileGraphStatus` | Meaning | State |
 |---|---|---|
@@ -235,8 +247,10 @@ Status comes from `GET <apiBase>/code-ontology?filters[projectUuid][$eq]=<uuid>&
 | `error` | failed — read `failedStep` + `statusMessage` | `error` |
 
 - **Errored** → retry: `GET /code-ontology/check-update/:id` for the latest commit, then
-  `POST /code-ontology/sync/:id {incomingCommitId}`. Up to `--max-retries` (default 2), then leave it as
-  `error` and report the reason.
+  `POST /code-ontology/sync/:id?projectUuid=<uuid> {incomingCommitId}`. Up to `--max-retries` (default 2),
+  then leave it as `error` and report the reason. If `check-update` itself fails (the branch can't be read:
+  missing or expired token, renamed branch), that counts as an attempt too — report it and point the user at
+  the repo's **Edit Git Config** in the UI rather than retrying.
 - **Suspected stall** → a repo `ingesting` with no stage change for 30 minutes is probed with the same
   `POST /sync/:id`. The backend answers **409** while the ingest's heartbeat is fresh (it is just big) and
   starts a new sync only if the old one has died. So the probe is safe; the log records `still_running` or
@@ -246,6 +260,28 @@ Status comes from `GET <apiBase>/code-ontology?filters[projectUuid][$eq]=<uuid>&
 
 Report progress as counts (`indexed=…, ingesting=…, error=…`) rather than per-repo lines once there are
 more than ~10 repos.
+
+---
+
+## Re-sync, remove or re-add a repo
+
+After onboarding, the same state file handles maintenance:
+
+| Need | Command | Without the script (MCP) |
+|---|---|---|
+| New commits on indexed repos | `git_onboard.py sync [--only key,...]` — `check-update`, then sync only where the branch moved | `Manage_Repository action="retry"` |
+| Wrong branch, duplicate, or retries used up → start over | `git_onboard.py delete --only <key> --confirm <name> --force --readd [--branch B]`, then `connect` / `run` | `Manage_Repository action="delete"`, then `action="create"` |
+| Remove a repo from the project | `git_onboard.py delete --only <key> --confirm <name> [--force]` | `Manage_Repository action="delete"` |
+
+**Deleting is irreversible** (the repo's whole code graph goes, and anything built on it must be regenerated):
+
+- Never delete to retry — `run` / `sync` / `retry` re-sync in place.
+- Delete only when the user asked for that repo, one repo per command. Show the repo's name, status and file
+  count first and get an explicit yes; `--confirm` / `confirmName` must be the exact name in Breeze.
+- An **indexed or ingesting** repo needs `--force` (`allowIndexed=true`): use it only when the user
+  explicitly asked to remove that indexed repo. Otherwise suggest they delete it in the UI on
+  `<uiBaseUrl>/code-ontology/<projectUuid>`.
+- In `--autonomous` mode never delete; report the repo instead.
 
 ---
 

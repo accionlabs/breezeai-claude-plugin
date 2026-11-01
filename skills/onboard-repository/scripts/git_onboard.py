@@ -7,7 +7,9 @@ ingest is active or errored, retrying errored / stalled ones via POST /sync/:id.
 
 Everything is resumable: state lives in <state-dir>/repos.json and every action is
 appended to <state-dir>/log.jsonl. Re-running any subcommand picks up from the state
-file — nothing is connected twice (a repo with a codeOntologyId is never re-created).
+file — nothing is connected twice: a repo with a codeOntologyId is never re-created, and
+a repo the project already has (same URL + branch, e.g. added in the UI) is adopted
+instead of connected again.
 
 Stdlib only. Secrets are never printed:
   - Breeze API key: env BREEZE_API_KEY, else `apiKey` in .breeze.json (cwd).
@@ -22,8 +24,14 @@ Subcommands
   connect   [--max-inflight N]                                      connect selected repos
   status                                                            refresh ingest status
   run       [--max-inflight N] [--interval S] [--max-retries R]     loop: status → retry → connect
+  sync      [--only key,...] [--dry-run]                            pick up new commits on indexed repos
+                                                                    (--dry-run: only report which are behind)
+  delete    --only <key> --confirm <name> [--force] [--readd [--branch B]]
+                                                                    delete one repo's code ontology; --readd
+                                                                    puts it back in the queue to connect again
 """
 import argparse
+import base64
 import json
 import os
 import re
@@ -132,6 +140,37 @@ def provider_of(url):
     return "gitlab"
 
 
+def norm_url(url):
+    """Compare form of a clone URL: host + path, lower-case, no credentials / `.git` / trailing `/`."""
+    p = urllib.parse.urlparse((url or "").strip())
+    path = p.path.rstrip("/").removesuffix(".git")
+    return f"{(p.hostname or '').lower()}{path}".lower()
+
+
+def default_branch(url, provider, token):
+    """The branch HEAD points at, from git's smart-HTTP ref list (what `git clone` reads first).
+
+    Works on GitHub, GitLab, Bitbucket and Azure DevOps. The token goes in an Authorization
+    header, never the URL. Returns None when the repo can't be read (private without a token,
+    wrong URL).
+    """
+    base = url.rstrip("/")
+    if not base.endswith(".git") and provider != "azure_devops":
+        base += ".git"
+    h = {"User-Agent": "git/2.43.0"}
+    if token:
+        user = {"github": "x-access-token", "gitlab": "oauth2", "bitbucket": "x-token-auth"}.get(provider, "token")
+        h["Authorization"] = "Basic " + base64.b64encode(f"{user}:{token}".encode()).decode()
+    req = urllib.request.Request(f"{base}/info/refs?service=git-upload-pack", headers=h)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            head = r.read(4096)
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    m = re.search(rb"symref=HEAD:refs/heads/([^\s\x00]+)", head)
+    return m.group(1).decode() if m else None
+
+
 # ---------- discover / add ----------
 
 def discover(args, st):
@@ -196,11 +235,15 @@ def add(args, st):
     key = path
     name = path.split("/")[-1]
     if key not in st.repos:
+        branch = args.branch or default_branch(args.url, prov, git_token(prov, args.token_env))
+        if not branch:
+            sys.exit(f"{key}: could not read the default branch (private repo without a token, or a wrong URL). "
+                     "Pass --branch, and a token for private repos.")
         st.repos[key] = {"key": key, "name": name, "displayName": name, "url": args.url.removesuffix(".git"),
-                         "branch": args.branch or "main", "provider": prov, "selected": True, "status": "discovered"}
+                         "branch": branch, "provider": prov, "selected": True, "status": "discovered"}
         st.save()
-        st.log("add", key, provider=prov)
-    print(f"{key}: in state")
+        st.log("add", key, provider=prov, branch=branch)
+    print(f"{key}: in state (branch {st.repos[key]['branch']})")
 
 
 # ---------- tree (for ignore-pattern proposal) ----------
@@ -338,9 +381,10 @@ def ignore_text(st, r):
 def refresh(st, base, hdr, uuid):
     """GET /code-ontology for the project; map rows back onto state by codeOntologyId."""
     rows, page = [], 1
-    sel = "_id,name,status,fileGraphStatus,statusMessage,failedStep,erroredAt,fileCount,classCount,functionCount,updatedAt,repoUrl"
+    # Full rows (~1 KB each), no selectFields: the endpoint's select allowlist drops gitBranch, commitId and
+    # progressAt, which the duplicate check and the stall check need. Rows never carry the git token.
     while True:
-        q = urllib.parse.urlencode({"filters[projectUuid][$eq]": uuid, "selectFields": sel, "limit": 100, "page": page})
+        q = urllib.parse.urlencode({"filters[projectUuid][$eq]": uuid, "limit": 100, "page": page})
         s, d, _ = http("GET", f"{base}/code-ontology?{q}", hdr)
         if s != 200:
             st.log("status_error", http=s, message=str(d)[:200])
@@ -366,12 +410,39 @@ def refresh(st, base, hdr, uuid):
             st.log("status", key, status=new, fileGraphStatus=fg, failedStep=row.get("failedStep"))
         r.update(status=new, fileGraphStatus=fg, statusMessage=row.get("statusMessage"), failedStep=row.get("failedStep"),
                  fileCount=row.get("fileCount"), classCount=row.get("classCount"), functionCount=row.get("functionCount"),
-                 serverUpdatedAt=row.get("updatedAt"), checkedAt=now())
+                 serverUpdatedAt=row.get("updatedAt"), serverProgressAt=row.get("progressAt"),
+                 commitId=row.get("commitId"), checkedAt=now())
     st.save()
     return rows
 
 
-def connect_one(st, base, hdr, uuid, key, r, token_env):
+def adopt_existing(st, key, r, rows):
+    """If the project already has this repo (same URL + branch), take over its id instead of connecting it again.
+
+    Returns True when the repo was adopted or blocked (nothing to POST)."""
+    want = norm_url(r["url"])
+    for row in rows or []:
+        if norm_url(row.get("repoUrl")) == want and (row.get("gitBranch") or "") == r["branch"]:
+            fg = row.get("fileGraphStatus")
+            status = "indexed" if fg == "active" else "error" if fg == "error" else "ingesting"
+            r.update(codeOntologyId=row["_id"], status=status, fileGraphStatus=fg, attempts=0, adoptedAt=now())
+            st.log("adopted", key, codeOntologyId=row["_id"], fileGraphStatus=fg)
+            st.save()
+            return True
+    taken = {(row.get("name") or "").strip().lower() for row in rows or []}
+    if r["displayName"].strip().lower() in taken:
+        r.update(status="connect_failed",
+                 lastError=f"the project already has a repository named '{r['displayName']}' (different URL or branch); "
+                           "set a different displayName in repos.json")
+        st.log("connect_failed", key, message=r["lastError"])
+        st.save()
+        return True
+    return False
+
+
+def connect_one(st, base, hdr, uuid, key, r, token_env, rows=None):
+    if rows is not None and adopt_existing(st, key, r, rows):
+        return
     tok = git_token(r["provider"], token_env)
     body = {"projectUuid": uuid, "name": r["displayName"], "repoUrl": r["url"], "gitBranch": r["branch"],
             "gitProvider": r["provider"]}
@@ -390,15 +461,23 @@ def connect_one(st, base, hdr, uuid, key, r, token_env):
     st.save()
 
 
-def retry_one(st, base, hdr, key, r):
+def retry_one(st, base, hdr, uuid, key, r):
     """Re-sync an errored / suspected-stalled ingest. 409 from /sync means the ingest is alive."""
     cid = r["codeOntologyId"]
     s, d, _ = http("GET", f"{base}/code-ontology/check-update/{cid}", hdr)
     if s != 200:
-        st.log("retry_check_failed", key, http=s)
+        # Counts as an attempt: a branch that can't be read (no/expired token, renamed branch) won't
+        # fix itself, and without this `run` would retry it every cycle forever.
+        r["attempts"] = r.get("attempts", 0) + 1
+        r["lastError"] = (f"HTTP {s}: {str(d.get('message', d))[:200]} — the branch can't be read: check the "
+                          "repo's token and branch (UI → Edit Git Config), then `run` again")
+        st.log("retry_check_failed", key, http=s, attempt=r["attempts"], message=str(d.get("message", d))[:200])
+        st.save()
         return
     incoming = d.get("latestCommitId") or d.get("currentCommitId")
-    s, d, _ = http("POST", f"{base}/code-ontology/sync/{cid}", hdr, {"incomingCommitId": incoming})
+    # projectUuid on the query string: the sync route's project check reads it there (400 without it).
+    q = urllib.parse.urlencode({"projectUuid": uuid})
+    s, d, _ = http("POST", f"{base}/code-ontology/sync/{cid}?{q}", hdr, {"incomingCommitId": incoming})
     if s == 409:
         r["stallProbeAt"] = now()
         st.log("still_running", key)  # backend heartbeat is fresh — not stalled
@@ -412,7 +491,7 @@ def retry_one(st, base, hdr, key, r):
 
 
 def stalled(r):
-    ts = r.get("serverUpdatedAt")
+    ts = r.get("serverProgressAt") or r.get("serverUpdatedAt")
     if r["status"] != "ingesting" or not ts:
         return False
     age = (datetime.now(timezone.utc) - datetime.fromisoformat(ts.replace("Z", "+00:00"))).total_seconds() / 60
@@ -430,18 +509,18 @@ def summary(st):
 
 
 def cycle(args, st, base, hdr, uuid):
-    refresh(st, base, hdr, uuid)
+    rows = refresh(st, base, hdr, uuid)
     for key, r in st.repos.items():
         if not r.get("selected") or not r.get("codeOntologyId") or not r.get("url"):
             continue  # local uploads (no url) can't be re-synced from git
         if (r["status"] == "error" or stalled(r)) and r.get("attempts", 0) < args.max_retries:
-            retry_one(st, base, hdr, key, r)
+            retry_one(st, base, hdr, uuid, key, r)
     inflight = sum(1 for r in st.repos.values() if r.get("selected") and r["status"] == "ingesting")
     for key, r in st.repos.items():
         if inflight >= args.max_inflight:
             break
         if r.get("selected") and r["status"] in ("discovered", "planned") and not r.get("codeOntologyId"):
-            connect_one(st, base, hdr, uuid, key, r, args.token_env)
+            connect_one(st, base, hdr, uuid, key, r, args.token_env, rows)
             if r["status"] == "ingesting":
                 inflight += 1
     print(f"[{now()}] {summary(st)}")
@@ -458,9 +537,101 @@ def done(st, max_retries):
     return True
 
 
+def sync(args, st, base, hdr, uuid):
+    """Pick up new commits on indexed repos: check-update, then sync/:id only where the branch moved."""
+    refresh(st, base, hdr, uuid)
+    only = set(k for k in (args.only or "").split(",") if k)
+    for key, r in st.repos.items():
+        if (only and key not in only) or not r.get("selected") or not r.get("codeOntologyId") or not r.get("url"):
+            continue
+        if r["status"] == "ingesting":
+            print(f"{key}: still ingesting, skipped")
+            continue
+        s, d, _ = http("GET", f"{base}/code-ontology/check-update/{r['codeOntologyId']}", hdr)
+        if s != 200:
+            st.log("sync_check_failed", key, http=s, message=str(d.get("message", d))[:200])
+            print(f"{key}: could not read the branch (HTTP {s}): token missing/expired or branch renamed")
+            continue
+        if not d.get("change") and r["status"] == "indexed":
+            r["behind"] = False
+            print(f"{key}: up to date at {(d.get('currentCommitId') or '')[:7]}")
+            continue
+        incoming = d.get("latestCommitId") or d.get("currentCommitId")
+        r["behind"] = bool(d.get("change"))
+        if args.dry_run:
+            print(f"{key}: behind — indexed {(d.get('currentCommitId') or 'none')[:7]}, branch at {(incoming or '?')[:7]}"
+                  f" ({d.get('fileUpdatedCount', 0)} files changed, {d.get('fileDeletedCount', 0)} deleted)")
+            continue
+        q = urllib.parse.urlencode({"projectUuid": uuid})
+        s, d2, _ = http("POST", f"{base}/code-ontology/sync/{r['codeOntologyId']}?{q}", hdr, {"incomingCommitId": incoming})
+        if s == 409:
+            print(f"{key}: an ingest is already running")
+        elif s in (200, 201):
+            r.update(status="ingesting", syncedAt=now())
+            st.log("synced", key, fromCommit=d.get("currentCommitId"), toCommit=incoming)
+            print(f"{key}: sync started {(d.get('currentCommitId') or 'none')[:7]} -> {incoming[:7]}")
+        else:
+            st.log("sync_failed", key, http=s, message=str(d2.get("message", d2))[:200])
+            print(f"{key}: sync failed HTTP {s}")
+    st.save()
+
+
+def delete(args, st, base, hdr, uuid):
+    """Delete ONE repo's code ontology (graph nodes, clusters, row). Irreversible.
+
+    Guards: --only names exactly one repo in the state; --confirm must equal its name in Breeze;
+    an indexed or ingesting repo needs --force. --readd puts the repo back to `discovered`
+    (optionally on a new --branch) so the next `connect` / `run` creates it again with the same
+    ignore patterns.
+    """
+    keys = [k for k in (args.only or "").split(",") if k]
+    if len(keys) != 1:
+        sys.exit("delete takes exactly one repo: --only <key>")
+    key = keys[0]
+    r = st.repos.get(key)
+    if not r:
+        sys.exit(f"{key}: not in the state file")
+    rows = refresh(st, base, hdr, uuid)
+    if rows is None:
+        sys.exit("could not read the project's repositories")
+    cid = r.get("codeOntologyId")
+    row = next((x for x in rows if x["_id"] == cid), None) if cid else None
+    if not row:
+        r.update(codeOntologyId=None, status="discovered" if args.readd else "deleted")
+        st.log("delete_skipped", key, reason="not connected in Breeze")
+        st.save()
+        print(f"{key}: not connected in Breeze; nothing to delete" + (" (queued to connect)" if args.readd else ""))
+        return
+    name = row.get("name") or ""
+    if args.confirm != name:
+        sys.exit(f"{key}: --confirm must be the repository's exact name in Breeze: '{name}'")
+    fg = row.get("fileGraphStatus")
+    if (fg == "active" or fg in IN_FLIGHT) and not args.force:
+        sys.exit(f"{key}: is {'indexed' if fg == 'active' else 'still ingesting (' + fg + ')'}. To pick up new "
+                 "commits use `sync --only <key>`; delete it only if the user asked, with --force.")
+    q = urllib.parse.urlencode({"projectUuid": uuid})
+    s, d, _ = http("DELETE", f"{base}/code-ontology/{cid}?{q}", hdr, timeout=300)
+    if s != 200:
+        st.log("delete_failed", key, http=s, message=str(d.get("message", d))[:200])
+        sys.exit(f"{key}: delete failed: HTTP {s} {str(d.get('message', d))[:200]}")
+    gone = d.get("data") or {}
+    st.log("deleted", key, codeOntologyId=cid, files=gone.get("filesDeleted"), readd=bool(args.readd))
+    r.update(codeOntologyId=None, attempts=0, fileGraphStatus=None, commitId=None, deletedAt=now(),
+             status="discovered" if args.readd else "deleted")
+    if args.readd:
+        r["selected"] = True
+        if args.branch:
+            r["branch"] = args.branch
+    else:
+        r["selected"] = False
+    st.save()
+    print(f"{key}: deleted ({gone.get('filesDeleted', 0)} files, {gone.get('functionsDeleted', 0)} functions)"
+          + (f"; queued to connect again on {r['branch']} — run `connect` or `run`" if args.readd else ""))
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["discover", "add", "tree", "preview", "connect", "status", "run"])
+    ap.add_argument("cmd", choices=["discover", "add", "tree", "preview", "connect", "status", "run", "sync", "delete"])
     ap.add_argument("--state-dir", default=".breeze/onboarding")
     ap.add_argument("--project")
     ap.add_argument("--api-base")
@@ -475,6 +646,10 @@ def main():
     ap.add_argument("--max-inflight", type=int, default=5)
     ap.add_argument("--max-retries", type=int, default=2)
     ap.add_argument("--interval", type=int, default=60)
+    ap.add_argument("--confirm", help="delete: the repository's exact name in Breeze")
+    ap.add_argument("--force", action="store_true", help="delete: allow an indexed or ingesting repo")
+    ap.add_argument("--readd", action="store_true", help="delete: queue the repo to be connected again")
+    ap.add_argument("--dry-run", action="store_true", help="sync: only report which repos are behind their branch")
     args = ap.parse_args()
     global TOKEN_FILE
     TOKEN_FILE = args.token_file
@@ -495,6 +670,10 @@ def main():
             if r.get("selected") and r["status"] in ("error", "connect_failed"):
                 print(f"  {key}: {r['status']} {r.get('failedStep') or ''} {r.get('statusMessage') or r.get('lastError') or ''}")
         return
+    if args.cmd == "delete":
+        return delete(args, st, base, hdr, uuid)
+    if args.cmd == "sync":
+        return sync(args, st, base, hdr, uuid)
     if args.cmd == "connect":
         args.max_retries = 0
         return cycle(args, st, base, hdr, uuid)
