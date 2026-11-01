@@ -11,7 +11,9 @@ When the user asks about Breeze capabilities or wants to perform a Breeze task, 
 |---|---|
 | First-time setup, init, bootstrap | `/breeze:project setup` |
 | Show / list / switch / create project, re-auth | `/breeze:project [show \| list \| use <name> \| create <name> \| auth \| status]` |
-| Upload/onboard a source repo | `/breeze:onboard-repository` |
+| Onboard a whole project / estate end to end, resume onboarding, "what's next" | `/breeze:onboard-project` |
+| Connect / upload / onboard repos (one, a list, a GitHub org, a GitLab group), fix `.repoignore` noise | `/breeze:onboard-repository` |
+| Deep audit of one repo's code graph | `/breeze:code-ontology-audit-check` |
 | Search features, code, "how does X work" | `/breeze:search` |
 | Impact analysis, blast radius, "what breaks if X" | `/breeze:impact-analysis` |
 | Analyze a requirement, check coverage | `/breeze:analyze-functional` |
@@ -34,11 +36,11 @@ When the user asks about Breeze capabilities or wants to perform a Breeze task, 
 
 **Brownfield (existing code):**
 1. `/breeze:project setup`
-2. `/breeze:onboard-repository` (once per repo)
-3. `/breeze:generate-functional-from-ui` (frontend)
-4. `/breeze:generate-functional-from-backend` (each backend)
-5. `/breeze:validate-functional-graph`
-6. `/breeze:generate-spec`
+2. `/breeze:onboard-project` — runs and tracks the rest:
+   onboard-repository (all repos) → units + routing → personas → functional per unit →
+   join + validate-functional-graph → design (UI units) → validate-design-graph;
+   generate-architecture in parallel
+3. `/breeze:generate-spec`
 
 **Incremental update (after commits):**
 1. `/breeze:update-functional-from-diff <prev-sha> <current-sha>`

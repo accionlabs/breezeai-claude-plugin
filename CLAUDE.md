@@ -95,8 +95,9 @@ server needs auth. If it doesn't appear in the user's terminal, escalate via
 The `apiKey` in `.breeze.json` is **not** used for MCP tool calls. It is only
 for non-MCP consumers:
 
-- the `breeze-code-ontology-generator` CLI run by `/breeze:onboard-repository`
-  in **automatic upload** mode,
+- `/breeze:onboard-repository` in **git-link** mode (REST calls to connect repos
+  and poll ingest status) and in local **automatic upload** mode (the
+  `breezeai-cog` CLI),
 - the REST `/functional-graph/v2/upsert` path used by
   `/breeze:generate-functional-from-ui` (its flow-structuring sub-agent POSTs
   with an `api-key:` header),

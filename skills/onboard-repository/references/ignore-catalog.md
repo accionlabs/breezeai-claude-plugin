@@ -1,13 +1,36 @@
----
-name: update-repo-ignore
-description: Scan one or more repos for noise files (auto-generated, tooling config, build artifacts, assets, docs) and update their .repoignore files. Use when adding a new repo to a code graph tool like Breeze, after adding new tooling, or when the graph seems polluted with irrelevant files. Works for any language or framework.
----
+# Ignore-pattern catalogue
 
-# Update `.repoignore` files
+Used by `/breeze:onboard-repository` (Step 4) to propose exclusions for each repo. It was
+the standalone `update-repo-ignore` skill before; it now lives here so onboarding always
+applies it. The same patterns are used in both modes:
 
-Scans repos for files and folders that add noise to a semantic code graph — auto-generated code, build tooling config, CI/CD pipelines, static assets, documentation, test infrastructure — and writes accurate `.repoignore` patterns for each.
+- **Git link** → sent as `ignorePatterns` on `POST /code-ontology/generate-from-git`.
+  The backend stores them and the analyzer applies them on **every** sync.
+  Limits: 10,000 characters in total, 512 per line, no `<` `>` characters.
+- **Local** → written to `<repo>/.repoignore` before COG runs.
 
-## What belongs in `.repoignore`
+## How COG layers exclusions (so you don't repeat what it already does)
+
+1. **Built-in defaults** (`breezeai_cog/core/default_ignores.txt`). These already skip:
+   `.git/ node_modules/ vendor/ bower_components/ jspm_packages/`, lock files,
+   `__pycache__/ *.pyc .venv/ venv/`, `dist/ build/ out/ target/ bin/ obj/ .next/ .nuxt/`,
+   `*.min.js *.min.css`, `.idea/ .vscode/`, `.env .env.* *.pem *.key`, `*.log logs/ tmp/ temp/`,
+   Terraform state, and **tests**: `test/ tests/ __tests__/ *.test.* *.spec.* test_*.py *_test.py *_test.go`.
+2. The repo's own `.gitignore` and `.repoignore` files, at any depth.
+3. Patterns pushed with the request (`ignorePatterns`), added on top.
+4. `.repoinclude` re-includes paths the layers above excluded (for example, tests the user wants indexed).
+   It does **not** bring back templates; only the template-capture setting does.
+
+Do not repeat the built-ins in proposals. Only add patterns for things that actually exist in the repo's
+file list (`trees/<repo>.txt` from `git_onboard.py tree`, or a directory listing in local mode).
+
+## Templates are separate
+
+Markup and view files (`.html .htm .cshtml .razor .aspx .ascx .master .vue`) are skipped at scan time
+unless template capture is on: `--capture-templates` locally, or `BREEZEAI_COG_CAPTURE_TEMPLATES=true`
+on the server. The UI functional pass needs them. They are not controlled by ignore patterns.
+
+## What to exclude
 
 Exclude anything that is **not hand-authored business logic**. Use this as a checklist — not all categories will apply to every repo.
 
@@ -117,53 +140,32 @@ Exclude anything that is **not hand-authored business logic**. Use this as a che
 - Hand-authored DB migration files containing Up/Down logic — but DO exclude their auto-generated snapshot twins
 - Hand-authored `Makefile` targets that encode real build knowledge (judge by content)
 
-## Procedure
 
-### 1. Identify repos to scan
+### Vendored third-party libraries (common in older web apps)
 
-Ask the user which repo(s) to scan if not already clear. For a monorepo, list the sub-repos and confirm scope, or scan all if instructed.
+Copies of libraries checked into the repo rather than installed. They inflate line counts and pollute
+search (HotDocs: 114 library files, about 167k lines, against 11k lines of real code).
 
-### 2. Detect the stack
+`**/Scripts/jquery*.js`, `**/Scripts/bootstrap*.js`, `**/Scripts/knockout*.js`, `**/Scripts/modernizr*.js`,
+`**/Scripts/_references.js`, `**/*-vsdoc.js`, `**/*.intellisense.js`, `**/lib/` (front-end library folders),
+`**/wwwroot/lib/`, `**/Content/bootstrap*`, `**/static/vendor/`, `**/third_party/`, `**/thirdparty/`, `**/packages/` (NuGet)
 
-Before scanning, do a quick top-level directory listing of each repo to identify the language and framework. This tells you which categories from the checklist above are relevant and what additional patterns to look for.
+Keep the application's own scripts in the same folders (for example `interview.js`). Judge by file name and
+size: a known library name, a version in the file name, or a file far larger than anything else is vendored.
 
-### 3. Launch one Explore agent per repo (in parallel)
+## Procedure (per repo)
 
-For each repo, launch an `Explore` agent (use `run_in_background: true` when scanning multiple):
-
-> Scan `<repo-root>` thoroughly for files and folders that contain no hand-authored business logic — auto-generated files, build tooling config, CI/CD pipelines, static assets, documentation, test infrastructure, lock files, editor configs, etc.
->
-> For each item found: give the exact relative path from the repo root and a one-line reason why it's noise.
->
-> Check for (adapt to the stack you find): `.husky/`, `.github/`, `.vscode/`, `.cursor/`, `.idea/`, `.claude/`, `docs/`, CI pipeline files, `sonar-project.properties`, `.sonarlint/`, `Dockerfile`, `docker-compose*.yml`, `postman/`, `.yaak/`, build config files (`tsconfig*.json`, `jest.config.*`, `webpack.config.*`, `vite.config.*`, `babel.config.*`, `pytest.ini`, `build.gradle`, `pom.xml`), `project.json`, `ng-package.json`, `**/*.md`, `**/*.xlf`, binary assets (`**/*.woff`, `**/*.woff2`, `**/*.png`, `**/*.jpg`, `**/*.webp`, `**/*.svg` under assets dirs, `**/*.ico`, `**/*.mp4`), schema dumps (`schema.json`, `*.gql`), lock files, `__pycache__/`, `*.pyc`, `venv/`, `.gradle/`, `target/`, `Pods/`, `.terraform/`, `.env.*`, test project folders, coverage outputs, scratchpad files, and any files with auto-generated headers (`// <auto-generated />`, `// Code generated`, `@generated`, `# This file was automatically generated`).
->
-> Report everything — list exact paths, not just patterns.
-
-### 4. Synthesise findings into `.repoignore` patterns
-
-For each repo, read the current `.repoignore` (if it exists), then write an updated version with clean sections:
-
-```
-# <Category label>
-<pattern>
-<pattern>
-```
-
-Rules for patterns:
-- Use `**/foo/**` for folders that may appear at any depth
-- Use `foo/**` for folders that only appear at the repo root
-- Use `**/*.ext` for file-type exclusions that apply everywhere
-- Use specific paths when a broader glob would accidentally exclude real code
-- Group related patterns under a comment heading
-- Only add patterns for things that actually exist — keep it specific, not aspirational
-
-### 5. Write the file
-
-Write `.repoignore` at the repo root. If it already exists, read it first, preserve correct existing patterns, and add new ones. Don't remove patterns without confirming they're wrong.
-
-### 6. Verify
-
-After writing, briefly confirm:
-- The `.repoignore` covers the major noise sources found
-- No hand-authored source files are accidentally excluded
-- The patterns are valid glob syntax
+1. Read the repo's file list (`trees/<key>.txt`) or, in local mode, list the repo.
+2. Detect the stack from manifests (`package.json`, `pom.xml`, `*.csproj`, `pyproject.toml`, …) and pick the
+   matching sections above.
+3. Propose patterns grouped under `# <category>` comments. Prefer specific paths over broad globs when a
+   broad glob would catch real code. Count how many files each pattern removes.
+4. Show the proposal with the counts: files kept, files excluded, and the biggest exclusions. For a batch,
+   show one table for all repos and let the user open any single repo's detail.
+5. Save the confirmed patterns:
+   - git link → `.breeze/onboarding/ignore/<key with / as __>.repoignore` (or `_default.repoignore` for
+     patterns shared by every repo in the batch);
+   - local → `<repo>/.repoignore`, merged with any existing file (never drop existing lines without asking).
+6. Always exclude `.breeze.json` (it holds the API key). Tests stay excluded unless the user asks for them
+   (they are a built-in default); to include them, add the test paths to a `.repoinclude` instead. The API has no field for include
+   patterns, so in git-link mode the `.repoinclude` has to be committed to the repo.

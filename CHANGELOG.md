@@ -11,10 +11,39 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 ## [Unreleased]
 
 ### Added
+- `onboard-project` skill: end-to-end onboarding orchestrator. Plans a workspace (`.breeze/plan.json` + `plan.log.jsonl`),
+  onboards the code graph, classifies units (SPA, service, Web Forms, MVC, metadata, shared library, schema, infra,
+  unsupported), routes each to its skill, and runs personas → functional → join + validate → design, with architecture
+  in parallel. Resumes from the first unfinished step after a stop or stall; checks persona descriptions, duplicate
+  outcomes and design flags between steps.
+- `onboard-project` interactive vs `--autonomous` modes with approval gates G1–G7 (repos, ignore patterns, git
+  integration + token collection without pasting tokens, units, personas, functional validation, design
+  validation); `scripts/plan.py` (single writer of the plan, atomic, logged) and `scripts/join.py` (live-graph
+  UI ↔ System join: method + path, verb-agnostic MVC actions, NO HANDLER code findings). Learned from an autonomous
+  end-to-end HotDocs run: run groups, `job` unit type for console/worker programs, MVC classification signals,
+  canonical `/<app>/<controller>/<action>` URLs for multi-app solutions, working copies under `.breeze/src/`,
+  per-group output dirs, sub-agent-type preflight with general-purpose fallback, design exclusions from validation,
+  optional document upload (P1b), `.breeze/report.md`.
+- `onboard-repository/scripts/git_onboard.py` (`preview` shows what built-ins + patterns exclude; `--token-file`): discover GitHub orgs / GitLab groups, fetch file lists for ignore
+  proposals, connect repos via `POST /code-ontology/generate-from-git`, poll `GET /code-ontology` status, and retry
+  errored / stalled ingests via `POST /code-ontology/sync/:id` (a 409 means the ingest is still alive). State in
+  `.breeze/onboarding/repos.json`, events in `log.jsonl`.
 - `generate-page-registry` skill: scans the router, names each page (no "Page" suffix) and types it LIST / DETAIL /
   FORM / DASHBOARD, and writes `existingpages.json` keyed `name|pageType|modality` for `generate-design-from-ui`.
   Scans every route, or only the screens of an outcome or chosen scenarios; merge mode keeps node IDs; citations
   from the code graph when a project is linked.
+
+### Changed
+- `onboard-repository` rewritten: git link (server-side sync, ignore patterns stored per repo) is the default mode,
+  local COG runs remain; accepts one repo, a list, an org / group or a monorepo; triage for large estates; one ignore
+  proposal per batch; template-capture check for UI repos; status polling, retries and a light audit after ingest;
+  resumable state. Docs no longer require `--capture-statements` (on by default in COG).
+- `code-ontology-audit-check`: templates are indexed when captured; check ingest status before auditing.
+- README pipeline and `breeze-skill-routing` point brownfield onboarding at `onboard-project`.
+
+### Removed
+- `update-repo-ignore` skill — its catalogue is now `onboard-repository/references/ignore-catalog.md`, applied on
+  every onboarding (it was never called by any other skill).
 
 ## [3.12.1] — 2026-10-29
 
