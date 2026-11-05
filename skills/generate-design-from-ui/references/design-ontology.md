@@ -38,7 +38,11 @@ Flows, Pages, and Components support **multi-parent relationships**:
 
 ### Backend Dedup Mechanism
 
-**The backend deduplicates by `projectUuid + name` (case-insensitive).**
+**The backend deduplicates Flows, Pages and Components by `projectUuid + name + platform` (case-insensitive).**
+**UserJourneys are the exception:** they are keyed by `projectUuid + scenarioId + platform`.
+Re-upserting a scenario updates (and renames, if the name changed) its own UJ; two personas'
+same-named scenarios each get their own UJ; a UJ is never moved to another scenario. A UJ
+sent without `scenarioId` falls back to matching by name.
 When a node with the same name already exists:
 1. A new parent relationship edge is created (e.g. `INCLUDES_FLOW`)
 2. The new parent ID is appended to the parent ID array
@@ -69,10 +73,16 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Component | `pageIds[]` | Parent Page IDs (multi-parent) |
 | Component | `actionIds[]` | Actions this component implements |
 
-- **All IDs come from `Get_all_steps_actions_for_a_scenario_id`** —
-  fetch steps + actions per scenario, extract UUIDs, then wire them
-  into the design payload
-- Shared steps can appear in multiple flows' `stepIds[]`
+- **All IDs come from `fetch_steps_actions.py`** (Phase 0b) —
+  the script fetches the full step/action tree per scenario via REST
+  API. Extract `stepId` and `actionId` UUIDs and wire them into the
+  design payload
+- **Shared steps** — stepIds can appear on multiple Flows and/or
+  Pages simultaneously. The same step can be referenced by multiple
+  design nodes.
+- **Shared actions** — actionIds can appear on multiple Components
+  simultaneously. The same action can be referenced by multiple
+  design nodes.
 - Every `stepId` and `actionId` MUST appear in at least one design node
 - `scenarioId` is ALWAYS required on UserJourney
 
@@ -85,14 +95,17 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Name of the user journey |
+| `platform` | string | No | Scope — which product/deployment (e.g. "customer portal"). Part of uniqueness key. Backend normalises to trimmed lowercase. Defaults to "default" |
 | `description` | string | No | Description |
 | `scenarioId` | string | Yes | Linked functional Scenario ID |
+| `citations` | object[] | No | Per-node citations. Merged with top-level citations. Each: `{"type": "document\|exDoc\|figma\|jira\|confluence\|code\|prompt", "name"?, "inputText"?, "reference"?}` |
 
 ### Flow
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Name of the flow |
+| `platform` | string | No | Inherited from parent UserJourney. Part of uniqueness key. Backend normalises to trimmed lowercase |
 | `description` | string | No | Description |
 | `modality` | string | Yes | `WEB`, `MOBILE`, `TABLET`, `DESKTOP`, `VOICE`, `API`, `KIOSK`, `WATCH`, `TV` |
 | `entryPoint` | string | No | Page ID of the starting page |
@@ -105,12 +118,14 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Name of the page |
+| `platform` | string | No | Inherited from parent Flow. Part of uniqueness key. Backend normalises to trimmed lowercase |
 | `description` | string | No | Description |
 | `pageType` | string | No | `LIST`, `DETAIL`, `FORM`, `DASHBOARD` |
 | `requiresAuth` | boolean | No | Requires authentication |
 | `allowedRoles` | string[] | No | Roles allowed to access |
 | `flowIds` | string[] | Yes | Parent Flow IDs (multi-parent) |
 | `stepIds` | string[] | No | Linked functional Step IDs |
+| `citations` | object[] | No | Per-node citations. Merged with top-level citations. Each: `{"type": "document\|exDoc\|figma\|jira\|confluence\|code\|prompt", "name"?, "inputText"?, "reference"?}` |
 
 > **Page has NO `actionIds` field.** Actions map to Components only.
 
@@ -119,6 +134,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Name of the component |
+| `platform` | string | No | Inherited from parent Page. Part of uniqueness key. Backend normalises to trimmed lowercase |
 | `type` | string | Yes | `ORGANISM`, `MOLECULE`, `ATOM`, `TEMPLATE` |
 | `description` | string | No | Description |
 | `designSystemRef` | string | No | Design system reference (metadata, not dedup key) |
@@ -129,6 +145,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | `pageIds` | string[] | Yes | Parent Page IDs (multi-parent) |
 | `actionIds` | string[] | No | Linked functional Action IDs |
 | `supportingComponents` | string[] | No | Names of child components |
+| `citations` | object[] | No | Per-node citations. Merged with top-level citations. Each: `{"type": "document\|exDoc\|figma\|jira\|confluence\|code\|prompt", "name"?, "inputText"?, "reference"?}` |
 
 ---
 

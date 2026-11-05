@@ -152,8 +152,8 @@ procedures** (the parser drops them), and **never** loop the per-object column e
 | Semantic search / dedup | `Architecture_Graph_Search` (`include_labels=[...]`) |
 | Create node | `Create_Architecture_Node` |
 | Update node | `Update_Architecture_Node` |
-| Read schema nodes | `Get_DB_Schema_Nodes_By_Label` (`with_children` / `with_parent` / `filters`) |
-| Read ES nodes | `Get_ES_Nodes_By_Label` |
-| Create schema nodes | `Create_DB_Schema_Table/Column/Constraint/Index/View/Procedure/Sequence` — ⚠ per-object; see the bulk caveat above |
+| Read schema nodes | `Get_DataLake_Schema_Nodes` (`with_children` / `with_parent` / `filters`) |
+| Read ES nodes | `Get_DataLake_Schema_Nodes` |
+| Create schema nodes | `Create_DataLake_Schema_Node (label DDLTable / DDLColumn / DDLConstraint / DDLIndex / DDLView / DDLProcedure / DDLSequence)` — ⚠ per-object; see the bulk caveat above |
 | Code grounding | `Code_Graph_Search`, `Call_List_Repositories_` |
 | Scenario anchoring (optional) | `Functional_Graph_Search` |

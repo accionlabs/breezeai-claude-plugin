@@ -180,7 +180,9 @@ If validation fails, log warning and **re-run Step 3b greps** for this scenario 
    "Dashboard|dashboard|WEB": {
      "id": "<real-uuid>",
      "stepIds": ["step-3"],
-     "pageType": "dashboard"
+     "pageType": "dashboard",
+     "sourceFile": "src/pages/dashboard/dashboard.component.ts",
+     "citations": [{"type": "code", "reference": "<code-node-id>"}]
    }
    ```
 4. **Write** `existingpages.json` back to disk
@@ -204,7 +206,7 @@ These files survive across Claude Code sessions. If you skip disk persistence, t
 **Steps:**
 1. Fetch newly created components:
    ```
-   Get_all_Design_By_Label(uuid, label: "Component", page: "1", limit: "50")
+   Get_Design_Nodes_By_Label(uuid, label: "Component", page: "1", limit: "50")
    ```
    (paginate if needed)
 2. For each component in response, update corresponding entry in `existingcomponents.json`:

@@ -1,383 +1,324 @@
 ---
 name: onboard-repository
 description: >
-  Get a source repository into the Breeze code graph for the current
-  project. Wraps the Python `breezeai-cog` parser (run on demand via
-  `uvx`) with `--capture-statements` so method-level statements are
-  available for downstream skills (generate-functional-from-ui,
-  generate-functional-from-backend, generate-code, search). Supports
-  two upload modes: automatic (cog streams to the backend, needs an
-  API key) or manual (cog writes a gzipped ndjson file locally and the
-  user uploads it via the Breeze UI at /code-ontology/<projectUuid>).
-  API key is optional — collected on-demand only if the user picks
-  automatic mode. Requires Python 3.10+, uv (provides uvx), and git on
-  PATH (on Windows, run under WSL); resolves the target repo from a
-  path argument or the current directory. Run once per repo. Re-run to
-  re-index after large changes.
-  Use when: "onboard repo", "upload repository", "index repo into
-  breeze", "add repo to project", "ingest codebase", "register code
-  graph", or whenever a Breeze skill reports the project has no code
+  Get one repository, a list of repositories, a whole GitHub organisation /
+  GitLab group, or a monorepo into the Breeze code graph for the current
+  project. Default mode is GIT LINK: the repo is connected to Breeze
+  (GitHub, GitLab, Bitbucket, Azure DevOps) and parsed server-side, with
+  ignore patterns stored on the repo and applied on every sync — nothing is
+  generated on disk. LOCAL mode runs the `breezeai-cog` parser via `uvx`
+  (with template capture when needed) and uploads automatically or hands
+  over an ndjson for manual upload. Every run proposes ignore patterns
+  (vendored libraries, generated code, build output, …), polls the server
+  ingest status until each repo is indexed or errored, retries failures,
+  audits the result, and keeps a resumable state file + log under
+  `.breeze/onboarding/` so a stopped run picks up where it left off. Scales
+  to hundreds of repos (discover → triage → batch confirm → throttled
+  connect). Use when: "onboard repo", "onboard repos", "connect github org",
+  "add gitlab group", "upload repository", "index repo into breeze", "add repo
+  to project", "ingest codebase", "register code graph", "clean up
+  .repoignore", or whenever a Breeze skill reports the project has no code
   ontology yet.
+argument-hint: "[repo path | repo URL | org/group URL | list file] [--local] [--autonomous] [--project <uuid>]"
 ---
 
 ## What this skill does
 
-Uploads a single source repository into the Breeze **code graph** for
-the current project, capturing files, classes, functions, route
-decorators, call chains, AND method-level statements (the
-`--capture-statements` flag). The captured graph is what every
-downstream Breeze skill reads from:
+Gets source code into the Breeze **code graph** — files, classes, functions, routes,
+call chains and method-level statements — which every downstream skill reads
+(`generate-functional-from-*`, `generate-architecture`, `generate-design-from-ui`,
+`search`, `impact-analysis`, `generate-code`).
 
-- `/breeze:generate-functional-from-ui`
-- `/breeze:generate-functional-from-backend`
-- `/breeze:deprecated-cluster-pipeline` *(retired — do not use)*
-- `/breeze:generate-code`
-- `/breeze:search`
-- `/breeze:analyze-functional`
+It handles **one repo or hundreds** in the same flow:
 
-**Run this once per repo** that you want Breeze to know about. For a
-multi-repo system (one frontend + N backends), invoke the skill once
-per repo. Re-run after large refactors or new feature merges if the
-graph has gone stale.
+```
+Step 1  mode: git link (default) or local
+Step 2  scope: one repo · list · org/group · monorepo  → state file
+Step 3  triage (batches): pick what is in scope
+Step 4  ignore patterns: propose per repo from its file list → confirm (one approval per batch)
+Step 5  ingest: git link → connect + server sync · local → COG run + upload
+Step 6  status: poll until every repo is indexed / errored; retry errored + stalled
+        (later: re-sync new commits, remove or re-add a repo — see "Re-sync, remove or re-add")
+Step 7  audit: counts, templates, unsupported languages, empty repos
+Step 8  report + next steps
+```
 
-This skill **does not** upload documents. Document onboarding is
-handled implicitly by `/breeze:analyze-functional` (which can ingest
-PDFs, markdown, and other text inputs as part of the analysis flow)
-and `/breeze:visual-to-text` (which converts UI design visuals into
-structured user stories that feed into the same flow).
+Everything is recorded in `.breeze/onboarding/` (in the current working directory,
+which should be the workspace — not inside one of the repos):
+
+| File | What it holds |
+|---|---|
+| `repos.json` | One entry per repo: url, branch, provider, `selected`, `status`, `codeOntologyId`, counts, last error, attempts |
+| `log.jsonl` | Append-only event log: discover, connect, status changes, retries, failures |
+| `ignore/<repo>.repoignore`, `ignore/_default.repoignore` | Confirmed patterns per repo / shared |
+| `trees/<repo>.txt` | Remote file list used to propose patterns |
+
+**Resume rule:** at the start of every run, if `.breeze/onboarding/repos.json` exists, show its summary
+(counts by status, last 5 log events) and continue from it. Never re-connect a repo that already has a
+`codeOntologyId` — re-sync it instead (Step 6).
+
+The helper script `scripts/git_onboard.py` (stdlib Python) does all remote calls in git-link mode so the
+logic is deterministic and resumable. Run it as
+`python3 <skill dir>/scripts/git_onboard.py <cmd> --project <uuid>`.
 
 ## Project
 
 This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
 
-> **API key:** this skill additionally needs a Breeze `apiKey` only if you choose **automatic upload** mode (the CLI streams to the backend). Manual mode needs no key. Collect it on-demand as described below.
+URLs (`apiBase`, `uiBaseUrl`) come from `breeze.config.json`, overridable per project in `.breeze.json`
+(see `CLAUDE.md` → "Service URLs"). `<apiBase>` / `<uiBaseUrl>` below are placeholders.
 
-URLs (`apiBase`, `uiBaseUrl`) come from `breeze.config.json` at the
-plugin root, overridable per-project via `.breeze.json`. See
-`CLAUDE.md` → "Service URLs" for the full rule.
-Throughout this skill, `<apiBase>` and `<uiBaseUrl>` are placeholders
-the LLM substitutes at runtime — don't hardcode the literal hosts.
+### Secrets
 
-## Step 1 — Pick the upload mode
+- **Breeze API key** (git link and local automatic upload): env `BREEZE_API_KEY`, else `apiKey` in
+  `.breeze.json`. If neither exists, ask the user to generate one at `<uiBaseUrl>/mcp/generate/key` and
+  save it to `.breeze.json` (reply only "API key saved"). `.breeze.json` must be gitignored.
+- **Git token** (private repos): a token file (`--token-file`), env `GITHUB_TOKEN` / `GITLAB_TOKEN` /
+  `BITBUCKET_TOKEN` / `AZURE_DEVOPS_TOKEN`, or the logged-in `gh` / `glab` CLI. **Never ask the user to
+  paste a token into chat.** How to collect one is under gate G3 below. Recommend a read-only,
+  fine-grained token. Breeze stores it on each connected repo to run later syncs.
 
-This skill runs the Python `breezeai-cog` parser (via `uvx`) to parse
-the repo into a gzipped ndjson file. There are **two ways** to get
-that data into the Breeze backend, and the user picks which one based
-on whether they have an API key handy:
+### Interactive (default) vs `--autonomous`
 
-### Mode A — Automatic upload (cog streams to backend)
+Interactive runs stop at three gates; autonomous runs decide them and log the decision to
+`log.jsonl` (`{"event":"gate", "gate", "decision", "detail"}`):
 
-Requires an `apiKey` in `.breeze.json`. The parser does not
-authenticate via Keycloak OAuth like the MCP tools — it needs an
-explicit key (passed as `--user-api-key`, sent as the `api-key`
-header).
+| Gate | Interactive: show and ask | Autonomous |
+|---|---|---|
+| **G1 Repos** (Step 3) | Repos found, the ones suggested for skipping and why | Take the suggestions (N = 24 months) |
+| **G2 Ignore patterns** (Step 4) | Per-batch table of kept / excluded / biggest exclusions | Accept the proposals |
+| **G3 Git integration** (Step 1, confirmed before Step 5) | Mode, provider, branch per repo, and that Breeze stores the token; then collect the token | Git link if every repo has a remote and a token is already available (or the repos are public); else local. Never prompts for a token; repos that need one are reported as `blocked: token` |
 
-1. Read `.breeze.json`. If `apiKey` is present → set
-   `uploadMode = "automatic"` and continue to Step 2.
-2. If `apiKey` is missing, prompt the user with **both options**:
+**Collecting a token at G3** — in order: (1) `gh auth status` / `glab auth status` already logged in;
+(2) ask the user to run `! gh auth login` / `! glab auth login`; (3) ask the user to run
+`! read -rs T && mkdir -p ~/.config/breeze && printf %s "$T" > ~/.config/breeze/<provider>_token && chmod 600 ~/.config/breeze/<provider>_token`
+and pass `--token-file` to the script. Public repos need no token.
+- Never print either secret, never write the git token to a file.
 
-   > This skill can either upload your code graph automatically (needs
-   > a Breeze API key), or generate the ndjson locally so you can
-   > upload it manually via the Breeze UI. Pick one:
-   >
-   > **A. Paste API key now (recommended for repeat onboardings)** —
-   > generate one at **`<uiBaseUrl>/mcp/generate/key`** and paste it.
-   > I'll save it to `.breeze.json` for next time.
-   >
-   > **B. Skip — I'll upload manually via the UI** — I'll just
-   > generate the gzipped ndjson file locally, and at the end
-   > I'll give you the upload URL.
+---
 
-3. Based on the choice:
-   - **A:** save the pasted key to `.breeze.json` under `apiKey` (no
-     echo back, "API key saved" only) and set
-     `uploadMode = "automatic"`.
-   - **B:** set `uploadMode = "manual"` and continue without writing
-     anything to `.breeze.json`.
+## Step 1 — Pick the mode
 
-### Mode B — Manual upload (UI)
+Ask once (skip if the prompt already says, e.g. a local path + "local"):
 
-When `uploadMode = "manual"`, this skill will run the parser
-**without** `--upload`, producing only the local
-`<repo>-project-analysis.ndjson.gz` file. At the end (Step 6), it
-points the user at the Breeze UI to upload it:
+> How should Breeze get the code?
+> **A. Git link (recommended)** — connect the repos from GitHub / GitLab / Bitbucket / Azure DevOps.
+> Breeze parses them on the server, keeps the ignore patterns on each repo and can re-sync later.
+> Nothing is generated on your machine.
+> **B. Local** — run the parser here on a checked-out copy, then upload (automatic with an API key, or
+> manual through the UI). Use this when the server can't reach the git host, there is no token, or the
+> code isn't in git.
 
-```
-<uiBaseUrl>/code-ontology/<projectUuid>?page=1
-```
+Record `mode` in `repos.json` (`"mode": "git" | "local"`).
 
-**Security (Mode A only):** Never print the key in output or commit
-it. Make sure `.breeze.json` is in `.gitignore`.
+**Templates.** UI repos with markup views (AngularJS/Angular `.html`, Razor `.cshtml`, Web Forms
+`.aspx/.ascx`, Vue `.vue`) need them in the graph for the UI functional pass. Locally, pass
+`--capture-templates`. On the server it is a deploy-time analyzer setting (`BREEZEAI_COG_CAPTURE_TEMPLATES`)
+the API can't read; the dev deployment had it **on** (verified 2026-11-01: all 39 `.cshtml` views of a
+git-linked repo were indexed). So don't warn up front — the Step 7 audit checks for template File nodes,
+and only if they are missing re-onboard that repo locally with `--capture-templates`.
 
-## Step 2 — Verify prerequisites (Python + uv + git)
+---
 
-The parser is the Python **`breezeai-cog`**, run on demand via **`uvx`** — no Node.js, no global install, no runtime-version pinning. `uvx` fetches and runs `breezeai-cog` from GitHub in an ephemeral, isolated environment each time (cached per version after the first run). **Verify the toolchain is present; STOP and ask the user only if something is missing.**
+## Step 2 — Scope → state file
 
-> **Windows → run under WSL.** The parser and `uvx` expect a POSIX shell. If the user is on native Windows (PowerShell/cmd), tell them to re-run this skill from a **WSL** terminal.
+Accept any of these; several can be combined:
 
-### 2a. Check the toolchain
+| Input | Git link | Local |
+|---|---|---|
+| One repo URL | `git_onboard.py add --url <url> [--branch B]` (no `--branch` = the repo's real default branch; a private repo needs its token first) | — |
+| List of URLs (file or pasted) | `add` once per line (`url[,branch]`) | — |
+| GitHub org / user | `git_onboard.py discover --provider github --org <org>` | — |
+| GitLab group (incl. subgroups, self-hosted via `--host`) | `git_onboard.py discover --provider gitlab --org <group path>` | — |
+| Bitbucket workspace / Azure DevOps project | `add` per repo (no discovery API in the script yet) | — |
+| Local path(s) | — | one entry per path |
+| Monorepo | one repo entry; note its apps for `/breeze:onboard-project` | one entry |
+
+Local paths must exist and look like source (`.git`, or a manifest such as `package.json`, `pom.xml`,
+`*.csproj`, `pyproject.toml`, `go.mod`). If the path is the Breeze plugin repo itself, warn — the user
+almost certainly means another folder.
+
+---
+
+## Step 3 — Triage (any time there are more than ~10 repos)
+
+Show a table from `repos.json`: name, language, size, last push, archived, fork, empty. Suggest
+**excluding** archived repos, forks, empty repos, and repos with no push in the last N months (ask N;
+default 24). Group the rest so the user can decide quickly (by language, or by name prefix such as
+`payroll-*`, `hr-*`). Set `selected: true/false` for every repo and save.
+
+For one to a few repos, skip the table and just confirm the list.
+
+Unsupported languages (see `uvx --from git+https://github.com/accionlabs/breezeai-cog breezeai-cog
+capabilities`; today C#, Java, Python, TypeScript/JavaScript, VB) produce no code nodes. Flag repos whose
+main language is unsupported (Go, PHP, Ruby, C/C++, RPG, COBOL, …) as **unsupported** in the state file
+and tell the user now rather than after the sync.
+
+---
+
+## Step 4 — Ignore patterns
+
+Follow [references/ignore-catalog.md](references/ignore-catalog.md):
+
+1. Git link: `git_onboard.py tree` fetches each selected repo's file list (GitHub / GitLab) into
+   `trees/`. Local: list the folder.
+2. Propose patterns per repo — only for paths that exist, never repeating COG's built-in defaults.
+   Patterns shared by every repo go to `ignore/_default.repoignore`.
+3. Save the proposals to `ignore/`, then run `git_onboard.py preview`: it applies COG's built-in
+   defaults plus your patterns to each file list with gitignore semantics and prints, per repo, files not
+   parsed (unsupported type), excluded by built-ins, excluded by each of your patterns, kept, and any
+   pattern that matched nothing. "Kept" counts parseable source only; the server's `fileCount` also
+   includes config files, so it will be higher.
+   Show **one table for the batch** from that output (gate **G2**). Let the user open any repo's detail.
+   One confirmation per batch.
+4. Local mode: write the confirmed patterns to `<repo>/.repoignore` (merged with an existing file).
+
+Keep each repo's patterns under 10,000 characters (server limit); prefer `**/dir/` over long file lists.
+
+---
+
+## Step 5 — Ingest
+
+### Git link
 
 ```bash
-python3 --version   # need 3.10+
-uvx --version       # uv provides uvx
-git --version       # must be on PATH (uvx installs from git+https://…)
+python3 <skill dir>/scripts/git_onboard.py run --project <uuid> --max-inflight 5 --interval 60
 ```
 
-### 2b. If `uvx` is missing — install uv
+`run` loops until every selected repo is `indexed` or out of retries:
 
-`uvx` ships with **uv**. Install it, then re-check `uvx --version`:
+- connects repos (`POST <apiBase>/code-ontology/generate-from-git` with `projectUuid, name, repoUrl,
+  gitBranch, gitProvider, gitToken?, ignorePatterns?`). The backend creates the code ontology and starts
+  the first sync itself;
+- keeps at most `--max-inflight` ingests running at once (start with 5; the analyzer and embedding queue
+  are shared — raise it only if status keeps up);
+- polls status and retries (Step 6).
 
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+Run it in the background for large batches and report progress from `log.jsonl`. If the session stops,
+re-running the same command resumes: connected repos are never re-created.
 
-After install, `uvx` lives in `~/.local/bin` — ensure that's on `PATH` (open a new shell, or `source ~/.bashrc`). uv can also provision Python if needed: `uv python install 3.12`.
+Before connecting, the script checks the project's existing repositories: a repo with the **same URL and
+branch** (for example one added earlier in the UI or with the `Manage_Repository` MCP tool) is **adopted**
+(its id goes into the state, nothing is created). A different repo with the **same name** is reported as
+`connect_failed` — give it another `displayName` in `repos.json`.
 
-### 2c. STOP conditions
+**One or two repos without the script:** the `Manage_Repository` MCP tool (`action="create"`) connects a
+git repo with no Breeze API key and no shell — useful when the user has only the MCP tools. Pass a git
+token only if the user offers one; prefer the script (token from `gh` / env, never seen by the model) for
+private repos and for anything more than a handful.
 
-- **Python < 3.10 or missing** → ask the user to install Python 3.10+ (or `uv python install 3.12` once uv is present).
-- **git missing** → ask the user to install git (uvx needs it to clone `git+https://github.com/accionlabs/breezeai-cog`).
-- **native Windows, no WSL** → ask the user to re-run under WSL.
+### Local
 
-No runtime activation prefix is needed (unlike the old Node CLI) — `uvx` is self-contained, so Step 5's commands run as-is in any shell where `uvx` is on `PATH`.
-
-## Step 3 — Resolve the target repo
-
-Resolve the **absolute path of the repo to upload** in this order:
-
-1. **Explicit argument** — if the user passed a path
-   (`/breeze:onboard-repository /path/to/repo`), validate that the
-   path exists and looks like a source repo:
-   - has a `.git` directory, OR
-   - has a recognizable manifest (`package.json`, `pom.xml`,
-     `pyproject.toml`, `requirements.txt`, `go.mod`, `composer.json`,
-     `Cargo.toml`, etc.)
-2. **Current working directory** — if the cwd itself looks like a
-   source repo (same checks as 1), confirm with the user:
-   *"Onboard the current directory `<cwd>` as a Breeze repo?"*
-3. **Ask the user** — single prompt: *"Provide the absolute path to
-   the repo you want to onboard."* Do not guess across siblings.
-
-If the resolved path is the **plugin working directory itself** (i.e.
-the user is sitting in the Breeze plugin repo, not their target
-project), warn them and ask them to re-confirm — they almost
-certainly want a different path.
-
-Before running, **show the user a one-line summary of what will
-happen** and ask them to confirm:
-
-> About to onboard repo `<resolved-path>` into Breeze project
-> `<projectUuid>` using API base `<apiBase>`. This will index files,
-> classes, functions, call chains, and method-level statements. Large
-> repos can take several minutes. Proceed? [y/N]
-
-Wait for confirmation before running the command.
-
-## Step 4 — Suggest related repos (brownfield onboarding)
-
-Brownfield projects almost always have **more than one repo** — a
-frontend plus one or more backends, or a set of microservices. After
-the user confirms the first repo, gently surface this:
-
-> Most projects have a frontend + one or more backend repos. After
-> this upload, you can onboard the others by re-running
-> `/breeze:onboard-repository <other-repo-path>`. The
-> `/breeze:generate-functional-from-ui` and
-> `/breeze:generate-functional-from-backend` skills work best when
-> every repo in the system is indexed.
-
-This is informational — do not block on it. Continue with the upload.
-
-## Step 4.5 — Configure exclusions (`.repoignore`)
-
-The generator has **no `--exclude` CLI flag**. Exclusions are driven by a
-gitignore-style **`.repoignore`** file at the repo root, which the generator
-parses and merges with its **built-in** `.repoignore`. The built-in already
-skips `.git/`, `node_modules/`, `vendor/`, `dist/`, `build/`, `target/`,
-`.gradle/`, `tests/`, `/docs/`, `*.csv`, images, `.env*`, etc. — so common
-dependency/build/test noise is handled automatically.
-
-The parser only handles its **supported source languages** — **C#** (+ ASP.NET, Web Forms, WCF, GraphQL), **Java** (+ Spring Boot, JAX-RS, Vert.x), **Python** (+ FastAPI), **TypeScript/JavaScript** (+ Angular, React, NestJS, Express, LoopBack, GraphQL), and **VB** (+ VB ASP.NET). Other languages (Go, PHP, Perl, Ruby, …) and non-source artifacts (`.json`, `.md`, PDFs) are never turned into code nodes even without an ignore entry. (Run `uvx --from git+https://github.com/accionlabs/breezeai-cog breezeai-cog capabilities` for the authoritative, live list.) You still want a `.repoignore` when:
-
-- a folder contains **source files you don't want indexed** — generated code,
-  vendored copies, scratch/planning dirs, sample apps, or a previous tool's
-  output that happens to hold `.java`/`.js`/etc.;
-- a large generated/output folder would needlessly slow the directory walk;
-- the user explicitly names folders to skip.
-
-**What to do before running:**
-
-1. Check for an existing `<repo>/.repoignore` — if present, honor it (the tool
-   merges it automatically; just tell the user it's in effect).
-2. Scan the repo root for obvious non-source / generated / output folders
-   (e.g. a tool's output dir, `merge_plan/`, `*-output/`, a checkpoint folder)
-   and any secrets file (`.breeze.json` holds the apiKey — never index it).
-3. If you find any, **propose a `.repoignore`** listing them and write it after
-   the user confirms (don't silently exclude — show the list). Use
-   gitignore syntax: a trailing `/` means "directory, matched anywhere"
-   (`merge_plan/` → skipped at any depth); a leading `/` anchors to repo root.
-
-```
-# example <repo>/.repoignore
-.breeze-metadata-output/      # generated functional-graph payloads (not source)
-merge_plan/             # scratch / planning folder
-.breeze.json            # contains apiKey — never index
-```
-
-Negation (`!pattern`) is **not** supported by the generator. Skipping this
-step is fine for a clean single-module repo; it matters most for large
-monorepos or trees that mix source with generated output.
-
-## Step 5 — Run the parser
-
-No activation prefix is needed — `uvx` runs `breezeai-cog` self-contained in any shell where `uvx` is on `PATH`. The exact command depends on `uploadMode` from Step 1. The parser writes a **single gzipped file** `<repo-name>-project-analysis.ndjson.gz` into `--out` (if `--out` is omitted it defaults to the repo's **parent** directory).
-
-### Mode A — `uploadMode = "automatic"`
-
-Read `apiKey`, `projectUuid`, and `apiBase` from `.breeze.json`, then run:
+Prerequisites: Python 3.10+, `uvx` (from uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`), git.
+On Windows run under WSL. Then per repo:
 
 ```bash
 uvx --from git+https://github.com/accionlabs/breezeai-cog breezeai-cog repo-to-json-tree \
-  --repo <resolved-repo-path> \
-  --out <output-path> \
-  --capture-statements \
-  --upload \
-  --user-api-key <apiKey> \
-  --uuid <projectUuid> \
-  --baseurl <apiBase>
+  --repo <repo path> --out <output dir> [--capture-templates] \
+  [--upload --uuid <projectUuid> --baseurl <apiBase>]      # automatic upload; key from env API_KEY
 ```
 
-### Mode B — `uploadMode = "manual"`
+- Statements are captured by default (`--no-capture-statements` turns them off — don't).
+- Add `--capture-templates` for UI repos with markup views (Step 1).
+- Without `--upload` the parser writes `<repo>-project-analysis.ndjson.gz`; the user uploads it at
+  `<uiBaseUrl>/code-ontology/<projectUuid>?page=1` (substitute real values).
+- Pass the API key as env `API_KEY=…` for the command only; don't put it on the command line.
+- After an automatic upload, the server still ingests asynchronously. Add the repo to the state file
+  with `"status": "uploaded"` and `"displayName"` set to the name the parser used (the repo folder name);
+  `git_onboard.py status` then matches it to its code ontology by name and tracks it like a git-linked
+  repo (Step 6). Retries don't apply to local uploads — on `error`, re-run the parser.
 
-Omit the `--upload`, `--user-api-key`, `--uuid`, and `--baseurl` flags. The parser then only analyzes the repo and writes the gzipped ndjson locally — no network call:
+Common local failures: `uvx: command not found` → install uv; Python too old → `uv python install 3.12`;
+no ndjson produced → wrong `--out` or no supported files; `401` → bad API key; `404 Project not found` →
+wrong project UUID. Surface errors verbatim.
 
-```bash
-uvx --from git+https://github.com/accionlabs/breezeai-cog breezeai-cog repo-to-json-tree \
-  --repo <resolved-repo-path> \
-  --out <output-path> \
-  --capture-statements
-```
+---
 
-**Flag rationale:**
+## Step 6 — Status, stalls and retries
 
-- `--repo` — absolute path resolved in Step 3
-- `--out <dir>` — directory for the gzipped ndjson (`<repo-name>-project-analysis.ndjson.gz`). Optional; defaults to the repo's **parent**. Pick a writable dir you can point the user at for Mode B (e.g. the repo's parent, or a scratch folder).
-- `--upload` *(Mode A only)* — after writing the file locally, streams it to the Breeze backend
-- `--capture-statements` — **mandatory in both modes**. Without it the parser captures method signatures only, not their bodies. Downstream skills (especially `generate-functional-from-backend`) need statement-level data to extract routes, queue env vars, cron expressions, side effects, and call chains. Re-indexing without this flag silently degrades the graph.
-- `--user-api-key`, `--uuid`, `--baseurl` *(Mode A only)* — credentials + project link from `.breeze.json` (also readable from env `API_KEY` / `BREEZE_API_URL`).
-- Optional: `--language <lang>` (repeatable) to restrict languages; `--jobs <N>` to cap worker processes; `--verbose` for DEBUG logs.
+Status comes from `GET <apiBase>/code-ontology?filters[projectUuid][$eq]=<uuid>` (full rows — the
+`selectFields` allowlist drops `gitBranch`, `commitId` and `progressAt`). `git_onboard.py status` wraps it
+and updates `repos.json`; without the script, `Call_List_Repositories_` returns the same fields.
 
-**Run it foregrounded so the user can see progress.** Large repos
-(100K+ LOC) can take 5–15 minutes. If the command fails, surface the
-error verbatim — don't paraphrase. Common failure modes:
+| `fileGraphStatus` | Meaning | State |
+|---|---|---|
+| `started`, `node_creation`, `relationship_creation`, `creating_embeddings`, `metadata_addition` | ingest running | `ingesting` |
+| `active` | done | `indexed` |
+| `error` | failed — read `failedStep` + `statusMessage` | `error` |
 
-| Symptom | Likely cause | Fix | Mode |
-|---|---|---|---|
-| `uvx: command not found` | uv not installed | Install uv (Step 2b: `curl -LsSf https://astral.sh/uv/install.sh \| sh`), then re-open the shell | both |
-| `error: Python 3.10+ required` / version-related import errors | Python too old | Install Python 3.10+ (`uv python install 3.12`) | both |
-| First run pauses on `Resolved … packages` / `Building breezeai-cog` | `uvx` cloning + building `breezeai-cog` from GitHub (one-time per version; cached after) | Wait — subsequent runs reuse the cache | both |
-| `fatal: ... git ...` during `--from git+https://…` | git missing / no network | Install git; check connectivity to github.com | both |
-| No `<repo>-project-analysis.ndjson.gz` produced despite exit 0 | Wrong `--out` path, or all files skipped (unsupported languages) | Check `--out` is writable; run `… breezeai-cog capabilities` to confirm the repo's languages are supported | both |
-| `401 Unauthorized` / `upload failed` | Wrong / expired API key | Delete the `apiKey` field from `.breeze.json` and re-run this skill — Step 1 will prompt again (or pick Mode B) | A |
-| `404 Project not found` | Wrong projectUuid in `.breeze.json` | Re-run `/breeze:project setup` and re-link | A |
-| `ECONNREFUSED` / DNS error on baseurl | Wrong `apiBase` | Check the value in `.breeze.json` | A |
-| Upload errors on ingest (`fileGraphStatus: error`) | Backend-side stale Neo4j constraint (a known DB migration issue), not a cog/file fault | Escalate to the Breeze backend team; the local `.ndjson.gz` is valid | A |
-| Hangs at "Uploading…" for many minutes | Large repo, slow link | Wait — cancel only if 30+ min with no progress | A |
-| Parser errors during walk | Unsupported language / encoding | Surface verbatim; the ndjson written so far still uploads in Mode B | both |
+- **Errored** → retry: `GET /code-ontology/check-update/:id` for the latest commit, then
+  `POST /code-ontology/sync/:id?projectUuid=<uuid> {incomingCommitId}`. Up to `--max-retries` (default 2),
+  then leave it as `error` and report the reason. If `check-update` itself fails (the branch can't be read:
+  missing or expired token, renamed branch), that counts as an attempt too — report it and point the user at
+  the repo's **Edit Git Config** in the UI rather than retrying.
+- **Suspected stall** → a repo `ingesting` with no stage change for 30 minutes is probed with the same
+  `POST /sync/:id`. The backend answers **409** while the ingest's heartbeat is fresh (it is just big) and
+  starts a new sync only if the old one has died. So the probe is safe; the log records `still_running` or
+  `retried`.
+- `connect_failed` (HTTP error on connect, e.g. bad token or URL) → fix the cause, set the repo back to
+  `discovered`, re-run.
 
-## Step 6 — Finalize (mode-dependent)
+Report progress as counts (`indexed=…, ingesting=…, error=…`) rather than per-repo lines once there are
+more than ~10 repos.
 
-### Mode A — verify the upload landed
+---
 
-After the command exits successfully, run a quick smoke test against
-the code graph to confirm the repo is queryable:
+## Re-sync, remove or re-add a repo
 
-```
-Code_Graph_Search "<repo name>"   (via the Breeze MCP)
-```
+After onboarding, the same state file handles maintenance:
 
-Expect at least one File node result. If the graph still appears
-empty after a successful upload, ask the user to wait ~30 seconds
-for indexing and try again — the upload returns when bytes land,
-indexing finishes shortly after.
+| Need | Command | Without the script (MCP) |
+|---|---|---|
+| New commits on indexed repos | `git_onboard.py sync [--only key,...]` — `check-update`, then sync only where the branch moved | `Manage_Repository action="retry"` |
+| Wrong branch, duplicate, or retries used up → start over | `git_onboard.py delete --only <key> --confirm <name> --force --readd [--branch B]`, then `connect` / `run` | `Manage_Repository action="delete"`, then `action="create"` |
+| Remove a repo from the project | `git_onboard.py delete --only <key> --confirm <name> [--force]` | `Manage_Repository action="delete"` |
 
-### Mode B — hand off the ndjson for manual upload
+**Deleting is irreversible** (the repo's whole code graph goes, and anything built on it must be regenerated):
 
-The parser has finished writing `<output-path>/<repo-name>-project-analysis.ndjson.gz` but the backend doesn't have the data yet. Tell the user (substitute the real file path):
+- Never delete to retry — `run` / `sync` / `retry` re-sync in place.
+- Delete only when the user asked for that repo, one repo per command. Show the repo's name, status and file
+  count first and get an explicit yes; `--confirm` / `confirmName` must be the exact name in Breeze.
+- An **indexed or ingesting** repo needs `--force` (`allowIndexed=true`): use it only when the user
+  explicitly asked to remove that indexed repo. Otherwise suggest they delete it in the UI on
+  `<uiBaseUrl>/code-ontology/<projectUuid>`.
+- In `--autonomous` mode never delete; report the repo instead.
 
-> ✅ Generated `<repo-name>-project-analysis.ndjson.gz` at `<output-path>`. To finish onboarding, upload it via the Breeze UI:
->
->   **`<uiBaseUrl>/code-ontology/<projectUuid>?page=1`**
->
-> Drop that `.ndjson.gz` file into the upload area on that page. Until you do this, downstream skills like `/breeze:generate-functional-from-ui` and `/breeze:search` will report "no code ontology" because the graph is still empty.
+---
 
-Substitute the actual `uiBaseUrl` (from `.breeze.json` → `breeze.config.json`
-→ `https://ai.accionbreeze.com`) and `projectUuid` (from
-`.breeze.json`) into the URL before showing it — don't print the
-placeholders verbatim.
+## Step 7 — Audit
 
-After the user confirms they've uploaded, optionally run the same
-`Code_Graph_Search` smoke test as Mode A to confirm the manual
-upload landed.
+For every `indexed` repo (sample if there are many, but always list problems for all):
 
-## Step 7 — Tell the user what to do next
+- **Counts:** files, classes, functions from the status row; flag zero classes/functions (unsupported
+  language or everything ignored).
+- **Expected vs. indexed files:** compare the tree / local file count minus excluded patterns with
+  `fileCount`; explain large gaps.
+- **Templates:** for UI repos, check `.html` / `.cshtml` / `.aspx` / `.vue` File nodes exist
+  (`Get_Code_Nodes_By_Label` label `File`, filter on path). Missing → re-onboard that repo locally with
+  `--capture-templates`.
+- **Noise that got through:** large vendored files in the File list (library names, versions in names) →
+  add patterns, `PUT <apiBase>/code-ontology/:id {"ignorePatterns": …}`, then re-sync (Step 6).
 
-Present a clear next-step menu based on what kind of repo was just
-onboarded. **In Mode B, gate this on the user having completed the
-manual UI upload** — none of the downstream skills work until the
-graph is populated.
+For a deep single-repo audit (ghost files after re-index, LOC deltas against an ndjson), run
+`/breeze:code-ontology-audit-check <repo>`.
 
-> ✅ Repo `<name>` is now indexed in Breeze project `<projectUuid>`.
->
-> **Next steps depend on the repo type:**
->
-> - **Frontend repo** → run
->   `/breeze:generate-functional-from-ui <repo-path>` to generate the
->   User-persona side of the functional graph.
-> - **Backend repo** → run
->   `/breeze:generate-functional-from-backend <repo-path>` to
->   generate the System-persona side (REST + queues + cron + WebSocket
->   + webhooks).
-> - **More repos to onboard?** Re-run `/breeze:onboard-repository
->   <other-repo-path>` for each one.
-> - **Exploring an existing graph?** Use `/breeze:search`,
->   `/breeze:analyze-functional`, or `/breeze:analyze-architecture`.
+Record audit results per repo in `repos.json` (`audit: {ok, notes[]}`).
 
-If the user has a multi-repo system, suggest the recommended order:
+---
 
-1. Onboard the frontend repo first (so the UI pass has it)
-2. Onboard each backend repo
-3. Run `/breeze:generate-functional-from-ui` on the frontend
-4. Run `/breeze:generate-functional-from-backend` on each backend
-5. Run `/breeze:validate-functional-graph` to check the result
-6. Optionally run `/breeze:generate-spec` to export the graph
+## Step 8 — Report and next steps
+
+Summarise: repos indexed / errored / unsupported / skipped, files and LOC, any template or noise issues,
+and where the state and log live. Then:
+
+- One or two repos → the next skill per repo type (`generate-functional-from-ui` for a UI,
+  `generate-functional-from-backend` for a service, …).
+- Several repos, a monorepo, or a whole estate → `/breeze:onboard-project`, which classifies units,
+  detects personas once, and runs the functional, design and architecture skills in order with its own
+  resumable plan.
 
 ## What this skill does NOT do
 
-- **Document upload** — PDFs, markdown specs, and other text inputs
-  are handled by `/breeze:analyze-functional` (which ingests them as
-  part of the analysis flow) and `/breeze:visual-to-text` (which
-  converts design visuals into structured user stories that feed the
-  analysis flow). Do not try to upload documents through this skill.
-- **Functional graph generation** — this skill only populates the
-  *code* graph. Use `/breeze:generate-functional-from-ui` /
-  `/breeze:generate-functional-from-backend` to derive functional
-  scenarios from the indexed code.
-- **Multi-repo batch upload** — this skill processes one repo at a
-  time. For a multi-repo system, invoke it once per repo. The
-  per-invocation confirmation is intentional — uploads can be slow
-  and we want the user to acknowledge each one.
-
-## See also
-
-- `/breeze:project setup` — must be run first to create `.breeze.json`
-  and link a `projectUuid`. The API key is **not** collected there
-  any more; this skill prompts for it in Step 1 when needed.
-- `/breeze:generate-functional-from-ui` — next step after onboarding
-  a frontend repo
-- `/breeze:generate-functional-from-backend` — next step after
-  onboarding a backend repo
-- `/breeze:analyze-functional` — for ingesting documents and
-  analyzing requirements against the existing graph
-- `/breeze:visual-to-text` — for converting UI design visuals into
-  user stories
+- Functional, design or architecture graphs (see `/breeze:onboard-project`).
+- Documents (use `/breeze:analyze-functional` or `/breeze:visual-to-text`).
+- Store git tokens anywhere except the Breeze repo record the user asked to create.

@@ -93,7 +93,8 @@ Then **restart Claude Code** again so the updated skills/hooks/MCP definitions a
 | Skill | Command | Description |
 |-------|---------|-------------|
 | **Project** | `/breeze:project [show \| list \| use <name> \| create <name> \| auth \| status \| setup]` | Canonical home for all project management. Sub-modes: `show` (active project), `list` (all accessible), `use <name\|uuid>` (switch and persist), `create <name> [--desc "..."]` (create and link), `auth` (re-authenticate MCP), `status` (full metadata report), `setup` (full bootstrap = auth + link/create + ontology check). No API key collected here (MCP uses Keycloak OAuth); does **not** upload repos or documents. |
-| **Onboard Repository** | `/breeze:onboard-repository [repo-path]` | Get a source repository into the Breeze code graph. Wraps `breeze-code-ontology-generator` with `--capture-statements`, verifies Node.js is **exactly v22.x** (Node 24+ fails silently due to a tree-sitter ESM/TLA issue), and resolves the target repo from an argument or the current directory. Supports two modes: automatic (CLI streams to backend with an API key) or manual (CLI writes ndjson locally and you upload via the Breeze UI). API key is optional. Run once per repo (frontend + each backend). |
+| **Onboard Project** | `/breeze:onboard-project [start \| status \| next \| rerun <step>] [--autonomous]` | End-to-end onboarding orchestrator for one repo, a monorepo or hundreds of services. Onboards the code graph, classifies units (SPA, service, Web Forms, MVC, metadata, shared library, schema, infra, unsupported), routes each to the right skill, and runs personas → functional → join + validate → design, with architecture in parallel. Interactive approval gates (repos, ignore patterns, git integration + tokens, units, personas, functional and design validation) or `--autonomous` (decides and logs every gate). Resumable plan in `.breeze/plan.json` + event log (`scripts/plan.py`); UI ↔ System join report (`scripts/join.py`). |
+| **Onboard Repository** | `/breeze:onboard-repository [repo path \| repo URL \| org/group \| list] [--local]` | Gets code into the Breeze code graph. **Git link** (default): connects GitHub / GitLab / Bitbucket / Azure DevOps repos, parsed server-side with ignore patterns stored per repo. **Local**: runs `breezeai-cog` via `uvx` (template capture for UI repos) and uploads. Discovers whole orgs/groups, triages, proposes ignore patterns (vendored libraries, generated code, …), polls ingest status, retries errored/stalled syncs and audits the result. Resumable state in `.breeze/onboarding/`. Replaces `update-repo-ignore`. |
 
 ### Search & analysis
 
@@ -137,18 +138,25 @@ Both new skills resolve their target repo in this order: explicit path arg → `
 ### Recommended pipelines
 
 ```
-First-time onboarding of a brownfield full-stack project:
-  /breeze:project setup                               # MCP auth + project link (no API key needed yet)
-  /breeze:onboard-repository <frontend repo>          # offers automatic (API key) or manual (UI upload) mode; indexes code graph (once per repo)
-  /breeze:onboard-repository <backend repo 1>
-  /breeze:onboard-repository <backend repo 2>
-  ...
-  /breeze:generate-functional-from-ui       <frontend repo>
-  /breeze:generate-functional-from-backend  <backend repo 1>
-  /breeze:generate-functional-from-backend  <backend repo 2>
-  ...
-  /breeze:validate-functional-graph
+First-time onboarding of a brownfield project (any size — one repo to hundreds):
+  /breeze:project setup                    # MCP auth + project link
+  /breeze:onboard-project [--autonomous]   # plans and runs everything below, resumable (.breeze/plan.json)
+    P0 preflight                           # API key, sub-agent graph tools + agent types, missing inputs
+    P1 /breeze:onboard-repository          # all repos: git link or local · gates G1 repos, G2 ignore patterns, G3 git + token
+    P2 units + routing                     # SPA / service / job / webforms / MVC / metadata / library / schema / infra · run groups · G4
+    P3 /breeze:detect-personas             # once across all UIs, merged · G5
+    P4 generate-functional-from-{ui,backend,aspnet-webforms,metadata}   # per run group, with live outcome names
+    P5 scripts/join.py + /breeze:validate-functional-graph              # G6
+    P6 /breeze:generate-architecture       # in parallel, any time after P2
+    P7 generate-page-registry → generate-component-registry → generate-design-from-ui → validate-design-graph · G7
+    P8 .breeze/report.md                   # every phase, counts, join findings, all auto-decisions
   /breeze:generate-spec
+
+Running the steps by hand works too — follow the same order.
+
+Interactive mode (default) stops at gates G1–G7 for approval; `--autonomous` decides each gate and records
+it in `plan.json` → `gates` for review. Git tokens are never pasted into chat: the skill uses an existing
+`gh` / `glab` login, `! gh auth login`, or a `chmod 600` token file (`--token-file`).
 
 Greenfield project (no code yet):
   /breeze:project setup
@@ -217,7 +225,7 @@ claude --plugin-dir ../breeze-claude-plugin
 
 ## Notes
 
-- `.breeze.json` may contain a Breeze API key once you've used a skill that needs one (currently `/breeze:onboard-repository`, and the retired `/breeze:deprecated-cluster-pipeline` if you're resuming a historical run). Add `.breeze.json` to `.gitignore`.
+- `.breeze.json` may contain a Breeze API key once you've used a skill that needs one (currently `/breeze:onboard-repository` — git-link mode and local automatic upload — and the retired `/breeze:deprecated-cluster-pipeline` if you're resuming a historical run). Add `.breeze.json` to `.gitignore`.
 - The Breeze MCP server uses Keycloak OAuth; Claude Code handles sign-in automatically on the first MCP tool call and does **not** read `apiKey` from `.breeze.json`. MCP-only workflows never need an API key.
 - API keys are collected **on-demand** by the skills that actually use them, with a prompt pointing at `<uiBaseUrl>/mcp/generate/key` (default `https://ai.accionbreeze.com/mcp/generate/key`; see `breeze.config.json`). No upfront paste during setup.
 - The Keycloak token expires after roughly **7 days**. Expect to re-authenticate periodically via `/breeze:project auth`; skills will tell you when an MCP call hits a 401.

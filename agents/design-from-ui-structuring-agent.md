@@ -12,7 +12,7 @@ tools:
   - mcp__plugin_breeze_breeze-mcp__Bulk_Update_Design_Nodes
   - mcp__plugin_breeze_breeze-mcp__Update_Functional_Node
   - mcp__plugin_breeze_breeze-mcp__Update_Design_Node
-  - mcp__plugin_breeze_breeze-mcp__Get_all_Design_By_Label
+  - mcp__plugin_breeze_breeze-mcp__Get_Design_Nodes_By_Label
   - mcp__plugin_breeze_breeze-mcp__Design_Graph_Search
   - mcp__plugin_breeze_breeze-mcp__Code_Graph_Search
 ---
@@ -50,41 +50,30 @@ OUTCOME:
   id:                  <outcome UUID>
   name:                <outcome name>
   personaName:         <persona name>
-SCENARIOS:             <JSON array of scenarios with steps/actions>
+  personaId:           <persona UUID>
+  platform:            <platform slug, e.g. "source-web" or "">
 MODALITIES:            [<modality list, e.g. "WEB", "MOBILE">]
 FRAMEWORK:             <detected framework, e.g. "react-router", "vue-router", "angular">
 UI_REPO:               <absolute path to UI repo root>
 PROJECT_UUID:          <project UUID>
+API_BASE:              <Breeze API base URL>
+API_KEY:               <Breeze API key>
+SCRIPTS_PATH:          <absolute path to skill scripts directory>
 OUTPUT_DIR:            <absolute directory path for payload files>
 REFERENCES_PATH:       <absolute path to skill references directory>
 COMPONENT_REGISTRY:    <absolute path to existingcomponents.json, or "none">
+PAGE_REGISTRY:         <absolute path to existingpages.json, or "none">
+APP_SUFFIX:            <e.g. " [Source Web]" or "">
+PLATFORM_ID:           <e.g. "source-web" or "">
+PAGE:                  <page number, default 1>
 MODE:                  <"live" | "dry-run">
 ```
 
-**`SCENARIOS` shape:**
-```json
-[
-  {
-    "id": "scenario-uuid-1",
-    "name": "Search for projects",
-    "stepsActions": [
-      {
-        "stepId": "step-uuid-1",
-        "stepName": "Navigate to search page",
-        "order": 1,
-        "actions": [
-          { "actionId": "action-uuid-1", "actionName": "Enter search query" }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "scenario-uuid-2",
-    "name": "Save current search",
-    "stepsActions": [...]
-  }
-]
-```
+> **No SCENARIOS input.** You fetch scenarios (and their steps/actions)
+> yourself in Phase 0b using `fetch_steps_actions.py` with the PAGE
+> number. For large outcomes (>50 scenarios), the parent spawns multiple
+> sub-agents with different PAGE values — each processes up to 50
+> scenarios.
 
 ---
 
@@ -126,9 +115,10 @@ ELSE:
 When you discover a component in the UI code:
 1. **Check registryCache by exact name** (case-insensitive)
 2. **Match found** → use the cached classification (type, scope,
-   supportingComponents, designSystemRef). Do NOT re-classify.
-   Still read the source file if needed for branch-tagging (Phase 2e),
-   but trust the cached type/scope.
+   supportingComponents, designSystemRef, **citations**). Do NOT
+   re-classify. Still read the source file if needed for branch-tagging
+   (Phase 2e), but trust the cached type/scope. Use the cached
+   `citations` directly in Phase 3c-i — no Code_Graph_Search needed.
 3. **No match** → classify from scratch using the decision tree
 4. **Override rule:** If you read the actual source and the cached
    classification is clearly wrong (e.g., cached as ATOM but the
@@ -139,10 +129,73 @@ When you discover a component in the UI code:
 **Benefits:**
 - Skips classification for known components (faster)
 - Consistent naming across runs (same `designSystemRef`)
+- **Pre-populated citations** — no Code_Graph_Search needed for cached components
 - Components from shared dirs (already scanned by generate-component-registry)
   don't need re-reading
 - Still reads UI files for branch-tagging and action mapping (cache
   doesn't know which branch a component belongs to)
+
+---
+
+## Phase 0b: Fetch Scenarios & Steps/Actions via Python Script
+
+> **CRITICAL — do this BEFORE Phase 1.** Without scenarios, stepIds, and
+> actionIds, the entire design payload is useless.
+
+Run `fetch_steps_actions.py` via Bash. The script fetches one page of
+unprocessed scenarios for the outcome AND their steps/actions:
+
+```bash
+python3 "SCRIPTS_PATH/fetch_steps_actions.py" "API_BASE" "API_KEY" "PROJECT_UUID" "OUTCOME_ID" --page PAGE --limit 50
+```
+
+The `PAGE` value comes from your input (defaults to 1). The parent uses
+pagination to split large outcomes across multiple sub-agents — each
+agent gets a different page.
+
+**Output (JSON on stdout):**
+```json
+{
+  "scenarios": [
+    {
+      "id": "scenario-uuid-1",
+      "name": "Search for projects",
+      "isDesignGenerated": false,
+      "stepsActions": [
+        {
+          "stepId": "step-uuid-1",
+          "stepName": "Navigate to search page",
+          "order": 1,
+          "actions": [
+            { "actionId": "action-uuid-1", "actionName": "Enter search query" }
+          ]
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 50,
+    "total": 120,
+    "hasMore": true
+  }
+}
+```
+
+**Steps:**
+1. Run the script with the outcome ID and page number (one Bash call)
+2. Parse `scenarios` from the JSON output — this is your scenario list
+3. Any scenario with empty `stepsActions` → mark as `failed` with
+   error `NO_STEPS_ACTIONS`. Do not process it further.
+4. If zero scenarios returned → return `FAIL` summary line
+5. Hold the enriched list in memory for all subsequent phases:
+   - **Phase 1** — scenario names, step names, action names drive grep discovery
+   - **Phase 3c** — `stepIds` on Flows/Pages, `actionIds` on Components
+   - **Phase 3d** — validation that every stepId/actionId appears in a design node
+
+> **This uses the REST API with api-key auth.** No MCP tool needed.
+> The script handles `isDesignGenerated` filtering and nested
+> step/action fetching.
 
 ---
 
@@ -557,7 +610,17 @@ components for `/register`, plus all `/verify-email` components.
 Process each scenario in `SCENARIOS` sequentially:
 
 ```
+processedScenarioIds = {}   ← scenarioId → scenario name (built up as you go)
+
 FOR each scenario in SCENARIOS:
+  ⛔ DUPLICATE GUARD — before any processing:
+    IF scenario.id IN processedScenarioIds:
+      Log: "DUPLICATE_SCENARIO_ID: '{name}' shares scenarioId with
+            '{processedScenarioIds[id]}' — skipping to prevent duplicate UJ"
+      Mark as failed with error "DUPLICATE_SCENARIO_ID"
+      CONTINUE to next scenario
+    ADD scenario.id → scenario.name to processedScenarioIds
+
   3a. Produce flow discovery evidence block
   3b. Classify components for this scenario's actions
   3c. Build design payload
@@ -569,6 +632,13 @@ FOR each scenario in SCENARIOS:
   Track: succeeded[], failed[], pending[]
 END FOR
 ```
+
+> **Why the duplicate guard matters:** `fetch_steps_actions.py` may
+> return the same scenario on a pagination boundary, or the functional
+> graph may have issued the same UUID to two different scenarios. Without
+> this guard, the second payload for a `scenarioId` is merged into the
+> first UJ — the backend keys UserJourneys by `scenarioId + platform` — so
+> the UJ is renamed and collects another scenario's flows and pages.
 
 ### 3h. Context Budget Check
 
@@ -713,6 +783,52 @@ FormPageLayout.supportingComponents = ["PageHeader", "SocialAuthPanel"]
 
 > **Read `design-ontology.md` and `reusability.md` NOW (first scenario only).**
 
+#### 3c-i. Collect Citations
+
+**Every node except Flow gets citations** (Flow does not support them).
+
+Use a **registry-first** strategy: the component and page registries
+already have `citations` populated by `/breeze:generate-component-registry`.
+Only query `Code_Graph_Search` for nodes NOT found in a registry.
+
+**Step 1: Use registry citations (no MCP calls needed).**
+
+| Node type | Registry | How |
+|---|---|---|
+| **Component** (all types) | `existingcomponents.json` | Look up by name. If entry has non-empty `citations` → use directly |
+| **Page** | `existingpages.json` | Look up by `"{name}\|{pageType}\|{modality}"`. If entry has non-empty `citations` → use directly |
+
+**Step 2: Collect remaining file paths that need lookup.**
+
+Only gather paths for nodes NOT resolved from registries:
+- **UserJourney** — always needs lookup (not in any registry). Use the
+  primary page file for this scenario's target route.
+- **Component** with no registry match or empty `citations` — use its
+  `sourceFile` from Phase 2
+- **Page** with no registry match or empty `citations` — use
+  `allPages[route].files[0]`
+
+**Step 3: Batch-query Code Graph (only for unresolved nodes).**
+
+Call `Code_Graph_Search(uuid: PROJECT_UUID, query: "<relative-file-path>")`
+once per unique file path. Cache the results.
+
+**Step 4: Assign citations.**
+
+| Node type | Citation source |
+|---|---|
+| **UserJourney** | Code Graph lookup result for the target route file |
+| **Page** | Registry `citations` if available, else Code Graph lookup |
+| **Component** | Registry `citations` if available, else Code Graph lookup |
+
+- If no citation found (not in registry AND no Code Graph match) →
+  set `"citations": []` (do NOT invent IDs)
+- Flow does NOT support per-node citations — never add them
+
+> **Do NOT block on citation failures.** If `Code_Graph_Search` returns
+> no results or errors, build the payload without that citation. The
+> node is still valid; it just won't have a source link in the UI.
+
 **Hierarchy:**
 
 ```
@@ -727,16 +843,21 @@ UserJourney (1:1 with scenario, scenarioId required)
 ```json
 {
   "userJourneys": [{
-    "name": "...", "description": "...", "scenarioId": "...",
+    "name": "...", "platform": "...", "description": "...", "scenarioId": "...",
+    "citations": [{"type": "code", "reference": "<code-node-id>"}],
     "flows": [{
-      "name": "...", "modality": "WEB", "entryPoint": "...", "exitPoint": "...",
+      "name": "...", "platform": "...", "modality": "WEB", "entryPoint": "...", "exitPoint": "...",
       "stepIds": ["..."],
       "pages": [{
-        "name": "...", "pageType": "FORM", "stepIds": ["..."],
+        "name": "...", "platform": "...", "pageType": "FORM", "stepIds": ["..."],
+        "citations": [{"type": "code", "reference": "<code-node-id>"}],
         "components": [
-          { "name": "...", "type": "TEMPLATE", "layoutType": "FLEX", "supportingComponents": ["..."] },
-          { "name": "...", "type": "ORGANISM", "actionIds": ["..."], "supportingComponents": ["..."] },
-          { "name": "...", "type": "ATOM", "supportingComponents": [] }
+          { "name": "...", "platform": "...", "type": "TEMPLATE", "layoutType": "FLEX", "supportingComponents": ["..."],
+            "citations": [{"type": "code", "reference": "<code-node-id>"}] },
+          { "name": "...", "platform": "...", "type": "ORGANISM", "actionIds": ["..."], "supportingComponents": ["..."],
+            "citations": [{"type": "code", "reference": "<code-node-id>"}] },
+          { "name": "...", "platform": "...", "type": "ATOM", "supportingComponents": [],
+            "citations": [{"type": "code", "reference": "<code-node-id>"}] }
         ]
       }]
     }]
@@ -744,9 +865,18 @@ UserJourney (1:1 with scenario, scenarioId required)
 }
 ```
 
+**Per-node citations:** UserJourney, Page, and ALL Component types
+(ORGANISM, MOLECULE, ATOM, TEMPLATE) get a `citations` array. Flow
+does NOT support per-node citations — never add them to flows.
+Cite the source file the node was derived from. Format:
+`{"type": "code", "reference": "<code-node-id>"}` or other types
+(`document`, `exDoc`, `figma`, `jira`, `confluence`, `prompt`).
+
 **Rules:**
 - One `Bulk_Update_Design_Nodes` call PER SCENARIO (not per outcome)
-- Include reused nodes by name — backend dedup handles linking
+- Set `platform` on **EVERY node** — UserJourney, Flow, Page, and Component. Use the value from the OUTCOME `platform` input (defaults to `"default"`). Do NOT omit it on children — the backend uses `projectUuid + name + platform` for dedup (`projectUuid + scenarioId + platform` for UserJourneys), so missing `platform` on any node breaks uniqueness.
+- Include reused nodes by name — backend dedup handles linking (by projectUuid + name + platform)
+- UserJourney names may repeat across personas — the UJ is keyed by its `scenarioId`, so use the scenario name as-is (no persona qualifier)
 - `pageType` and `modality` MUST be UPPERCASE
 - Pages have NO `actionIds` — actions map to Components only
 - Every stepId/actionId must appear in at least one design node
@@ -770,24 +900,17 @@ Before writing/upserting this scenario's payload:
 4. **Template check** — every Page has a TEMPLATE
 5. **supportingComponents minimum** — >= 2 for non-ATOMs
 6. **Pitfall check** — repo names (not invented), UPPERCASE enums, no actionIds on Pages
+7. **Citation check** — UserJourney, Page, and every Component (all types) should have `citations` array. Flow must NOT have citations. Missing citations are a warning (not a blocker) — log but don't fail
+8. **scenarioId uniqueness** — the `scenarioId` on the UserJourney must match this scenario's UUID exactly and must NOT already be present in `processedScenarioIds` (already caught by the loop guard above, but re-verify here as a safety net)
 
 Repair in-place (max 2 passes). If still failing → log error for
 this scenario, continue to next.
 
-### 3e. Write Payload to Disk
+### 3e. Accumulate Scenario Result
 
-Write to `OUTPUT_DIR/design_{slugified_scenario_name}.json`:
-
-```json
-{
-  "scenario": { "id": "...", "name": "..." },
-  "outcomeId": "...",
-  "outcomeName": "...",
-  "payload": { "userJourneys": [...] },
-  "stats": { "flows": N, "pages": N, "components": N },
-  "evidence": "<flow evidence summary>"
-}
-```
+Do NOT write individual files per scenario. Instead, accumulate each
+scenario's result in memory for the single outcome file written in
+Phase 4.
 
 ### 3f. Upsert via MCP
 
@@ -820,43 +943,47 @@ Update_Functional_Node(
 
 ---
 
-## Phase 4: Write Results Manifest & Return Summary
+## Phase 4: Write Outcome File & Return Summary
 
-### 4a. Write Results Manifest
+### 4a. Write Single Outcome File
 
-After processing all scenarios, write a results manifest to
-`OUTPUT_DIR/results_{outcome_name_slug}.json`. The parent reads this
-to update its checkpoint with per-scenario status and stats.
+After processing all scenarios (or on early exit), write ONE file:
+
+`OUTPUT_DIR/design_{outcome_name_slug}.json` (page 1) or
+`OUTPUT_DIR/design_{outcome_name_slug}_p{PAGE}.json` (page 2+)
+
+This is the **only file the sub-agent writes**. It contains everything:
+payloads, status, stats, and evidence for every scenario in this outcome.
+The parent reads this single file to update its checkpoint.
 
 ```json
 {
   "outcomeId": "<outcome UUID>",
   "outcomeName": "<outcome name>",
   "personaName": "<persona name>",
-  "scenarios": [
-    {
-      "id": "scenario-uuid-1",
+  "scenarios": {
+    "scenario-uuid-1": {
       "name": "Login with Email",
       "status": "completed",
-      "payloadPath": "design_login-with-email.json",
-      "flowsCreated": 2,
-      "pagesCreated": 3,
-      "componentsCreated": 12,
-      "completedAt": "2026-08-10T14:30:00Z"
+      "payload": { "userJourneys": [...] },
+      "stats": { "flows": 2, "pages": 3, "components": 12 },
+      "evidence": "<flow evidence summary>",
+      "error": null
     },
-    {
-      "id": "scenario-uuid-2",
+    "scenario-uuid-2": {
       "name": "Social Login",
       "status": "failed",
-      "error": "FAIL_UPSERT · http: 422",
-      "payloadPath": "design_social-login.json",
-      "completedAt": null
+      "payload": { "userJourneys": [...] },
+      "stats": { "flows": 0, "pages": 0, "components": 0 },
+      "evidence": "<flow evidence summary>",
+      "error": "FAIL_UPSERT · http: 422"
     }
-  ],
+  },
   "totals": {
     "scenarios": 5,
     "succeeded": 4,
     "failed": 1,
+    "pending": 0,
     "flows": 8,
     "pages": 10,
     "components": 34
@@ -865,35 +992,46 @@ to update its checkpoint with per-scenario status and stats.
 ```
 
 **Rules:**
-- Write the manifest AFTER all scenarios are processed (or attempted)
-- Every scenario in `SCENARIOS` input must appear in the manifest
-- `status` is `completed`, `failed`, or `pending` (only on `BUDGET` early exit)
-- `payloadPath` is relative to `OUTPUT_DIR`
-- `error` is null for succeeded scenarios, error string for failed ones
-- `totals` aggregates across all SUCCEEDED scenarios only
+- **One file per sub-agent run** — no separate results manifest, no per-scenario files
+- `scenarios` is keyed by scenario UUID (not an array)
+- Every scenario fetched in Phase 0b must appear
+- `status`: `completed`, `failed`, or `pending` (only on `BUDGET` early exit)
+- `payload` is always present (even for failed — preserves partial work for debugging)
+- `error` is null for succeeded, error string for failed
+- `totals` aggregates across SUCCEEDED scenarios only
 
 ### 4b. Return Summary Line
 
 Return ONLY a single summary line. Nothing else after this line.
 
-**Success (all scenarios succeeded):**
+**Success — all scenarios on this page succeeded, no more pages:**
 ```
-OK · outcome: "<outcomeName>" · scenarios: <N>/<total> · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
+OK · outcome: "<outcomeName>" · page: <N> · scenarios: <N>/<total> · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
 ```
 
-**Partial success (some failed):**
+**Success — all scenarios on this page succeeded, MORE pages exist:**
 ```
-PARTIAL · outcome: "<outcomeName>" · succeeded: <N> · failed: <N> (<names>) · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
+HAS_MORE · outcome: "<outcomeName>" · page: <N> · processed: <N> · nextPage: <N+1> · total: <totalScenarios> · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
+```
+
+> **When to return `HAS_MORE`:** After Phase 0b, if `pagination.hasMore`
+> is `true`, process all scenarios on this page normally, then return
+> `HAS_MORE` instead of `OK`. The parent will spawn a new sub-agent
+> for the next page.
+
+**Partial success (some failed on this page):**
+```
+PARTIAL · outcome: "<outcomeName>" · page: <N> · succeeded: <N> · failed: <N> (<names>) · hasMore: <true|false> · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
 ```
 
 **Context budget reached (early exit):**
 ```
-BUDGET · outcome: "<outcomeName>" · completed: <N> · pending: <N> (<names>) · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
+BUDGET · outcome: "<outcomeName>" · page: <N> · completed: <N> · pending: <N> (<names>) · flows: <N> · pages: <N> · components: <N> · dir: <OUTPUT_DIR>
 ```
 
 **Total failure:**
 ```
-FAIL · outcome: "<outcomeName>" · reason: <reason> · dir: <OUTPUT_DIR>
+FAIL · outcome: "<outcomeName>" · page: <N> · reason: <reason> · dir: <OUTPUT_DIR>
 ```
 
 ---
@@ -914,3 +1052,4 @@ FAIL · outcome: "<outcomeName>" · reason: <reason> · dir: <OUTPUT_DIR>
 11. **Angular: read BOTH .ts AND .html** — never skip the template file
 12. **Angular: use PascalCase class name** — not kebab selector
 13. **Context budget** — after each scenario, check if ~75% consumed; if so, write manifest with pending scenarios and return `BUDGET` summary line
+14. **Fetch stepsActions in Phase 0b** — run `fetch_steps_actions.py` via Bash BEFORE Phase 1. Use `stepId` values on Flows/Pages `stepIds[]` and `actionId` values on Components `actionIds[]`. Every stepId and actionId MUST appear in at least one design node. If a scenario has empty `stepsActions`, mark it as failed — do NOT proceed without linkage

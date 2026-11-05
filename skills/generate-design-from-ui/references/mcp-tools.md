@@ -5,22 +5,24 @@
 | Tool | Purpose |
 |---|---|
 | `Get_scenarios_by_uuid` | Fetch scenarios with pagination and filtering |
-| `Get_all_steps_actions_for_a_scenario_id` | Fetch steps + actions for one scenario |
 | `Functional_Graph_Search` | Search for matching scenarios |
+
+> **Steps/actions** are fetched via `fetch_steps_actions.py` (REST API
+> with api-key), not via MCP. See Phase 0b in the sub-agent.
 
 ## Design Graph Query Tools
 
 | Tool | Purpose |
 |---|---|
-| `Get_all_Design_By_Label` | Paginate existing design nodes by type |
+| `Get_Design_Nodes_By_Label` | Paginate existing design nodes by type, or fetch by id / relationship via `filters` (`{"id": {"$in": [...]}}`, `{"flowIds": "<flow id>"}`) |
 | `Design_Graph_Search` | Semantic search for dedup |
-| `Get_Design_Nodes_by_Ids` | Query nodes by relationships |
 
 ## Mutation Tools
 
 | Tool | Purpose |
 |---|---|
 | `Bulk_Update_Design_Nodes` | **PRIMARY** — create entire UserJourney tree per scenario |
+| `Create_Design_Node` | Create a single node with per-node citations (not idempotent — 400 on duplicate name; for a UserJourney with `scenarioId`, 400 when that scenario already has a UJ on the platform) |
 | `Update_Design_Node` | Update metadata fields on existing nodes |
 | `Update_Functional_Node` | Mark scenario as processed (`isDesignGenerated=true`) |
 | `Delete_Design_Node` | Remove nodes when replacing |
@@ -32,8 +34,7 @@
 | Tool | Parameter | Correct Name | Wrong Names |
 |---|---|---|---|
 | All Breeze MCP tools | Project ID | `uuid` | `projectId`, `projectUuid` |
-| `Get_all_Design_By_Label` | Node label | `label` | `parameters0_Value` |
-| `Get_all_steps_actions_for_a_scenario_id` | Scenario ID | `parameters0_Value` | `scenarioId`, `id` |
+| `Get_Design_Nodes_By_Label` | Node label | `label` | `parameters0_Value` |
 
 ---
 
@@ -72,7 +73,7 @@ END LOOP
 `Bulk_Update_Design_Nodes`** — one call per scenario. Never batch
 multiple scenarios in one call.
 
-**Backend dedup:** Nodes are matched by `projectUuid + name`
+**Backend dedup:** Nodes are matched by `projectUuid + name + platform`
 (case-insensitive). If existing, new parent edges are created and
 parent ID arrays (`userJourneyIds[]`, `flowIds[]`, `pageIds[]`) are
 appended to. No `Update_Design_Node` calls needed for linking.
@@ -86,3 +87,23 @@ registry update (Step 6d) is sufficient since dedup is by name.
 
 **Mark processed:** `Update_Functional_Node` with
 `isDesignGenerated: true` after successful upsert.
+
+---
+
+## Citation Placement (Design Graph)
+
+Per-node `citations` arrays are supported on **UserJourney**, **Page**,
+and **Component** nodes. Each node's citations are resolved individually
+and merged with the top-level `citations` (which apply as a shared
+default to every node). **Flow does not support per-node citations**
+(derived structure — no distinct source artifact).
+
+| Level | Per-node `citations`? | Typical source |
+|---|---|---|
+| **Component** | yes — primary | the component file / Figma component |
+| **Page** | yes | the route definition file |
+| **UserJourney** | optional | a design doc or Figma board |
+| Flow | no | derived structure, no distinct artifact |
+
+Citation format: `{"type": "code", "reference": "<code-ontology-node-id>"}`.
+Other types: `document`, `exDoc`, `figma`, `jira`, `confluence`, `prompt`.

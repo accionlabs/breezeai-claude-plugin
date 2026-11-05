@@ -10,6 +10,120 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+### Added
+- `onboard-project` skill: end-to-end onboarding orchestrator. Plans a workspace (`.breeze/plan.json` + `plan.log.jsonl`),
+  onboards the code graph, classifies units (SPA, service, Web Forms, MVC, metadata, shared library, schema, infra,
+  unsupported), routes each to its skill, and runs personas → functional → join + validate → design, with architecture
+  in parallel. Resumes from the first unfinished step after a stop or stall; checks persona descriptions, duplicate
+  outcomes and design flags between steps.
+- `onboard-project` interactive vs `--autonomous` modes with approval gates G1–G7 (repos, ignore patterns, git
+  integration + token collection without pasting tokens, units, personas, functional validation, design
+  validation); `scripts/plan.py` (single writer of the plan, atomic, logged) and `scripts/join.py` (live-graph
+  UI ↔ System join: method + path, verb-agnostic MVC actions, NO HANDLER code findings). Learned from an autonomous
+  end-to-end HotDocs run: run groups, `job` unit type for console/worker programs, MVC classification signals,
+  canonical `/<app>/<controller>/<action>` URLs for multi-app solutions, working copies under `.breeze/src/`,
+  per-group output dirs, sub-agent-type preflight with general-purpose fallback, design exclusions from validation,
+  optional document upload (P1b), `.breeze/report.md`.
+- `onboard-repository/scripts/git_onboard.py` (`preview` shows what built-ins + patterns exclude; `--token-file`): discover GitHub orgs / GitLab groups, fetch file lists for ignore
+  proposals, connect repos via `POST /code-ontology/generate-from-git`, poll `GET /code-ontology` status, and retry
+  errored / stalled ingests via `POST /code-ontology/sync/:id` (a 409 means the ingest is still alive). State in
+  `.breeze/onboarding/repos.json`, events in `log.jsonl`.
+- `generate-page-registry` skill: scans the router, names each page (no "Page" suffix) and types it LIST / DETAIL /
+  FORM / DASHBOARD, and writes `existingpages.json` keyed `name|pageType|modality` for `generate-design-from-ui`.
+  Scans every route, or only the screens of an outcome or chosen scenarios; merge mode keeps node IDs; citations
+  from the code graph when a project is linked.
+
+### Changed
+- `onboard-repository` rewritten: git link (server-side sync, ignore patterns stored per repo) is the default mode,
+  local COG runs remain; accepts one repo, a list, an org / group or a monorepo; triage for large estates; one ignore
+  proposal per batch; template-capture check for UI repos; status polling, retries and a light audit after ingest;
+  resumable state. Docs no longer require `--capture-statements` (on by default in COG).
+- `code-ontology-audit-check`: templates are indexed when captured; check ingest status before auditing.
+- README pipeline and `breeze-skill-routing` point brownfield onboarding at `onboard-project`.
+
+### Removed
+- `update-repo-ignore` skill — its catalogue is now `onboard-repository/references/ignore-catalog.md`, applied on
+  every onboarding (it was never called by any other skill).
+
+## [3.12.1] — 2026-10-29
+
+### Changed
+- `generate-functional-from-backend` sets `platform` on every Outcome like the UI skills: `functionalGraph.platform`,
+  else `designGraph.platform.id`, else a name confirmed once (suggesting the repo name, or the UI it serves) and saved
+  to `.breeze.json`, so UI and backend runs on one application share it. It no longer falls back to `"default"`.
+
+## [3.12.0] — 2026-10-29
+
+### Changed
+- UserJourneys are keyed by `projectUuid + scenarioId + platform` to match the backend (BREEZEAI-1436): two personas'
+  same-named scenarios each keep their own UJ. `generate-design-from-ui`, `update-design-from-diff` and the
+  design-from-ui agent drop the `"{Scenario} for {Persona}"` naming workaround and describe the new dedup rule.
+- `generate-functional-from-ui` and `generate-functional-from-aspnet-webforms` set `platform` on every Outcome to the
+  UI application's platform name: `functionalGraph.platform`, else `designGraph.platform.id`, else the app's name,
+  confirmed once and saved to `.breeze.json`. They no longer fall back to `"default"`.
+
+### Fixed
+- `validate-design-graph` no longer flags same-named UJs of different personas as duplicates, and its duplicate-scenarioId
+  check groups by `(scenarioId, platform)`, so one scenario designed on two platforms is no longer a P0.
+
+## [3.11.0] — 2026-10-22
+
+### Changed
+- Skills use the four consolidated Data Lake schema MCP tools (BREEZEAI-1279): `Get_DataLake_Schema_Nodes`,
+  `Create_DataLake_Schema_Node`, `Update_DataLake_Schema_Node`, `Delete_DataLake_Schema_Node`. They replace the 26
+  per-entity tools (`Create_DB_Schema_*`, `Get_DB_Schema_Nodes_By_Label`, `Get_ES_Nodes_By_Label`,
+  `List_NoSQL_Collections`, the ES / NoSQL create-update-delete tools). Labels are the graph labels (`DDLTable`,
+  `DDLColumn`, `ESIndex`, `NoSQLCollection`, …); `parent_id` narrows a listing to one table, ES index or collection.
+  Needs breezeai-mcp-backend with BREEZEAI-1279 deployed.
+- Design reads use `Get_Design_Nodes_By_Label`, which replaces `Get_all_Design_By_Label` and `Get_Design_Nodes_by_Ids`
+  (fetch by id with `filters={"id": {"$in": [...]}}`); `design-from-ui-structuring-agent`'s tool list is updated.
+- MCP tool cleanup in the same release: `Create_Master_Citation` replaces the deprecated
+  `Call_Create_Citation_Functional_`, the old citation aliases and `Get_Code_File_Details` are removed. No skill used them.
+
+## [3.10.2] — 2026-10-15
+
+### Changed
+- `impact-analysis` Step 2.3 maps the top hits' files with `Get_Code_Nodes_By_Label(children=false)` (names and line
+  ranges, no bodies) and keeps `children=true` for the 1–3 pinpointed Functions/Classes. It now says to always pass
+  `children` explicitly and what each value returns. On a large C# file the lean map was 22 KB against 5.1 MB.
+
+### Fixed
+- `impact-analysis` no longer tells the model to fall back to `embedText` on code nodes, which the API does not return.
+
+## [3.10.1] — 2026-10-15
+
+### Changed
+- `breeze-plugin-skills.qmd`: the skills overview names `Get_Code_Nodes_By_Label` instead of the retired File-only
+  `Get_Code_File_Details` (tool table, routing notes, architecture walkthrough). BREEZEAI-363.
+
+## [3.10.0] — 2026-09-28
+
+`impact-analysis` and `search` brought up to date with the Breeze MCP tools, checked against a live project (BreezeAI_V1)
+and graded on four tickets. `generate-architecture` reads the new DataLake `schemaSummary`.
+
+### Added
+- **Exact-text sweep** (`impact-analysis`, `search`): `Get_Functional_Nodes_By_Label(label="Action",
+  filters={"embedText": {"$containsi": "<noun>"}})` finds every action that names a field, screen or entity, with its full
+  ancestry. Count first (`limit=1`), fetch only when 60 or fewer; narrow by persona with a `$regexi` on the same field;
+  count again after narrowing and fall back to scenario names.
+- **Design coverage lookup:** `Get_all_Design_By_Label` filtered by `stepIds` / `actionIds` finds the page, flow or
+  component that already covers a step or action; stops after a few empty lookups.
+- **DataLake `schemaSummary` / `schemaTools`** (backend #745): read before any schema lookup — skip lakes with `{}`, pick
+  the tool by family, answer "which stores have schema and how big" in one call. `generate-architecture` checks the target
+  lake is empty before ingesting and verifies table / column totals from it.
+- **Elasticsearch and NoSQL stores:** `Get_ES_Nodes_By_Label` (`es-index` / `es-field` / `es-alias`) and
+  `List_NoSQL_Collections`, where only relational schema was covered before.
+
+### Fixed
+- **Data Layer section never produced** (`impact-analysis`): Stage 1 searched `DDLColumn` / `DDLConstraint` / `DDLIndex`,
+  which have no embedding and are refused, so it always fell under the 3-hit gate. It now lists with
+  `Get_DB_Schema_Nodes_By_Label` by name; the gate is "matched at least one table or column" everywhere; every Stage 1
+  table gets its columns listed (tables carry no `ddlText`); an empty DataLake `pattern` counts as application-owned.
+- **Search routing** (`search`): column / constraint / index / sequence questions went to unsearchable labels; routes are
+  found in `Function.decorators`, not Statement text; single-layer questions no longer fan out to all five layers.
+- `Get_Architecture_Nodes_By_Label` is called with `limit=100` (the default page is 10 and cuts layers off silently).
+- A failed `Call_List_Repositories_` no longer stalls a run: repo ids come from `Code_Graph_Search` hits.
+
 ## [3.9.0] — 2026-07-29
 
 Metadata pass: three silent-failure modes found while regenerating a ~100-repo Vert.x/MAPL tree.

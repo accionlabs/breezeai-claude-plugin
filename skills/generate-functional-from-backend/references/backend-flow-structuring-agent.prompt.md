@@ -34,6 +34,7 @@ REPO:
   root:                {{repo_root_absolute_path}}
 PROJECT_UUID:          {{project_uuid}}
 PROJECT_NAME:          {{project_name}}
+PLATFORM:              {{platform}}
 LLM_PLATFORM:          {{llm_platform}}
 OUTPUT_PATH:           {{output_path}}
 API_BASE:              {{api_base}}

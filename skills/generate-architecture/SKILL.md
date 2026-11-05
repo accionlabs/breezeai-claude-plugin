@@ -181,7 +181,11 @@ Skip if `--no-schema`, or if no schema sources were detected. **Read `references
 The essentials, in order:
 
 1. **The DataLake node must exist first** — commit it (Phase 7 order puts DataLake before this,
-   or create it now) and capture its `id` as `dataLakeId`.
+   or create it now) and capture its `id` as `dataLakeId`. **Check it is empty:** read its
+   `schemaSummary` (`Get_Architecture_Nodes_By_Label(label="DataLake")` returns it on every lake —
+   counts by family, e.g. `{"relational": {"tables": 87, "columns": 681}}`; `{}` = nothing ingested).
+   A lake that already holds schema is not ingested into again: ask whether to re-ingest into a
+   **fresh DataLake** (§9) or skip this lake.
 2. **Test one file as-is first** (§3). If it returns objects, no preprocessing needed. If it
    returns `tables=0` / `422`, apply the transforms — strip comments, unwrap guard blocks,
    drop procedural noise, normalise `;` separators — then re-test the same file before
@@ -193,7 +197,7 @@ The essentials, in order:
    so the 1000-char cap carries logic, not the signature.
 5. **Verify** (§9) — the 202 is only a parse receipt; nodes land ~10 s later.
 
-> ⛔ **Never loop `Create_DB_Schema_Column`.** Per-object column writes trigger a server-side
+> ⛔ **Never loop `Create_DataLake_Schema_Node(label="DDLColumn")`.** Per-object column writes trigger a server-side
 > re-embed of the table *and every column already on it* (O(n²)) — it stalls, and it cannot
 > create FK edges at all. Bulk is the only correct path for tables/columns.
 

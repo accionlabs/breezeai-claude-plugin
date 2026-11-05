@@ -71,7 +71,7 @@ Comparison Dimensions
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
 > `projectUuid`). Pass the resolved `projectUuid` value as `uuid`.
 >
-> **Design-by-label hint:** When calling `Get_all_Design_By_Label`, pass
+> **Design-by-label hint:** When calling `Get_Design_Nodes_By_Label`, pass
 > the node label as **`label`** (e.g., `label: "Component"`), NOT as
 > `parameters0_Value`.
 
@@ -108,7 +108,7 @@ Choose 1 or 2:
 ### 1a. Fetch All Components (Paginated)
 
 Fetch **all** components from the design graph by paginating through
-`Get_all_Design_By_Label`:
+`Get_Design_Nodes_By_Label`:
 
 ```
 allComponents = []
@@ -116,7 +116,7 @@ page = 1
 limit = 50
 
 LOOP:
-  1. Call Get_all_Design_By_Label(
+  1. Call Get_Design_Nodes_By_Label(
        uuid: <projectUuid>,
        label: "Component",
        page: "<page>",

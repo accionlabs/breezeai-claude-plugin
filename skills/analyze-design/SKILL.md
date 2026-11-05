@@ -25,6 +25,23 @@ argument-hint: "[ui-repo-path]"
 
 This skill is project-bound — it needs a `projectUuid`. Resolve it per `CLAUDE.md` at the plugin root: a `--project <name|uuid>` flag, a bare UUID, or a natural-language project hint in the prompt → otherwise the `projectUuid` in `.breeze.json`. A per-invocation override applies to that invocation only and must NOT mutate `.breeze.json`. If no project resolves, list accessible projects via `Call_List_Project_` and ask the user to pick (or run `/breeze:project setup`). Announce the active project on the first response line: `Project: <name> (<uuid>)`. Auth handling on Breeze MCP 401s is also covered in `CLAUDE.md` (point the user at `/breeze:project auth`).
 
+### Resolve platform config
+
+Read `designGraph.platform` from `.breeze.json` (same config as
+`generate-design-from-ui`):
+
+- If present → set `PLATFORM_ID = designGraph.platform.id` (e.g. `"source-web"`)
+  and `APP_SUFFIX = designGraph.platform.suffix` (e.g. `" [Source Web]"`)
+- If absent → set `PLATFORM_ID = ""`, `APP_SUFFIX = ""`
+
+When `APP_SUFFIX` is set:
+- Append it to every design node name before upserting
+- Filter `Get_Design_Nodes_By_Label` / `Design_Graph_Search` results to only
+  nodes ending with `APP_SUFFIX`
+- Set `platform` on UserJourney to `PLATFORM_ID` (children inherit)
+
+When absent, omit `platform` (backend defaults to `"default"`).
+
 ### Resolve UI repo (optional but strongly preferred)
 
 When a frontend repo is available, this skill reads the codebase to discover
@@ -65,7 +82,7 @@ says "skip" or no repo is found, set `uiRepoAvailable = false` and continue.
 > It maps to `filters[id][$eq]` on the backend. Using any other name fails
 > with `Required → at parameters0_Value`.
 >
-> **Design-by-label hint:** When calling `Get_all_Design_By_Label`, pass
+> **Design-by-label hint:** When calling `Get_Design_Nodes_By_Label`, pass
 > the node label as **`label`** (e.g., `label: "Component"`), NOT as
 > `parameters0_Value`. The `parameters0_Value` naming is specific to
 > `Get_all_steps_actions_for_a_scenario_id` — do not generalize it. Using
@@ -468,10 +485,10 @@ LINK instead of duplicating.
 
 Build the reuse registries once for this run (not per-scenario):
 
-- **Flow registry** — `Get_all_Design_By_Label(label: "Flow")`,
+- **Flow registry** — `Get_Design_Nodes_By_Label(label: "Flow")`,
   indexed by `(name, modality, routeSignature)` where
   `routeSignature` is the ordered list of route paths in the flow
-- **Page registry** — `Get_all_Design_By_Label(label: "Page")`,
+- **Page registry** — `Get_Design_Nodes_By_Label(label: "Page")`,
   indexed by `(name, pageType, modality, routePath,
 designSystemRef)`
 
@@ -595,20 +612,20 @@ Query existing design nodes to find what's already mapped:
 
 **Flow Registry:**
 
-If not already cached from Step 1.5d, query `Get_all_Design_By_Label`
+If not already cached from Step 1.5d, query `Get_Design_Nodes_By_Label`
 (label=`Flow`). Index by `(name, modality)` AND `routeSignature`. Used
 in Step 3b to avoid duplicating flows across scenarios.
 
 **Page Registry:**
 
-If not already cached from Step 1.5d, query `Get_all_Design_By_Label`
+If not already cached from Step 1.5d, query `Get_Design_Nodes_By_Label`
 (label=`Page`). Index by `(name, pageType, modality)` AND
 `(routePath, modality)`. Used in Step 3b to avoid duplicating pages
 across scenarios.
 
 **Component Registry:**
 
-Query `Get_all_Design_By_Label` (label=`Component`). Search by name,
+Query `Get_Design_Nodes_By_Label` (label=`Component`). Search by name,
 `designSystemRef`, or `componentType` to find existing components for reuse.
 Used in Step 3c for component reuse decisions — reuse if found, create new
 if not.
@@ -708,7 +725,7 @@ when multiple scenarios reference it.
 
 ### 3c. Component Reuse Resolution (REUSE FIRST)
 
-> **Always search existing components via `Get_all_Design_By_Label(label: "Component")`
+> **Always search existing components via `Get_Design_Nodes_By_Label(label: "Component")`
 > or `Design_Graph_Search` before creating any component.**
 
 Walk this priority order, stop at the first match:
@@ -748,7 +765,7 @@ current scenario, apply this for each Page:
    name from its structure (e.g., `SettingsPageLayout`). Never name a template
    after a specific page — use the layout pattern name.
 
-2. **Search existing TEMPLATEs** via `Get_all_Design_By_Label(label: "Component")`
+2. **Search existing TEMPLATEs** via `Get_Design_Nodes_By_Label(label: "Component")`
    or `Design_Graph_Search` for a TEMPLATE with the matching `designSystemRef`.
    If found → REUSE it (do not create a duplicate). Add the Page's ORGANISMs
    to its `supportingComponents` if not already present.
@@ -822,6 +839,11 @@ TEMPLATE already exists (reused), omit it from the payload.
 - **Component supportingComponents** — ORGANISM → MOLECULE/ATOM, MOLECULE → ATOM, ATOM → `[]`
 - **Reused components** — include with `designSystemRef`; backend deduplicates via upsert
 - **Multi-modality** — separate Flow entries per modality under the same UserJourney
+- **Per-node citations** — UserJourney, Page, and Component accept a `citations` array (merged with top-level). Flow does NOT support per-node citations. Cite the source artifact each node was derived from:
+  - **From Figma:** `{"type": "figma", "reference": "<figma-frame-url>"}`
+  - **From Jira:** `{"type": "jira", "reference": "<issue-key>"}`
+  - **From code:** `{"type": "code", "reference": "<code-node-id>"}` (look up via `Code_Graph_Search`)
+  - Skip if no source artifact exists for a node — do NOT block the upsert
 
 ### 5c. Make the Call
 
