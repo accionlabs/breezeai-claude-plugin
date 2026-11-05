@@ -19,12 +19,9 @@ applies before executing ANY project-bound Breeze skill or breeze-mcp tool:
      Do NOT hard-error — many prompts simply omit a project hint.
 2. **Announce** the active project: begin the response with `Project: <name> (<uuid>)`.
 
-**No `apiKey` requirement for MCP.** MCP tool calls authenticate via Keycloak
-OAuth — Claude Code handles sign-in automatically and does not read `apiKey` from
-`.breeze.json`. On a 401, point the user at `/breeze:project auth`. The stored
-`apiKey` is used ONLY by non-MCP consumers (the ontology-generator CLI in
-automatic mode and the REST `/functional-graph/v2/upsert` path); those skills prompt
-for it on-demand.
+**No `apiKey` requirement.** MCP tool calls authenticate via Keycloak OAuth —
+Claude Code handles sign-in automatically and does not read `apiKey` from
+`.breeze.json`. On a 401, point the user at `/breeze:project auth`.
 
 **Exception:** Skip project resolution for the exempt modes —
 `/breeze:project setup | auth | list | create` (they create `.breeze.json` or

@@ -11,52 +11,14 @@ When the user asks about Breeze capabilities or wants to perform a Breeze task, 
 |---|---|
 | First-time setup, init, bootstrap | `/breeze:project setup` |
 | Show / list / switch / create project, re-auth | `/breeze:project [show \| list \| use <name> \| create <name> \| auth \| status]` |
-| Onboard a whole project / estate end to end, resume onboarding, "what's next" | `/breeze:onboard-project` |
-| Connect / upload / onboard repos (one, a list, a GitHub org, a GitLab group), fix `.repoignore` noise | `/breeze:onboard-repository` |
-| Deep audit of one repo's code graph | `/breeze:code-ontology-audit-check` |
 | Search features, code, "how does X work" | `/breeze:search` |
 | Impact analysis, blast radius, "what breaks if X" | `/breeze:impact-analysis` |
-| Analyze a requirement, check coverage | `/breeze:analyze-functional` |
-| Check architecture impact | `/breeze:analyze-architecture` |
-| Generate architecture graph from a spec doc | `/breeze:generate-architecture` |
-| Analyze a Figma design | `/breeze:analyze-design` |
-| Generate functional graph from frontend | `/breeze:generate-functional-from-ui` |
-| Generate functional graph from backend | `/breeze:generate-functional-from-backend` |
-| Detect personas from UI code | `/breeze:detect-personas` |
-| Add/update nodes in functional graph | `/breeze:update-functional-graph` |
-| Incremental functional + design update from git diff | `/breeze:update-functional-from-diff` |
-| Incremental design graph update from git diff | `/breeze:update-design-from-diff` |
-| Validate graph quality | `/breeze:validate-functional-graph` |
-| Generate code from graph | `/breeze:generate-code` |
-| Export functional spec document | `/breeze:generate-spec` |
-| Convert designs to user stories | `/breeze:visual-to-text` |
-| Generate design graph from functional | `/breeze:generate-design` |
 
-## Recommended Pipelines
+## Recommended Pipeline
 
-**Brownfield (existing code):**
-1. `/breeze:project setup`
-2. `/breeze:onboard-project` — runs and tracks the rest:
-   onboard-repository (all repos) → units + routing → personas → functional per unit →
-   join + validate-functional-graph → design (UI units) → validate-design-graph;
-   generate-architecture in parallel
-3. `/breeze:generate-spec`
-
-**Incremental update (after commits):**
-1. `/breeze:update-functional-from-diff <prev-sha> <current-sha>`
-2. `/breeze:update-design-from-diff <prev-sha> <current-sha>` (design-only, deeper)
-
-**Greenfield (from designs/docs):**
-1. `/breeze:project setup`
-2. `/breeze:visual-to-text` (Figma/PDF/images)
-3. `/breeze:analyze-functional` (requirement documents)
-
-**New feature:**
-1. `/breeze:impact-analysis` (cross-layer blast radius)
-2. `/breeze:analyze-functional`
-3. `/breeze:analyze-architecture`
-4. `/breeze:update-functional-graph`
-5. `/breeze:generate-code`
+1. `/breeze:project setup` — link the repo to a Breeze project
+2. `/breeze:search` — explore the functional, design, code and architecture graphs
+3. `/breeze:impact-analysis` — cross-layer blast radius for a proposed change
 
 ## Project targeting
 

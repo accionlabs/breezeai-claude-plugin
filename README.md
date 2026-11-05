@@ -1,6 +1,6 @@
 # Breeze Plugin for Claude Code
 
-A Claude Code plugin that integrates with the Breeze AI platform for functional graph management, code analysis, design analysis, and requirement tracing.
+A Claude Code plugin that integrates with the Breeze AI platform for searching the functional, design, code, and architecture graphs and running cross-layer impact analysis.
 
 ## Quick Start
 
@@ -52,28 +52,18 @@ This walks you through:
 - Authenticating the Breeze MCP (browser-based Keycloak sign-in; no API key to paste)
 - Linking to an existing Breeze project or creating a new one
 - Checking ontology status
-- Pointing you at the right follow-up skill (onboard-repository,
-  generate-functional-from-*, etc.)
 
 The Keycloak token lasts roughly **7 days** from the last sign-in; after that any
 `/breeze:*` skill will prompt you to re-run `/breeze:project auth`.
 
-No API key is required at this stage — MCP-based skills authenticate
-via Keycloak OAuth automatically. `/breeze:onboard-repository` only
-needs an API key if you pick its **automatic upload** mode; the
-**manual upload** mode generates ndjson locally and you upload via
-the Breeze UI at `<uiBaseUrl>/code-ontology/<projectUuid>`. The
-retired `/breeze:deprecated-cluster-pipeline` still needs a key if
-you're resuming a historical run. In all cases the relevant skill
-prompts on-demand and points you at `<uiBaseUrl>/mcp/generate/key`
-if you don't have a key yet.
+No API key is required — every skill in this plugin talks to Breeze over MCP and
+authenticates via Keycloak OAuth automatically.
 
 `<uiBaseUrl>` resolves from `breeze.config.json` at the plugin root
 (default `https://ai.accionbreeze.com`). Override per-project by
 setting `uiBaseUrl` in `.breeze.json`.
 
-Your project UUID (and, once collected, your API key) is saved to
-`.breeze.json` in the project root (gitignored).
+Your project UUID is saved to `.breeze.json` in the project root (gitignored).
 
 ### Updating the plugin
 
@@ -88,87 +78,25 @@ Then **restart Claude Code** again so the updated skills/hooks/MCP definitions a
 
 ## Available Skills
 
-### Project management & setup
-
 | Skill | Command | Description |
 |-------|---------|-------------|
-| **Project** | `/breeze:project [show \| list \| use <name> \| create <name> \| auth \| status \| setup]` | Canonical home for all project management. Sub-modes: `show` (active project), `list` (all accessible), `use <name\|uuid>` (switch and persist), `create <name> [--desc "..."]` (create and link), `auth` (re-authenticate MCP), `status` (full metadata report), `setup` (full bootstrap = auth + link/create + ontology check). No API key collected here (MCP uses Keycloak OAuth); does **not** upload repos or documents. |
-| **Onboard Project** | `/breeze:onboard-project [start \| status \| next \| rerun <step>] [--autonomous]` | End-to-end onboarding orchestrator for one repo, a monorepo or hundreds of services. Onboards the code graph, classifies units (SPA, service, Web Forms, MVC, metadata, shared library, schema, infra, unsupported), routes each to the right skill, and runs personas → functional → join + validate → design, with architecture in parallel. Interactive approval gates (repos, ignore patterns, git integration + tokens, units, personas, functional and design validation) or `--autonomous` (decides and logs every gate). Resumable plan in `.breeze/plan.json` + event log (`scripts/plan.py`); UI ↔ System join report (`scripts/join.py`). |
-| **Onboard Repository** | `/breeze:onboard-repository [repo path \| repo URL \| org/group \| list] [--local]` | Gets code into the Breeze code graph. **Git link** (default): connects GitHub / GitLab / Bitbucket / Azure DevOps repos, parsed server-side with ignore patterns stored per repo. **Local**: runs `breezeai-cog` via `uvx` (template capture for UI repos) and uploads. Discovers whole orgs/groups, triages, proposes ignore patterns (vendored libraries, generated code, …), polls ingest status, retries errored/stalled syncs and audits the result. Resumable state in `.breeze/onboarding/`. Replaces `update-repo-ignore`. |
-
-### Search & analysis
-
-| Skill | Command | Description |
-|-------|---------|-------------|
+| **Project** | `/breeze:project [show \| list \| use <name> \| create <name> \| auth \| status \| setup]` | Canonical home for all project management. Sub-modes: `show` (active project), `list` (all accessible), `use <name\|uuid>` (switch and persist), `create <name> [--desc "..."]` (create and link), `auth` (re-authenticate MCP), `status` (full metadata report), `setup` (full bootstrap = auth + link/create + ontology check). No API key collected here — MCP uses Keycloak OAuth. |
 | **Search** | `/breeze:search <query>` | Smart-search across functional, design, code, and architecture graphs — routes to one graph, a subset, or all based on query intent. Default entry point for any question about the project. |
 | **Impact Analysis** | `/breeze:impact-analysis [--detailed] <prompt>` | Structured cross-layer impact analysis (functional → design → code → architecture). Summary by default; `--detailed` emits a full document with Mermaid request-path / async-tail diagrams, per-ontology marker tables, a structured risk taxonomy, a QA test plan, schema-side (DDL) impact with a 🔴/🟡/🟢 verdict, and deploy-coordination notes. Accepts `--project <name\|uuid>`. |
-| **Analyze Functional** | `/breeze:analyze-functional` | Analyze a requirement against the existing functional graph — coverage gaps, conflicts, dependencies, impact |
-| **Analyze Architecture** | `/breeze:analyze-architecture` | Analyze a requirement against the architecture graph — impacted layers and components across 8 architecture layers |
-| **Generate Architecture** | `/breeze:generate-architecture [spec-doc] [--iac <tf-path>]` | Generate the **full** 8-layer architecture ontology from an architecture spec document (PDF/markdown/image/diagram). Maps every component to exactly one layer, dedups against the existing graph, and commits via `Create/Update_Architecture_Node`. Grounding modes: **doc-only** or **code-grounded** (verifies claims and attaches `code_ontology_id` when repos are onboarded). Optional **`--iac <terraform-path>`** parses HCL directly to derive the deployed topology (services, gateways, queues, data stores, infra) — the code graph can't index Terraform, so this is a filesystem read. |
-| **Analyze Design** | `/breeze:analyze-design <Figma URL>` | Analyze UI/UX designs from Figma frames — functional summary, components, mapping to the functional graph, gap flags |
 
-### Generate functional graph from a repo
+Both `search` and `impact-analysis` are read-only — they query the Breeze graphs
+and never write nodes back.
 
-The recommended approach is the **split pipeline** — one pass for the UI and one for each backend repo. The two passes are independent and merge automatically by outcome name in the functional graph.
-
-| Skill | Command | Description |
-|-------|---------|-------------|
-| **Generate Functional from UI** | `/breeze:generate-functional-from-ui [repo-path]` | **Recommended for frontend repos.** Reads the UI codebase from the filesystem (Glob/Read/Grep), discovers routes + non-routed panels, and generates the **User-persona** side of the functional graph with full JSX coverage validation and API endpoints captured in `action.apis[]`. **Stack-aware:** SPA (React/Vue/Angular/Next) **and ASP.NET Web Forms (`.aspx`)** — for Web Forms it reads markup + code-behind + the SOAP service-proxy and captures the operation as the API (`type: SOAP`). Persona discovery and panel discovery are both hard gates with user confirmation. |
-| **Generate Functional from Backend** | `/breeze:generate-functional-from-backend [repo-path]` | **Recommended for backend repos.** Detects the framework (LoopBack/NestJS/Express/Fastify/Spring/FastAPI/etc.) and discovers ALL entry-point types: REST routes, SQS/Kafka/RabbitMQ consumers and producers, cron workers, WebSocket handlers, webhook receivers, and internal service-to-service routes. Writes **System** / **External System** persona scenarios with side effects captured in `apis[]` (REST/GraphQL/gRPC/WebSocket/Event), plus a per-repo handoff log used for cross-repo producer/consumer correlation. Run once per backend repo. |
-| **Deprecated Cluster Pipeline** *(do not use)* | `/breeze:deprecated-cluster-pipeline` | **Retired v1 cluster pipeline.** Kept only so historical in-progress runs can be resumed. The DBSCAN clustering step duplicates scenarios under realistic repo layouts, which is why this skill was retired. For all new work, use `/breeze:generate-functional-from-ui` and `/breeze:generate-functional-from-backend` above. |
-
-Both new skills resolve their target repo in this order: explicit path arg → `targetRepos.frontend` / `targetRepos.backend.<name>` in `.breeze.json` → current working directory autodetect → prompt the user. Resolved paths are persisted to `.breeze.json` so re-runs do not re-prompt. Checkpoint files (`entrypoints.json`, `entrypoints_<repo>.json`, `backend_log_<repo>.json`) live next to `.breeze.json`, not inside the target repo.
-
-### Generate from designs
-
-| Skill | Command | Description |
-|-------|---------|-------------|
-| **Visual to Text** | `/breeze:visual-to-text` | Generate user stories from UI design visuals (Figma frames, PDF screens, images) — outputs structured stories in persona/outcome/scenario/step/action form |
-| **Generate User Story from UI Design** | `/breeze:generate-userstory-from-uidesign` | Translate a UI design into user stories that describe functional intent |
-
-### Update, validate, generate
-
-| Skill | Command | Description |
-|-------|---------|-------------|
-| **Update Functional Graph** | `/breeze:update-functional-graph` | Create or update functional-graph nodes from code, documents, or Figma designs |
-| **Validate Functional Graph** | `/breeze:validate-functional-graph` | Validate the functional graph against source documents — coverage, duplicates, persona quality, citation traceability |
-| **Generate Code** | `/breeze:generate-code [feature \| ui \| backend \| fullstack] [persona]` | Generate code and tests from the functional + code graphs. **Selective** (single scenario/feature) or **full-app**: pick the persona — a **System** persona generates a **backend**, any non-System (human) persona generates the **user-facing UI**, and a mixed selection generates **fullstack**. Confirms the tech stack first, then for full builds runs orchestration mode — scaffold a shared foundation once and fan out one module-builder sub-agent per feature domain (`breeze:app-ui-module-agent` / `breeze:app-backend-module-agent`) with action-level coverage, then integrate + build + smoke-test + QA. |
-| **Generate Spec** | `/breeze:generate-spec` | Generate functional specification documents from the functional graph |
-
-### Recommended pipelines
+### Typical usage
 
 ```
-First-time onboarding of a brownfield project (any size — one repo to hundreds):
-  /breeze:project setup                    # MCP auth + project link
-  /breeze:onboard-project [--autonomous]   # plans and runs everything below, resumable (.breeze/plan.json)
-    P0 preflight                           # API key, sub-agent graph tools + agent types, missing inputs
-    P1 /breeze:onboard-repository          # all repos: git link or local · gates G1 repos, G2 ignore patterns, G3 git + token
-    P2 units + routing                     # SPA / service / job / webforms / MVC / metadata / library / schema / infra · run groups · G4
-    P3 /breeze:detect-personas             # once across all UIs, merged · G5
-    P4 generate-functional-from-{ui,backend,aspnet-webforms,metadata}   # per run group, with live outcome names
-    P5 scripts/join.py + /breeze:validate-functional-graph              # G6
-    P6 /breeze:generate-architecture       # in parallel, any time after P2
-    P7 generate-page-registry → generate-component-registry → generate-design-from-ui → validate-design-graph · G7
-    P8 .breeze/report.md                   # every phase, counts, join findings, all auto-decisions
-  /breeze:generate-spec
+First run in a repo:
+  /breeze:project setup                               # MCP auth + project link
 
-Running the steps by hand works too — follow the same order.
-
-Interactive mode (default) stops at gates G1–G7 for approval; `--autonomous` decides each gate and records
-it in `plan.json` → `gates` for review. Git tokens are never pasted into chat: the skill uses an existing
-`gh` / `glab` login, `! gh auth login`, or a `chmod 600` token file (`--token-file`).
-
-Greenfield project (no code yet):
-  /breeze:project setup
-  /breeze:visual-to-text           # Figma / PDF / images → user stories
-  /breeze:analyze-functional       # also ingests requirement documents
-
-Adding a new requirement to an existing project:
-  /breeze:impact-analysis          # cross-layer blast radius first
-  /breeze:analyze-functional
-  /breeze:analyze-architecture
-  /breeze:update-functional-graph
-  /breeze:generate-code
+Day to day:
+  /breeze:search how does invoice approval work       # explore the graphs
+  /breeze:impact-analysis what breaks if we drop the legacy payout endpoint
+  /breeze:impact-analysis --detailed <prompt>         # full document on disk
 
 Switching / comparing projects:
   /breeze:project list                                # see what's available
@@ -225,11 +153,9 @@ claude --plugin-dir ../breeze-claude-plugin
 
 ## Notes
 
-- `.breeze.json` may contain a Breeze API key once you've used a skill that needs one (currently `/breeze:onboard-repository` — git-link mode and local automatic upload — and the retired `/breeze:deprecated-cluster-pipeline` if you're resuming a historical run). Add `.breeze.json` to `.gitignore`.
-- The Breeze MCP server uses Keycloak OAuth; Claude Code handles sign-in automatically on the first MCP tool call and does **not** read `apiKey` from `.breeze.json`. MCP-only workflows never need an API key.
-- API keys are collected **on-demand** by the skills that actually use them, with a prompt pointing at `<uiBaseUrl>/mcp/generate/key` (default `https://ai.accionbreeze.com/mcp/generate/key`; see `breeze.config.json`). No upfront paste during setup.
+- `.breeze.json` holds the project link (`projectUuid`) and any per-project URL overrides. Add it to `.gitignore`.
+- The Breeze MCP server uses Keycloak OAuth; Claude Code handles sign-in automatically on the first MCP tool call and does **not** read `apiKey` from `.breeze.json`. No skill in this plugin needs an API key.
 - The Keycloak token expires after roughly **7 days**. Expect to re-authenticate periodically via `/breeze:project auth`; skills will tell you when an MCP call hits a 401.
 - All Breeze service URLs live in `breeze.config.json` at the plugin root (`uiBaseUrl`, `apiBase`). To repoint every skill at a different Breeze deployment, edit that single file — or override `uiBaseUrl` / `apiBase` per-project in `.breeze.json`.
 - The plugin ships a **`CLAUDE.md`** at the root. Claude Code auto-loads it and it centralizes the project-resolution flow, the exempt-skills list, the auth-on-401 rule, and the `.breeze.json` mutation policy. Individual `skills/*/SKILL.md` files defer to it rather than duplicating the rule.
-- The **Design** skills require a Figma MCP server to be configured separately.
-- All skills except `/breeze:project` (in `setup` / `auth` / `list` / `create` modes) and `/breeze:visual-to-text` (reads a design + writes local stories, no MCP calls) require a resolvable project (see **Project resolution** above).
+- `/breeze:search` and `/breeze:impact-analysis` require a resolvable project (see **Project resolution** above). `/breeze:project` in its `setup` / `auth` / `list` / `create` modes does not.

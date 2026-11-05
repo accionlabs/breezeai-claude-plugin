@@ -57,7 +57,7 @@ Begin the response with one line so the user can verify scope at a glance:
 
 ### Step 4: Load project context
 
-Immediately after announcing the project, call `Call_Get_Project_Details_` with the resolved UUID and read `metadata.description` and `metadata.projectContext` into the active context. Do this **before** making any graph search or graph write tool calls (`Functional_Graph_Search`, `Code_Graph_Search`, `Design_Graph_Search`, `Architecture_Graph_Search`, `Call_Create_Functional_Node_`, `Call_Update_Functional_Node_`, etc.).
+Immediately after announcing the project, call `Call_Get_Project_Details_` with the resolved UUID and read `metadata.description` and `metadata.projectContext` into the active context. Do this **before** making any graph search tool calls (`Functional_Graph_Search`, `Code_Graph_Search`, `Design_Graph_Search`, `Architecture_Graph_Search`, etc.).
 
 The `projectContext` field contains project-specific terminology rules, architectural conventions, and known caveats that must be respected in all responses and graph operations for this project. Treat it as authoritative — if it contradicts a general default, the projectContext wins.
 
@@ -92,23 +92,10 @@ Claude Code typically surfaces the actual login URL automatically when an MCP
 server needs auth. If it doesn't appear in the user's terminal, escalate via
 `/breeze:project auth` to trigger the handshake explicitly.
 
-The `apiKey` in `.breeze.json` is **not** used for MCP tool calls. It is only
-for non-MCP consumers:
-
-- `/breeze:onboard-repository` in **git-link** mode (REST calls to connect repos
-  and poll ingest status) and in local **automatic upload** mode (the
-  `breezeai-cog` CLI),
-- the REST `/functional-graph/v2/upsert` path used by
-  `/breeze:generate-functional-from-ui` (its flow-structuring sub-agent POSTs
-  with an `api-key:` header),
-- the retired `/breeze:deprecated-cluster-pipeline` (resume of historical runs).
-
-(Other functional-graph writers — `generate-functional-from-backend` and
-`update-functional-graph` — write via MCP tools and need no key.)
-
-These skills prompt for the key on-demand and point the user at
-`<uiBaseUrl>/mcp/generate/key`. MCP-only and manual-upload workflows never need
-a key.
+The `apiKey` in `.breeze.json` is **not** used for MCP tool calls, and no skill
+in this plugin needs one — `/breeze:search` and `/breeze:impact-analysis` read
+the graphs purely over MCP. If a key is present in `.breeze.json`, leave it
+alone and never print it.
 
 ## Service URLs
 
@@ -133,11 +120,10 @@ These skills are exempt from the resolution flow above — run them as requested
 | `/breeze:project auth` | OAuth handshake only. |
 | `/breeze:project list` | Lists accessible projects. |
 | `/breeze:project create <name>` | Creates a new project and links it. |
-| `/breeze:visual-to-text` | Reads a design (Figma / PDF / image) and writes local user stories — makes no Breeze MCP calls. |
 
-All other skills are project-bound and follow Steps 1–3 above.
-`/breeze:onboard-repository` needs a resolvable `projectUuid` but never probes
-the graph — it follows the same flow.
+All other skills — currently `/breeze:search` and `/breeze:impact-analysis`, plus
+`/breeze:project` in its `show` / `use` / `status` modes — are project-bound and
+follow Steps 1–3 above.
 
 ## Notes
 
