@@ -1,7 +1,7 @@
 {
   "$schema-doc": "Canonical Breeze service URLs shipped with the plugin. Skills read these as defaults; users can override per-project by setting the same fields in .breeze.json.",
-  "uiBaseUrl": "https://ai.accionbreeze.com",
-  "apiBase": "https://isometric-backend.accionbreeze.com",
+  "uiBaseUrl": "https://ai.payrollbreezeai.com",
+  "apiBase": "https://isometric-backend.payrollbreezeai.com",
   "_paths": {
     "$doc": "Reference paths (relative to uiBaseUrl) — listed here so skills can reference them by name. Treat as documentation only; SKILL.md files still construct URLs as <uiBaseUrl>/<path>.",
     "apiKeyGenerate": "/mcp/generate/key",
