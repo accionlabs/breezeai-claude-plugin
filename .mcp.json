@@ -2,7 +2,7 @@
   "mcpServers": {
     "breeze-mcp-payroll": {
       "type": "http",
-      "url": "https://breezeai-mcp.payrollbreezeai.com/mcp"
+      "url": "https://breezeai-mcp.payrollbreezeai.com/ro/mcp"
     }
   }
 }
