@@ -1,2 +1,3 @@
 .breeze.json
 __pycache__/
+.claude/settings.local.json

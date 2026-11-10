@@ -1,11 +1,27 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs ls:*)",
-      "Read(//Users/pranavpatil/Downloads/lmreborn-frontendweb_react_tnlm-ac4b062702e7/**)"
-    ],
-    "additionalDirectories": [
-      "/Users/pranavpatil/Desktop/Projects/breezeai-claude-plugin/skills"
+      "mcp__plugin_breeze_breeze-mcp-payroll__Functional_Graph_Search",
+      "mcp__plugin_breeze_breeze-mcp-payroll__Code_Graph_Search",
+      "mcp__plugin_breeze_breeze-mcp-payroll__Design_Graph_Search",
+      "mcp__plugin_breeze_breeze-mcp-payroll__Get_Design_Nodes_by_Ids",
+      "mcp__plugin_breeze_breeze-mcp-payroll__Get_all_Design_By_Label",
+      "mcp__plugin_breeze_breeze-mcp-payroll__get_design_by_label",
+      "mcp__plugin_breeze_breeze-mcp-payroll__Get_scenarios_by_uuid",
+      "mcp__plugin_breeze_breeze-mcp-payroll__get_scenarios_by_uuid",
+      "mcp__plugin_breeze_breeze-mcp-payroll__Get_all_steps_actions_for_a_scenario_id",
+      "mcp__plugin_breeze_breeze-mcp-payroll__get_steps_actions",
+      "mcp__plugin_breeze_breeze-mcp-payroll__Create_Design_Node",
+      "mcp__plugin_breeze_breeze-mcp-payroll__Update_Design_Node",
+      "mcp__plugin_breeze_breeze-mcp-payroll__Bulk_Update_Design_Nodes",
+      "mcp__plugin_breeze_breeze-mcp-payroll__bulk_update_design_nodes",
+      "mcp__plugin_breeze_breeze-mcp-payroll__Call_Update_Functional_Node_",
+      "mcp__plugin_breeze_breeze-mcp-payroll__update_functional_node",
+      "Bash(python3:*)",
+      "Bash(git add:*)",
+      "Bash(git rebase:*)",
+      "Bash(GIT_EDITOR=true git rebase --continue)",
+      "Bash(ls -1 skills/generate-design-from-ui/references/*.md)"
     ]
   }
 }

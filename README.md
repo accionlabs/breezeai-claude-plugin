@@ -42,6 +42,25 @@ You can confirm everything loaded by running:
 
 `breeze` should show as installed and enabled.
 
+#### Optional: pre-approve the Breeze MCP tools
+
+Breeze skills call the MCP server on nearly every step, so Claude Code will ask
+for permission each time unless you allow the tools once. The plugin cannot grant
+its own permissions — add them in **your** project's `.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "allow": ["mcp__plugin_breeze_breeze-mcp-payroll__*"]
+  }
+}
+```
+
+The tool prefix is `mcp__plugin_breeze_<server-name>__`, where `<server-name>` is
+the key under `mcpServers` in the plugin's `.mcp.json` (currently
+`breeze-mcp-payroll`). If you repoint the plugin at a different Breeze deployment
+and rename that key, update the prefix to match or the rules stop applying.
+
 ### 5. Initialize the workspace
 
 ```
