@@ -232,7 +232,15 @@ functional context:
      platform's design graph and their scenarios should not be linked
      to this platform's nodes
 3. For each **allowed persona**, call
-   `Get_all_outcomes_for_a_persona_id` — cache outcomes.
+   `Get_all_outcomes_for_a_persona_id` (page until `total`) — cache
+   outcomes with `platform = platformKey(outcome.platform)` (trim,
+   lowercase, blank → `"default"`). Target platform:
+   `PLATFORM_KEY = platformKey(functionalGraph.platform ?? designGraph.platform.id)`
+   (warn when the two are set and differ). When `PLATFORM_KEY` is set, skip
+   outcomes on another platform — they belong to another platform's design
+   graph. When it is not set and the outcomes span more than one platform,
+   STOP and ask for `functionalGraph.platform` / `designGraph.platform`
+   (one run per platform).
 4. For outcomes related to changed files (match by name/route), call
    `Get_all_scenarios_for_a_outcome_id` — cache scenarios.
 5. For each relevant scenario, call
@@ -242,6 +250,14 @@ functional context:
 > **HARD GATE:** If no allowed personas remain after filtering, STOP.
 > Either no functional graph exists (run `/breeze:generate-functional-from-ui`)
 > or `designGraph.platform.personas` in `.breeze.json` is misconfigured.
+>
+> **HARD GATE:** If the platform filter leaves **no outcomes**: when
+> `PLATFORM_KEY` came from `designGraph.platform.id` only and every allowed
+> outcome is on **one** platform `P`, offer `P` exactly as
+> `generate-design-from-ui` Step 2a-bis does (auto mode takes it; save
+> `functionalGraph.platform: "<P>"` to `.breeze.json`). Otherwise STOP and
+> list the Outcome platforms found — the configured platform names none of
+> them (see the stop message in `generate-design-from-ui` Step 2a-bis).
 
 #### 2b. Load Existing Design Graph
 
@@ -270,6 +286,15 @@ functional context:
 
    > These files contain only this platform's nodes. Never read or
    > write to the other platform's registry files.
+
+3. **Registry platform check** — same as `generate-design-from-ui`
+   ("Registry platform check"): look up up to 5 registry ids per registry
+   with `Get_Design_Nodes_By_Label(uuid, label, filters: {"id": {"$in":
+   [...]}})`; any node whose `platformKey(platform)` is not `PLATFORM_KEY`
+   → STOP and ask to re-run `/breeze:generate-component-registry` (and
+   `/breeze:generate-page-registry`). Registries from before 3.13.1 sit on
+   `designGraph.platform.id`, and reusing them would duplicate every
+   component and page on the Outcome platform.
 
 ### Phase 3 — Analyze Changes Per File Group
 
@@ -581,6 +606,7 @@ Build the nested payload per scenario and call
     "userJourneys": [{
       "name": "<scenario name>",
       "scenarioId": "<scenario UUID>",
+      "platform": "<the scenario's cached Outcome platform>",
       "citations": [{"type": "figma", "reference": "https://..."}],
       "flows": [{
         "name": "<flow name>",
@@ -893,14 +919,15 @@ for the complete entity model:
 
 - UserJourney ↔ Scenario (1:1 link via `scenarioId`)
 - UJ naming: `"{ScenarioName}{APP_SUFFIX}"` — no persona qualifier; the
-  backend keys UJs by `projectUuid + scenarioId + platform`, so two
+  backend keeps one UJ per `projectUuid + scenarioId`, so two
   personas' same-named scenarios each keep their own UJ. To rename a UJ,
   re-upsert it with its `scenarioId` and the new name.
 - Flow multiplied per modality
 - Page types: `LIST`, `DETAIL`, `FORM`, `DASHBOARD` (uppercase only)
 - Multi-parent support via `*Ids[]` arrays
 - Backend dedup by `projectUuid + name + platform` (case-insensitive) for
-  Flows/Pages/Components; by `projectUuid + scenarioId + platform` for UJs
+  Flows/Pages/Components; one UJ per `projectUuid + scenarioId`, placed with
+  everything under it on its Scenario's Outcome's platform
 
 Refer to `../generate-design-from-ui/references/atomic-design-rules.md`
 for component classification:

@@ -39,7 +39,7 @@ Flows, Pages, and Components support **multi-parent relationships**:
 ### Backend Dedup Mechanism
 
 **The backend deduplicates Flows, Pages and Components by `projectUuid + name + platform` (case-insensitive).**
-**UserJourneys are the exception:** they are keyed by `projectUuid + scenarioId + platform`.
+**UserJourneys are the exception:** each is unique by `projectUuid + scenarioId` (one journey per scenario) and the backend places it — with its Flows, Pages and Components — on its Scenario's **Outcome's** platform.
 Re-upserting a scenario updates (and renames, if the name changed) its own UJ; two personas'
 same-named scenarios each get their own UJ; a UJ is never moved to another scenario. A UJ
 sent without `scenarioId` falls back to matching by name.
@@ -95,7 +95,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Name of the user journey |
-| `platform` | string | No | Scope — which product/deployment (e.g. "customer portal"). Part of uniqueness key. Backend normalises to trimmed lowercase. Defaults to "default" |
+| `platform` | string | No | Scope — which product/deployment (e.g. "customer portal"). Set it to the Scenario's Outcome's platform; the backend overrides it with that platform. **Not** part of the UserJourney key (unique by `projectUuid + scenarioId`). Backend normalises to trimmed lowercase. Defaults to "default" |
 | `description` | string | No | Description |
 | `scenarioId` | string | Yes | Linked functional Scenario ID |
 | `citations` | object[] | No | Per-node citations. Merged with top-level citations. Each: `{"type": "document\|exDoc\|figma\|jira\|confluence\|code\|prompt", "name"?, "inputText"?, "reference"?}` |

@@ -21,7 +21,7 @@ via name-based dedup.
 ## Backend Dedup Mechanism
 
 **The backend deduplicates Flows, Pages and Components by `projectUuid + name + platform` (case-insensitive).**
-**UserJourneys are the exception:** they are keyed by `projectUuid + scenarioId + platform`.
+**UserJourneys are the exception:** each is unique by `projectUuid + scenarioId` (one journey per scenario) and the backend places it — with its Flows, Pages and Components — on its Scenario's **Outcome's** platform.
 Re-upserting a scenario updates (and renames, if the name changed) its own UJ; two personas'
 same-named scenarios each get their own UJ; a UJ is never moved to another scenario. A UJ
 sent without `scenarioId` falls back to matching by name.

@@ -116,6 +116,23 @@ def _platform_key(platform):
     return (platform or "").strip().lower() or "default"
 
 
+def _all_user_journeys(nodes_by_label, user_journeys):
+    """
+    Every platform's journeys (AllUserJourneys) plus this run's, one entry per id: paging
+    overlaps, or the filtered and unfiltered lists joined, would otherwise report one journey
+    as its own duplicate.
+    """
+    out, seen = [], set()
+    for uj in (nodes_by_label.get("AllUserJourneys") or []) + user_journeys:
+        uid = uj.get("id")
+        if uid in seen:
+            continue
+        if uid:
+            seen.add(uid)
+        out.append(uj)
+    return out
+
+
 def _find_near_duplicates(nodes, name_key="name", group_keys=None, threshold=0.6):
     """
     Find near-duplicate nodes by fuzzy name matching.
@@ -137,7 +154,7 @@ def _find_near_duplicates(nodes, name_key="name", group_keys=None, threshold=0.6
     by_platform = defaultdict(list)
     for n in nodes:
         if n.get(name_key):
-            platform = n.get("platform", "")
+            platform = _platform_key(n.get("platform"))
             by_platform[platform].append((n.get(name_key, ""), n))
 
     for platform, named in by_platform.items():
@@ -198,7 +215,7 @@ def parse_nodes_by_label(data):
     - List of nodes with a "label" field
     - Dict with "nodes" key containing a list
     """
-    labels = {"UserJourney": [], "Flow": [], "Page": [], "Component": []}
+    labels = {"UserJourney": [], "Flow": [], "Page": [], "Component": [], "AllUserJourneys": []}
 
     if isinstance(data, dict):
         for label in labels:
@@ -512,9 +529,9 @@ def run_checks(nodes_by_label, functional_graph=None):
     # Two nodes with the same name on different platforms are NOT duplicates.
     # UserJourneys are not checked here: a UJ is keyed by its Scenario, not its
     # name, so two personas may each own a same-named UJ (BREEZEAI-1436).
-    # Duplicate UJs are caught by CHECK 4b (scenarioId + platform).
+    # Duplicate UJs are caught by CHECK 4b (scenarioId). Platforms compare canonically.
     flow_name_modal = Counter(
-        (f.get("name", ""), f.get("modality", ""), f.get("platform", ""))
+        (f.get("name", ""), f.get("modality", ""), _platform_key(f.get("platform")))
         for f in flows
     )
     dup_flows = [
@@ -524,7 +541,7 @@ def run_checks(nodes_by_label, functional_graph=None):
     ]
 
     page_name_type = Counter(
-        (p.get("name", ""), p.get("pageType", ""), p.get("platform", ""))
+        (p.get("name", ""), p.get("pageType", ""), _platform_key(p.get("platform")))
         for p in pages
     )
     dup_pages = [
@@ -534,7 +551,7 @@ def run_checks(nodes_by_label, functional_graph=None):
     ]
 
     comp_name_type_plat = Counter(
-        (c.get("name", ""), c.get("type", ""), c.get("platform", ""))
+        (c.get("name", ""), c.get("type", ""), _platform_key(c.get("platform")))
         for c in components
     )
     dup_components = [
@@ -596,16 +613,20 @@ def run_checks(nodes_by_label, functional_graph=None):
     }
 
     # === CHECK 4b: Duplicate scenarioId across UserJourneys ===
-    # A scenarioId is 1:1 with a UserJourney PER PLATFORM — the backend's
-    # (projectUuid, scenarioId, platform) unique key (BREEZEAI-1436). The same
-    # scenario on two platforms legitimately has two UJs. Two UJs sharing
-    # (scenarioId, platform) predate that constraint — the project needs the
-    # userJourneyScenarioUniqueKey migration (merge or delete the extras).
+    # A scenarioId is 1:1 with a UserJourney — the backend's (projectUuid, scenarioId)
+    # unique key, on any platform (BREEZEAI-1436/1508/1537). Two UJs for one
+    # scenario are legacy data; the admin scenario-link repair merges them.
+    # Checked over every platform's journeys when the export carries them (AllUserJourneys):
+    # one scenario's journeys on two platforms are a duplicate too.
+    all_user_journeys = _all_user_journeys(nodes_by_label, user_journeys)
+    # This run's journeys (e.g. one APP_SUFFIX). Findings that touch none of them belong to
+    # another app: reported, but not counted toward this graph's health.
+    own_uj_ids = {uj.get("id") for uj in user_journeys if uj.get("id")}
     scenario_id_to_ujs = defaultdict(list)
-    for uj in user_journeys:
-        sid = uj.get("scenarioId")
+    for uj in all_user_journeys:
+        sid = (uj.get("scenarioId") or "").strip()
         if sid:
-            scenario_id_to_ujs[(sid, _platform_key(uj.get("platform")))].append({
+            scenario_id_to_ujs[sid].append({
                 "name": uj.get("name", "N/A"),
                 "id": uj.get("id"),
                 "platform": uj.get("platform", ""),
@@ -614,27 +635,70 @@ def run_checks(nodes_by_label, functional_graph=None):
     dup_scenario_ids = [
         {
             "scenarioId": sid,
-            "platform": plat,
             "count": len(ujs),
             "userJourneys": ujs,
             "issue": (
-                "Several UJs for one scenario on one platform — created before the "
-                "(projectUuid, scenarioId, platform) constraint; keep one, merge or delete the rest"
+                "Several UJs for one scenario — legacy data; run the scenario-link repair "
+                "(POST /design-ontology-graph/{uuid}/user-journeys/repair-scenario-links)"
             ),
         }
-        for (sid, plat), ujs in scenario_id_to_ujs.items()
+        for sid, ujs in scenario_id_to_ujs.items()
         if len(ujs) > 1
     ]
+    own_dups = [d for d in dup_scenario_ids if any(u["id"] in own_uj_ids for u in d["userJourneys"])]
+    other_dups = [d for d in dup_scenario_ids if d not in own_dups]
 
     report["checks"]["duplicate_scenario_ids"] = {
         "severity": "P0",
-        "count": len(dup_scenario_ids),
+        "count": len(own_dups),
         "note": (
-            "Each scenarioId must map to exactly one UserJourney per platform. "
-            "The backend now enforces this; duplicates are legacy data that the "
-            "userJourneyScenarioUniqueKey migration refuses to run over."
+            "Each scenarioId must map to exactly one UserJourney, on any platform. "
+            "The backend enforces this; duplicates are legacy data that the admin "
+            "scenario-link repair merges. otherPlatforms: duplicates among other apps' "
+            "journeys only (not counted)."
         ),
-        "items": dup_scenario_ids[:20],
+        "items": own_dups[:20],
+        "otherPlatforms": other_dups[:20],
+    }
+
+    # === CHECK 4c: Child on another platform than its journey ===
+    # Flows, Pages and Components sit on their journey's platform (BREEZEAI-1537). Each node is
+    # compared with the platform of the journey(s) above it, handed down the tree, so a correct
+    # Page under a misplaced Flow is not flagged and a misplaced Page under a misplaced Flow is.
+    journey_platform = {uj.get("id"): _platform_key(uj.get("platform")) for uj in user_journeys if uj.get("id")}
+    parent_fields = [
+        ("Flow", flows, "userJourneyIds"),
+        ("Page", pages, "flowIds"),
+        ("Component", components, "pageIds"),
+    ]
+    child_platform_mismatch = []
+    for label, nodes, field in parent_fields:
+        for n in nodes:
+            own = _platform_key(n.get("platform"))
+            expected = sorted({journey_platform[pid] for pid in (n.get(field) or []) if pid in journey_platform})
+            if not expected:
+                continue
+            # Hand the journey platform down: one parent platform → that; several → the node's own
+            # when it is among them (the others are flagged here), else the first.
+            if n.get("id"):
+                journey_platform[n.get("id")] = own if own in expected else expected[0]
+            if expected == [own]:
+                continue
+            child_platform_mismatch.append({
+                "label": label,
+                "name": n.get("name", "N/A"),
+                "id": n.get("id"),
+                "platform": own,
+                "journeyPlatforms": expected,
+                "issue": "not on its journey's platform" if own not in expected
+                         else "shared by journeys on different platforms",
+            })
+
+    report["checks"]["child_platform_mismatch"] = {
+        "severity": "P0",
+        "count": len(child_platform_mismatch),
+        "note": "A Flow/Page/Component must be on its journey's platform; the admin scenario-link repair realigns it.",
+        "items": child_platform_mismatch[:20],
     }
 
     # === CHECK 5: Invalid Enum Values ===
@@ -977,6 +1041,8 @@ def run_checks(nodes_by_label, functional_graph=None):
         + report["checks"]["template_compliance"]["pages_missing_template"]
         + report["checks"]["dangling_parent_refs"]["count"]
         + report["checks"]["broken_chains"]["count"]
+        + report["checks"]["child_platform_mismatch"]["count"]
+        + report["checks"].get("journey_platform_mismatch", {}).get("count", 0)
     )
 
     p1_count = (
@@ -1053,10 +1119,61 @@ def _run_functional_cross_check(report, nodes_by_label, functional_graph):
                                 "is_system": is_system,
                             }
 
+    # --- Journey platform vs Outcome platform (BREEZEAI-1537) ---
+    # Needs Outcome `platform` in the functional graph (newer backends return it).
+    scenario_platforms = defaultdict(set)
+    outcomes_have_platform = False
+    for p in personas:
+        for o in p.get("outcomes", []):
+            if "platform" in o:
+                outcomes_have_platform = True
+            for s in o.get("scenarios", []):
+                if s.get("id"):
+                    scenario_platforms[s["id"]].add(_platform_key(o.get("platform")))
+    journey_platform_mismatch = []
+    ambiguous_outcomes = []
+    all_user_journeys = _all_user_journeys(nodes_by_label, user_journeys)
+    own_uj_ids = {uj.get("id") for uj in user_journeys if uj.get("id")}
+    if outcomes_have_platform:
+        for uj in all_user_journeys:
+            sid = (uj.get("scenarioId") or "").strip()
+            plats = scenario_platforms.get(sid)
+            if not plats:
+                continue
+            if len(plats) > 1:
+                ambiguous_outcomes.append({
+                    "userJourney": uj.get("name", "N/A"), "id": uj.get("id"), "scenarioId": sid,
+                    "outcomePlatforms": sorted(plats),
+                    "issue": "scenario sits under several Outcomes on different platforms",
+                })
+                continue
+            target = next(iter(plats))
+            if _platform_key(uj.get("platform")) != target:
+                journey_platform_mismatch.append({
+                    "userJourney": uj.get("name", "N/A"), "id": uj.get("id"), "scenarioId": sid,
+                    "platform": _platform_key(uj.get("platform")), "outcomePlatform": target,
+                    "issue": "UserJourney not on its Outcome's platform",
+                })
+    # Other apps' journeys: reported, not counted (see CHECK 4b).
+    other_platform_items = [i for i in journey_platform_mismatch + ambiguous_outcomes if i["id"] not in own_uj_ids]
+    journey_platform_mismatch = [i for i in journey_platform_mismatch if i["id"] in own_uj_ids]
+    ambiguous_outcomes = [i for i in ambiguous_outcomes if i["id"] in own_uj_ids]
+    report["checks"]["journey_platform_mismatch"] = {
+        "severity": "P0",
+        "otherPlatforms": other_platform_items[:20],
+        "count": len(journey_platform_mismatch) + len(ambiguous_outcomes),
+        "note": (
+            "A UserJourney must be on its Scenario's Outcome's platform; the admin scenario-link "
+            "repair realigns it." if outcomes_have_platform else
+            "Skipped: the functional graph has no Outcome platform (older backend)."
+        ),
+        "items": (journey_platform_mismatch + ambiguous_outcomes)[:20],
+    }
+
     # --- Scenario coverage ---
     dangling_scenario_refs = []
     for uj in user_journeys:
-        sid = uj.get("scenarioId")
+        sid = (uj.get("scenarioId") or "").strip()
         if sid and sid not in func_scenario_ids:
             dangling_scenario_refs.append({
                 "userJourney": uj.get("name", "N/A"),
@@ -1064,7 +1181,7 @@ def _run_functional_cross_check(report, nodes_by_label, functional_graph):
                 "issue": "scenarioId not found in functional graph",
             })
 
-    design_scenario_ids = {uj.get("scenarioId") for uj in user_journeys if uj.get("scenarioId")}
+    design_scenario_ids = {(uj.get("scenarioId") or "").strip() for uj in user_journeys if (uj.get("scenarioId") or "").strip()}
     uncovered_scenarios = []
     for p in personas:
         pname = p.get("persona", "")

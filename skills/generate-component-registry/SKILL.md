@@ -81,8 +81,12 @@ every page is scanned exactly once.
    - If absent → check for legacy `designGraph.appSuffix`; if present
      use it as `APP_SUFFIX` with `PLATFORM_ID = ""`
    - If neither → set `PLATFORM_ID = ""`, `APP_SUFFIX = ""`
-   When upserting, set `platform` on UserJourney to `PLATFORM_ID`
-   (children inherit). Use platform-scoped registry files when
+   When upserting, set `platform` on the placeholder UserJourney to the
+   **target Outcome platform**: `platformKey(functionalGraph.platform ??
+   designGraph.platform.id)`, or, with neither set, the single platform the
+   project's Outcomes use (ask if they use several). Children inherit it, so
+   `generate-design-from-ui` — which writes on the Outcome's platform — finds
+   and reuses these components. Use platform-scoped registry files when
    `PLATFORM_ID` is set.
 
 > **Multi-app collision guard:** When `APP_SUFFIX` is non-empty, this
@@ -901,8 +905,9 @@ Skip if no code node is found — do NOT block the upsert.
 
 > **Note:** These are placeholder containers to get components into
 > the graph. When `/breeze:generate-design-from-ui` runs later, the
-> backend dedup by name will find these existing components and link
-> them to real UserJourneys/Flows/Pages automatically.
+> backend dedup by `name + platform` finds these components — they sit on
+> the target Outcome platform — and links them to real
+> UserJourneys/Flows/Pages automatically.
 
 ### 4b. Upsert in batches
 

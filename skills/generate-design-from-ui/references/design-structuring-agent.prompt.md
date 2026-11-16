@@ -19,7 +19,7 @@ OUTCOME:
   name:                {{outcome_name}}
   personaName:         {{persona_name}}
   personaId:           {{persona_id}}
-  platform:            {{platform}}
+  platform:            {{platform}}   # the Outcome's platform — written on every node
 MODALITIES:            [{{modalities}}]
 FRAMEWORK:             {{framework}}
 UI_REPO:               {{repo_root_absolute_path}}
@@ -32,7 +32,7 @@ REFERENCES_PATH:       {{skill_references_path}}
 COMPONENT_REGISTRY:    {{component_registry_path}}
 PAGE_REGISTRY:         {{page_registry_path}}
 APP_SUFFIX:            {{app_suffix}}
-PLATFORM_ID:           {{platform_id}}
+PLATFORM_ID:           {{platform_id}}   # registry/output scoping only
 PAGE:                  {{page}}
 MODE:                  {{mode}}
 

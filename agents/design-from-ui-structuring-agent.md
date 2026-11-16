@@ -51,7 +51,7 @@ OUTCOME:
   name:                <outcome name>
   personaName:         <persona name>
   personaId:           <persona UUID>
-  platform:            <platform slug, e.g. "source-web" or "">
+  platform:            <the Outcome's canonical platform, e.g. "web" or "default" — written on every node>
 MODALITIES:            [<modality list, e.g. "WEB", "MOBILE">]
 FRAMEWORK:             <detected framework, e.g. "react-router", "vue-router", "angular">
 UI_REPO:               <absolute path to UI repo root>
@@ -64,7 +64,7 @@ REFERENCES_PATH:       <absolute path to skill references directory>
 COMPONENT_REGISTRY:    <absolute path to existingcomponents.json, or "none">
 PAGE_REGISTRY:         <absolute path to existingpages.json, or "none">
 APP_SUFFIX:            <e.g. " [Source Web]" or "">
-PLATFORM_ID:           <e.g. "source-web" or "">
+PLATFORM_ID:           <e.g. "source-web" or "" — registry/output scoping only, never written on nodes>
 PAGE:                  <page number, default 1>
 MODE:                  <"live" | "dry-run">
 ```
@@ -637,8 +637,8 @@ END FOR
 > return the same scenario on a pagination boundary, or the functional
 > graph may have issued the same UUID to two different scenarios. Without
 > this guard, the second payload for a `scenarioId` is merged into the
-> first UJ — the backend keys UserJourneys by `scenarioId + platform` — so
-> the UJ is renamed and collects another scenario's flows and pages.
+> first UJ — the backend keeps one UserJourney per `projectUuid + scenarioId`
+> — so the UJ is renamed and collects another scenario's flows and pages.
 
 ### 3h. Context Budget Check
 
@@ -874,7 +874,7 @@ Cite the source file the node was derived from. Format:
 
 **Rules:**
 - One `Bulk_Update_Design_Nodes` call PER SCENARIO (not per outcome)
-- Set `platform` on **EVERY node** — UserJourney, Flow, Page, and Component. Use the value from the OUTCOME `platform` input (defaults to `"default"`). Do NOT omit it on children — the backend uses `projectUuid + name + platform` for dedup (`projectUuid + scenarioId + platform` for UserJourneys), so missing `platform` on any node breaks uniqueness.
+- Set `platform` on **EVERY node** — UserJourney, Flow, Page, and Component — to the OUTCOME `platform` input (the Outcome's own platform; `"default"` when blank). Never use `PLATFORM_ID` here. The backend dedups Flows, Pages and Components by `projectUuid + name + platform`, keeps one UserJourney per `projectUuid + scenarioId`, and places the journey and everything under it on the Outcome's platform — a different value on any node is overridden, and reused nodes are only found on that platform.
 - Include reused nodes by name — backend dedup handles linking (by projectUuid + name + platform)
 - UserJourney names may repeat across personas — the UJ is keyed by its `scenarioId`, so use the scenario name as-is (no persona qualifier)
 - `pageType` and `modality` MUST be UPPERCASE
