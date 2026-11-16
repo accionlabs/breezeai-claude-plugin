@@ -39,7 +39,8 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ### Upgrade notes
 - Needs the backend from breezeai-backend#893 (Outcome `platform` in the functional graph, the repair endpoint, and
-  journeys that follow an Outcome platform edit), with its `designPlatformUniqueKey` migration run.
+  journeys that follow an Outcome platform edit), and a graph without the old `(projectUuid, nameKey)`
+  unique keys on Flow/Page/Component.
 - A `.breeze.json` whose `designGraph.platform.id` (e.g. `source-web`) is not the Outcomes' platform: when all
   outcomes are on one platform, the skill offers it (auto mode takes it) and saves `functionalGraph.platform`;
   otherwise it stops with the platforms found. Prefer editing the Outcomes' platform in Breeze — the backend moves
