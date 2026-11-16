@@ -10,6 +10,49 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+## [3.13.1] — 2026-11-16
+
+### Fixed
+- `generate-design-from-ui`: design nodes go on the **Outcome's** platform (BREEZEAI-1537). Step 3a pages through all
+  of a persona's outcomes (the MCP tool returns 10 per page), keeps each outcome's canonical platform, and designs
+  only outcomes on `designGraph.platform.id` — the others are listed as "Blocked (other platform)". With no platform
+  configured, a run whose outcomes span several platforms stops and asks for one config per platform. `{{platform}}`
+  is now the Outcome's platform (written on every node); `{{platform_id}}` stays the config slug for registries and
+  output dirs. The checkpoint stores each outcome's platform (re-fetched on resume when missing), and Step 4
+  reconciliation groups by node platform.
+- `update-design-from-diff`: skips outcomes on another platform and sends the scenario's Outcome platform on the
+  UserJourney; same legacy-config offer and registry platform check as `generate-design-from-ui`.
+- `validate-design-graph`: duplicate-journey check groups by `scenarioId` alone (one journey per scenario, any
+  platform) over the unfiltered journeys, one entry per journey id; new checks for a journey not on its Outcome's
+  platform and a Flow/Page/Component not on the platform of the journey above it; platforms compared canonically.
+  Findings that touch only another app's journeys (`APP_SUFFIX`) are listed under `otherPlatforms` and not counted.
+  The functional graph is paged past its 10-persona default. Findings point at the admin scenario-link repair
+  endpoint.
+
+### Changed
+- Docs (`design-ontology.md`, `reusability.md`, `pitfalls.md`, `mcp-tools.md`, the structuring agent,
+  `generate-component-registry`, `analyze-design`): a UserJourney is unique by `projectUuid + scenarioId` and sits,
+  with its Flows, Pages and Components, on its Scenario's Outcome's platform. The design target platform is
+  `functionalGraph.platform`, then `designGraph.platform.id` — the value the functional skills wrote on the Outcomes.
+- `generate-design-from-ui` pre-scans every allowed persona's outcome list (Step 2a-bis) and settles the platform
+  before writing anything.
+
+### Upgrade notes
+- Needs the backend from breezeai-backend#893 (Outcome `platform` in the functional graph, the repair endpoint, and
+  journeys that follow an Outcome platform edit), with its `designPlatformUniqueKey` migration run.
+- A `.breeze.json` whose `designGraph.platform.id` (e.g. `source-web`) is not the Outcomes' platform: when all
+  outcomes are on one platform, the skill offers it (auto mode takes it) and saves `functionalGraph.platform`;
+  otherwise it stops with the platforms found. Prefer editing the Outcomes' platform in Breeze — the backend moves
+  their journeys with it — or set `functionalGraph.platform`. Changing `designGraph.platform.id` renames the output
+  dir, checkpoint and registry files. Resuming a checkpoint after the config changed asks which platform to use.
+- Registries from `generate-component-registry` / `generate-page-registry` built before this version sit on
+  `designGraph.platform.id`; the skill now stops when they are not on the run's platform. Re-run both registry
+  skills.
+- Projects with duplicate journeys or nodes on the wrong platform: a system admin runs
+  `POST /design-ontology-graph/{uuid}/user-journeys/repair-scenario-links`, then `validate-design-graph`.
+
+## [3.13.0] — 2026-11-01
+
 ### Added
 - `onboard-project` skill: end-to-end onboarding orchestrator. Plans a workspace (`.breeze/plan.json` + `plan.log.jsonl`),
   onboards the code graph, classifies units (SPA, service, Web Forms, MVC, metadata, shared library, schema, infra,
@@ -44,39 +87,6 @@ Bump the version in **both** `.claude-plugin/plugin.json` and
 ### Removed
 - `update-repo-ignore` skill — its catalogue is now `onboard-repository/references/ignore-catalog.md`, applied on
   every onboarding (it was never called by any other skill).
-
-## [3.13.1] — 2026-11-16
-
-### Fixed
-- `generate-design-from-ui`: design nodes go on the **Outcome's** platform (BREEZEAI-1537). Step 3a pages through all
-  of a persona's outcomes (the MCP tool returns 10 per page), keeps each outcome's canonical platform, and designs
-  only outcomes on `designGraph.platform.id` — the others are listed as "Blocked (other platform)". With no platform
-  configured, a run whose outcomes span several platforms stops and asks for one config per platform. `{{platform}}`
-  is now the Outcome's platform (written on every node); `{{platform_id}}` stays the config slug for registries and
-  output dirs. The checkpoint stores each outcome's platform (re-fetched on resume when missing), and Step 4
-  reconciliation groups by node platform.
-- `update-design-from-diff`: skips outcomes on another platform and sends the scenario's Outcome platform on the
-  UserJourney.
-- `validate-design-graph`: duplicate-journey check groups by `scenarioId` alone (one journey per scenario, any
-  platform) over the unfiltered journeys; new checks for a journey not on its Outcome's platform and a
-  Flow/Page/Component not on its parent's; platforms compared canonically. Findings point at the admin
-  scenario-link repair endpoint.
-
-### Changed
-- Docs (`design-ontology.md`, `reusability.md`, `pitfalls.md`, `mcp-tools.md`, the structuring agent,
-  `generate-component-registry`, `analyze-design`): a UserJourney is unique by `projectUuid + scenarioId` and sits,
-  with its Flows, Pages and Components, on its Scenario's Outcome's platform. The design target platform is
-  `functionalGraph.platform`, then `designGraph.platform.id` — the value the functional skills wrote on the Outcomes.
-- `generate-design-from-ui` pre-scans every allowed persona's outcome list (Step 2a-bis) and settles the platform
-  before writing anything.
-
-### Upgrade notes
-- A `.breeze.json` whose `designGraph.platform.id` (e.g. `source-web`) is not the Outcomes' platform (e.g. `default`
-  or `customer portal`) now stops with the platforms found. Prefer editing the Outcomes' platform in Breeze — the
-  backend moves their journeys with it — or set `functionalGraph.platform`. Changing `designGraph.platform.id`
-  renames the output dir, checkpoint and registry files.
-- Projects with duplicate journeys or nodes on the wrong platform: a system admin runs
-  `POST /design-ontology-graph/{uuid}/user-journeys/repair-scenario-links`, then `validate-design-graph`.
 
 ## [3.12.1] — 2026-10-29
 

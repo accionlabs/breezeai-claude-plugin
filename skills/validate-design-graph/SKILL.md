@@ -128,7 +128,9 @@ Combine all (filtered) nodes into a single JSON file keyed by label
 every UserJourney of the project, before the suffix/persona filters. Save
 to `design-graph-export.json` in the project root. Only the
 duplicate-scenarioId and journey-platform checks read `AllUserJourneys`;
-every other check uses the filtered `UserJourney` list.
+every other check uses the filtered `UserJourney` list. Findings that touch
+only other apps' journeys go to the check's `otherPlatforms` list and do not
+count toward this graph's health.
 
 ---
 
@@ -142,7 +144,10 @@ Ask the user (only if functional graph was NOT already fetched):
 
 **If yes (or already fetched in Step 1):**
 1. Call `Get_complete_functional_graph` with the project UUID
-   (skip if already fetched)
+   (skip if already fetched). It returns 10 personas per call: page with
+   `skip` (0, 10, 20, …) until you have `Get_all_personas(uuid).total`
+   personas, and merge the pages into one file. One call silently checks
+   only the first 10.
 2. Note the saved file path — pass it to the validation script with `--functional`
 3. If persona filter is active, also pass `--scenario-ids <comma-separated IDs>`
    so the script only checks coverage for in-scope scenarios
@@ -173,7 +178,7 @@ The script performs these checks automatically:
 | Empty hierarchy | P0 | UserJourneys with no Flows, Flows with no Pages, Pages with no Components |
 | Missing scenarioId | P0 | UserJourneys without a linked functional Scenario |
 | Duplicate scenarioId (`duplicate_scenario_ids`) | P0 | More than one UserJourney for the same `scenarioId` (on any platform, from `AllUserJourneys`) — legacy data |
-| Child platform (`child_platform_mismatch`) | P0 | A Flow/Page/Component not on its parent's platform |
+| Child platform (`child_platform_mismatch`) | P0 | A Flow/Page/Component not on the platform of the journey above it (`journeyPlatforms`), or shared by journeys on different platforms |
 | Journey platform (`journey_platform_mismatch`) | P0 | A UserJourney not on its Scenario's Outcome's platform, or a scenario under Outcomes on two platforms. Needs `--functional` (skipped, with a note, when the functional graph has no Outcome `platform`) |
 | Invalid enums | P0 | Invalid `modality`, `pageType`, `type`, `layoutType` values |
 | Template compliance | P0 | Pages missing a TEMPLATE component |

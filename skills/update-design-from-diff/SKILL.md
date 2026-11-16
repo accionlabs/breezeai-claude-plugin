@@ -251,7 +251,11 @@ functional context:
 > Either no functional graph exists (run `/breeze:generate-functional-from-ui`)
 > or `designGraph.platform.personas` in `.breeze.json` is misconfigured.
 >
-> **HARD GATE:** If the platform filter leaves **no outcomes**, STOP and
+> **HARD GATE:** If the platform filter leaves **no outcomes**: when
+> `PLATFORM_KEY` came from `designGraph.platform.id` only and every allowed
+> outcome is on **one** platform `P`, offer `P` exactly as
+> `generate-design-from-ui` Step 2a-bis does (auto mode takes it; save
+> `functionalGraph.platform: "<P>"` to `.breeze.json`). Otherwise STOP and
 > list the Outcome platforms found — the configured platform names none of
 > them (see the stop message in `generate-design-from-ui` Step 2a-bis).
 
@@ -282,6 +286,15 @@ functional context:
 
    > These files contain only this platform's nodes. Never read or
    > write to the other platform's registry files.
+
+3. **Registry platform check** — same as `generate-design-from-ui`
+   ("Registry platform check"): look up up to 5 registry ids per registry
+   with `Get_Design_Nodes_By_Label(uuid, label, filters: {"id": {"$in":
+   [...]}})`; any node whose `platformKey(platform)` is not `PLATFORM_KEY`
+   → STOP and ask to re-run `/breeze:generate-component-registry` (and
+   `/breeze:generate-page-registry`). Registries from before 3.13.1 sit on
+   `designGraph.platform.id`, and reusing them would duplicate every
+   component and page on the Outcome platform.
 
 ### Phase 3 — Analyze Changes Per File Group
 

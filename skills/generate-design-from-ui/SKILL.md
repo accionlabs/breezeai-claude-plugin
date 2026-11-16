@@ -354,7 +354,21 @@ page until `total` (outcome ids, names and `platform` only). Compute
 `platformKey(outcome.platform)` for each and decide the run's platform
 **now**, so the run never stops halfway:
 
-- `PLATFORM_KEY` set and **no** outcome on it → STOP (message below).
+- `PLATFORM_KEY` set and **no** outcome on it:
+  - **Legacy config** — `PLATFORM_KEY` came from `designGraph.platform.id`
+    only (`functionalGraph.platform` unset) and every allowed outcome is on
+    **one** platform `P` (typical: id `source-web`, Outcomes on `default`
+    from an older functional run). Ask once:
+    ```
+    designGraph.platform.id is "<PLATFORM_ID>", but this project's Outcomes
+    are all on "<P>". Design them on "<P>" and save functionalGraph.platform
+    = "<P>" in .breeze.json? (y/n)
+    ```
+    In auto mode, take yes and log the line. Yes → set `PLATFORM_KEY = P`
+    and write `functionalGraph.platform: "<P>"` into `.breeze.json` (keep
+    every other key; `PLATFORM_ID` still names the registries, output dir
+    and checkpoint). No → STOP (message below).
+  - Otherwise → STOP (message below).
 - `PLATFORM_KEY` null and outcomes on **more than one** platform → STOP
   (message below).
 - `PLATFORM_KEY` null and one platform → set `PLATFORM_KEY` to it.
@@ -443,7 +457,8 @@ For the current persona in `allowedPersonas`:
    defaults to 10 per page and one call silently drops the rest). If a page
    fails, retry it; never queue a partial outcome list.
 2. For each outcome take `platform = platformKey(outcome.platform)` (a
-   missing or blank platform is `"default"`).
+   missing or blank platform is `"default"`). This is the outcome's
+   `OUTCOME_PLATFORM`: the value of `{{platform}}` for its sub-agent.
 3. **Platform filter (⛔ hard rule):**
    - `PLATFORM_KEY` set → queue only outcomes whose `platform ==
      PLATFORM_KEY`. List the others as **Blocked (other platform)**, like
@@ -546,8 +561,12 @@ Next persona: Admin (2/5)
 If `design-progress.json` exists with in-progress data:
 
 1. Take `PLATFORM_KEY` from the checkpoint's `platformKey` (a checkpoint
-   without it → run the 2a-bis pre-scan first). Find `currentPersonaIndex`
-   — resume from that persona
+   without it → run the 2a-bis pre-scan first). If `.breeze.json` now
+   resolves to a different platform (Step 1, e.g. `functionalGraph.platform`
+   was set after the stop message), ask: `Checkpoint designs "<a>", config
+   now says "<b>". Resume on "<a>" (r) or start fresh on "<b>" (f)?` — in
+   auto mode, start fresh. Find `currentPersonaIndex` — resume from that
+   persona
 2. For the current persona, check `remaining` outcomes. An outcome entry
    without `platform` (checkpoint written by an older plugin) → re-fetch
    that persona's outcomes (Step 3a), fill in `platform`, and re-apply
@@ -601,6 +620,23 @@ All registries are **platform-scoped** when `PLATFORM_ID` is set:
 - Entries with `"id": null` are registered but not yet in the graph:
   include them by name in the bulk payload (create), then write the real
   ID back in blocking gate 5.
+
+**Registry platform check (once, before Step 3):** registries made before
+BREEZEAI-1537 put their placeholder nodes on `PLATFORM_ID` (e.g.
+`source-web`), not the Outcome platform. Reusing them would re-create every
+component and page on `PLATFORM_KEY` (the backend dedups by name +
+platform) and leave the old ones behind. Take up to 5 entries with a
+non-null `id` from the component registry (and from the page registry when
+set), call `Get_Design_Nodes_By_Label(uuid, label: "Component" | "Page",
+filters: {"id": {"$in": [...]}})`, and compare `platformKey(node.platform)`
+with `PLATFORM_KEY`. Any mismatch → STOP:
+```
+The component/page registry was built on platform "<found>", but this run
+designs on "<PLATFORM_KEY>". Re-run /breeze:generate-component-registry
+(and /breeze:generate-page-registry) so the registry nodes sit on
+"<PLATFORM_KEY>", then run this skill again.
+```
+No returned node (ids not in the graph yet) → nothing to check.
 
 > **⛔ Component registry is REQUIRED.** The sub-agent selects
 > components from the registry — it does not classify from scratch.

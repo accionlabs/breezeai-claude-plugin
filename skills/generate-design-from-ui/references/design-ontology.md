@@ -95,7 +95,7 @@ When a parent is deleted, shared children are NOT cascade-deleted:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Name of the user journey |
-| `platform` | string | No | Scope — which product/deployment (e.g. "customer portal"). Part of uniqueness key. Backend normalises to trimmed lowercase. Defaults to "default" |
+| `platform` | string | No | Scope — which product/deployment (e.g. "customer portal"). Set it to the Scenario's Outcome's platform; the backend overrides it with that platform. **Not** part of the UserJourney key (unique by `projectUuid + scenarioId`). Backend normalises to trimmed lowercase. Defaults to "default" |
 | `description` | string | No | Description |
 | `scenarioId` | string | Yes | Linked functional Scenario ID |
 | `citations` | object[] | No | Per-node citations. Merged with top-level citations. Each: `{"type": "document\|exDoc\|figma\|jira\|confluence\|code\|prompt", "name"?, "inputText"?, "reference"?}` |
