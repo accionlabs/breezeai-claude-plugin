@@ -122,13 +122,32 @@ reads actual code for accurate component discovery.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `id` | Yes (multi-platform) | Unique slug for this platform. Used to scope registry files, output dirs, and checkpoint. |
-| `suffix` | Yes (multi-platform) | Appended to every design node name before upserting. Supplementary visual indicator — the backend now deduplicates by `projectUuid + name + platform`, so the `platform` field is the primary isolation mechanism. |
+| `suffix` | Yes (multi-platform) | Appended to every design node name before upserting. Supplementary visual indicator — the backend deduplicates Flows, Pages and Components by `projectUuid + name + platform`, so the `platform` field is the primary isolation mechanism. |
 | `personas` | Yes (multi-platform) | Persona names that belong to THIS platform. Only outcomes from these personas are processed. Outcomes from other personas are excluded — they belong to another platform's design graph. |
 
 - If `designGraph.platform` exists → set `PLATFORM_ID`, `APP_SUFFIX`,
   and `PLATFORM_PERSONAS`.
 - If absent → set `PLATFORM_ID = ""`, `APP_SUFFIX = ""`,
   `PLATFORM_PERSONAS = null` (no filtering — single-platform project).
+- Resolve the **target Outcome platform** the same way the functional
+  skills wrote it: `PLATFORM_KEY = platformKey(functionalGraph.platform ??
+  designGraph.platform.id)` when either is set, else `null`. If both are
+  set and differ after `platformKey`, warn once:
+  `functionalGraph.platform ("<a>") and designGraph.platform.id ("<b>")
+  differ — designing outcomes on "<a>"; PLATFORM_ID "<b>" still names the
+  registries and output dir.`
+  `platformKey(x)` is the backend's canonical form: trim, lowercase,
+  blank/missing → `"default"`. Compare platforms ONLY through
+  `platformKey` — `"Web"`, `" web"` and `"web"` are one platform.
+
+> **⛔ Design nodes go on the Outcome's platform (BREEZEAI-1537).** A
+> UserJourney is unique per `projectUuid + scenarioId` and the backend
+> places it — and its Flows, Pages and Components — on its Scenario's
+> **Outcome's** platform, whatever the payload says. `PLATFORM_ID` is the
+> config slug for registries, output dirs and the checkpoint; the
+> `platform` written on nodes is the Outcome's (`OUTCOME_PLATFORM`, Step
+> 3a). Outcomes on another platform than `PLATFORM_KEY` are skipped, never
+> designed under this config.
 
 > **Why platform isolation matters:** A single Breeze project may host
 > design graphs for multiple applications (e.g., customer portal + admin
@@ -146,11 +165,13 @@ reads actual code for accurate component discovery.
 >
 > The `platform` config prevents ALL of these by:
 > 1. **Name suffixing** — `APP_SUFFIX` makes names unique across platforms
-> 2. **Persona scoping** — only outcomes from `PLATFORM_PERSONAS` are queued
+> 2. **Persona + outcome scoping** — only outcomes from `PLATFORM_PERSONAS`
+>    whose Outcome platform is `PLATFORM_KEY` are queued
 > 3. **Registry scoping** — each platform gets its own registry files
 > 4. **Output scoping** — each platform gets its own output dir and checkpoint
 > 5. **MCP query filtering** — sub-agents filter results by suffix before reusing
-> 6. **Reconciliation scoping** — only merges nodes with matching suffix
+> 6. **Reconciliation scoping** — only merges nodes on this run's platform
+>    (grouped by `platform`, and by suffix when one is set)
 
 > **Parameter naming hint:** All Breeze MCP tools require the project ID
 > parameter to be named **`uuid`** (NOT `projectId`, `projectid`, or
@@ -303,8 +324,9 @@ Look for `{OUTPUT_BASE}/design-progress.json`.
 
 > **HARD STOP: Build this BEFORE any processing.**
 >
-> Only fetch the **persona list** here — NOT all outcomes for all
-> personas. Outcomes are fetched one persona at a time in Step 3.
+> Fetch the **persona list** and, in 2a-bis, only the **outcome lists**
+> (ids, names, platforms) — no scenarios, steps or actions. Scenario work
+> still happens one persona at a time in Step 3.
 
 1. Call `Get_all_personas(uuid: "<projectUuid>")`
 2. Classify each persona into one of three buckets:
@@ -324,6 +346,33 @@ Look for `{OUTPUT_BASE}/design-progress.json`.
      Blocked (non-human): {names} ({N})
      Blocked (cross-platform): {names} ({N})
    ```
+
+### 2a-bis. Platform pre-scan (before anything is written)
+
+For every allowed persona, call `Get_all_outcomes_for_a_persona_id` and
+page until `total` (outcome ids, names and `platform` only). Compute
+`platformKey(outcome.platform)` for each and decide the run's platform
+**now**, so the run never stops halfway:
+
+- `PLATFORM_KEY` set and **no** outcome on it → STOP (message below).
+- `PLATFORM_KEY` null and outcomes on **more than one** platform → STOP
+  (message below).
+- `PLATFORM_KEY` null and one platform → set `PLATFORM_KEY` to it.
+
+Cache the lists; Step 3a reuses them instead of fetching again. Stop
+message (fill in the platforms found and their outcome counts):
+```
+No single design platform for this run.
+  Configured: {PLATFORM_KEY or "none"}
+  Outcome platforms found: {platform: count, ...}
+Fix (preferred): give these Outcomes the platform this app's design uses —
+  edit the Outcome's platform in Breeze (or re-run generate-functional with
+  functionalGraph.platform set); the backend moves existing journeys with it.
+Or: set functionalGraph.platform in .breeze.json to one of the platforms
+  above (one run per platform). Changing designGraph.platform.id renames the
+  output dir, checkpoint and registry files (existingcomponents.<id>.json) —
+  regenerate the registry after it.
+```
 
 ### 2b. Show processing plan to user
 
@@ -351,6 +400,7 @@ Write `{OUTPUT_BASE}/design-progress.json`:
   "project": "<repo name>",
   "projectUuid": "<uuid>",
   "platformId": "<platform slug or empty>",
+  "platformKey": "<the Outcome platform settled in 2a-bis, e.g. web>",
   "appSuffix": "<suffix or empty>",
   "platformPersonas": ["End User", "Admin"],
   "framework": "<framework>",
@@ -387,25 +437,43 @@ Write `{OUTPUT_BASE}/design-progress.json`:
 
 For the current persona in `allowedPersonas`:
 
-1. Call `Get_all_outcomes_for_a_persona_id(uuid, personaId)`
-2. Build the persona's outcome queue (no scenario data needed):
+1. Take this persona's outcomes from the 2a-bis pre-scan (or, on resume,
+   call `Get_all_outcomes_for_a_persona_id(uuid, personaId)` and **page
+   until `total`** — Pagination Rule in `references/mcp-tools.md`; the tool
+   defaults to 10 per page and one call silently drops the rest). If a page
+   fails, retry it; never queue a partial outcome list.
+2. For each outcome take `platform = platformKey(outcome.platform)` (a
+   missing or blank platform is `"default"`).
+3. **Platform filter (⛔ hard rule):**
+   - `PLATFORM_KEY` set → queue only outcomes whose `platform ==
+     PLATFORM_KEY`. List the others as **Blocked (other platform)**, like
+     blocked personas, with their platform. If this persona has outcomes but
+     none match, log it and move to the next persona.
+   - (`PLATFORM_KEY` is always set here: 2a-bis resolved it or stopped.)
+     Never let two platforms share registries, an output dir or
+     reconciliation.
+4. Build the persona's outcome queue (no scenario data needed), keeping
+   each outcome's platform:
 
 ```json
 {
   "personaId": "...",
   "personaName": "End User",
   "outcomes": [
-    { "outcomeId": "...", "outcomeName": "Authentication" },
-    { "outcomeId": "...", "outcomeName": "Search" }
+    { "outcomeId": "...", "outcomeName": "Authentication", "platform": "web" },
+    { "outcomeId": "...", "outcomeName": "Search", "platform": "web" }
+  ],
+  "blockedOtherPlatform": [
+    { "outcomeId": "...", "outcomeName": "Mobile Login", "platform": "mobile" }
   ]
 }
 ```
 
-3. Update checkpoint with this persona's outcomes (all `pending`)
-4. Log:
+5. Update checkpoint with this persona's outcomes (all `pending`)
+6. Log:
    ```
    Persona: End User
-     Outcomes: {N}
+     Outcomes: {N} (blocked, other platform: {M})
      Processing in batches of 5...
    ```
 
@@ -477,8 +545,13 @@ Next persona: Admin (2/5)
 
 If `design-progress.json` exists with in-progress data:
 
-1. Find `currentPersonaIndex` — resume from that persona
-2. For the current persona, check `remaining` outcomes
+1. Take `PLATFORM_KEY` from the checkpoint's `platformKey` (a checkpoint
+   without it → run the 2a-bis pre-scan first). Find `currentPersonaIndex`
+   — resume from that persona
+2. For the current persona, check `remaining` outcomes. An outcome entry
+   without `platform` (checkpoint written by an older plugin) → re-fetch
+   that persona's outcomes (Step 3a), fill in `platform`, and re-apply
+   the platform filter before dispatching it.
 3. For partially processed outcomes (status = `PARTIAL` or `BUDGET`),
    the sub-agent's outcome file tracks which scenarios are pending —
    on resume the new sub-agent fetches all scenarios but only processes
@@ -544,7 +617,7 @@ Read `references/design-structuring-agent.prompt.md` and substitute:
 | `{{outcome_name}}` | outcome name |
 | `{{persona_name}}` | persona name |
 | `{{persona_id}}` | persona UUID |
-| `{{platform}}` | `PLATFORM_ID` value (e.g., `"source-web"` or `""`) |
+| `{{platform}}` | the queued outcome's `platform` (`OUTCOME_PLATFORM`, already canonical, e.g. `"web"`) — written on every node. **Not** `PLATFORM_ID`. |
 | `{{page}}` | Page number for scenario pagination (default `1`). When a sub-agent returns `HAS_MORE`, re-queue the outcome with `page + 1`. |
 | `{{modalities}}` | comma-separated: `"WEB"` or `"WEB", "MOBILE"` |
 | `{{framework}}` | detected framework from Phase 0a |
@@ -559,7 +632,7 @@ Read `references/design-structuring-agent.prompt.md` and substitute:
 | `{{page_registry_path}}` | absolute path to `existingpages.json`, or `"none"` |
 | `{{mode}}` | `live` or `dry-run` |
 | `{{app_suffix}}` | `APP_SUFFIX` (e.g., `" [Source Web]"` or `""`) |
-| `{{platform_id}}` | `PLATFORM_ID` (e.g., `"source-web"` or `""`) |
+| `{{platform_id}}` | `PLATFORM_ID` (e.g., `"source-web"` or `""`) — registry/output scoping only, never written on nodes |
 
 ### Sub-Agent Response Handling
 
@@ -673,36 +746,38 @@ Resume: /breeze:generate-design-from-ui continue from {uiRepo}
 > **Run AFTER all outcomes complete (or on resume when remaining = 0).**
 
 Since sub-agents run in parallel and independently create design nodes,
-check for edge-case duplicates. The backend deduplicates by
-`projectUuid + name + platform` (case-insensitive), so most cases are handled.
-UserJourneys are keyed by `projectUuid + scenarioId + platform` and are
-never reconciled here.
+check for edge-case duplicates. The backend deduplicates Flows, Pages and
+Components by `projectUuid + name + platform` (case-insensitive), so most
+cases are handled. UserJourneys are unique by `projectUuid + scenarioId`
+(one journey per scenario, on its Outcome's platform) and are never
+reconciled here.
 This catches near-name mismatches across parallel agents.
 
-> **⛔ Platform scoping (critical):** When `APP_SUFFIX` is non-empty,
-> reconciliation MUST only operate on nodes belonging to this platform.
-> After fetching all nodes via `Get_Design_Nodes_By_Label`, **filter to
-> keep only nodes whose name ends with `APP_SUFFIX`** before grouping
-> and merging. Never merge a node from this platform with a node from
-> another platform — that destroys both graphs.
+> **⛔ Platform scoping (critical):** reconciliation MUST only operate on
+> nodes of the platform(s) this run designed. After fetching all nodes via
+> `Get_Design_Nodes_By_Label`, **keep only nodes whose
+> `platformKey(node.platform)` is one of the queued outcomes' platforms**
+> (and, when `APP_SUFFIX` is non-empty, whose name ends with it) before
+> grouping, and **always include `platform` in the group key**. Never
+> merge a node from one platform with a node from another — that destroys
+> both graphs.
 
 ### 4a. Flow Reconciliation
 
 1. `Get_Design_Nodes_By_Label(uuid, label: "Flow")` (paginate)
-2. **Filter:** keep only nodes matching this platform (name ends with
-   `APP_SUFFIX`, or all nodes if `APP_SUFFIX` is empty)
-3. Group by `(name, modality)` — find groups with >1 entry
+2. **Filter:** keep only nodes on this run's platform(s) (see above)
+3. Group by `(platform, name, modality)` — find groups with >1 entry
 4. True duplicates → merge (keep one, reassign edges, delete other)
 5. Near-duplicates → log for user review
 
 ### 4b. Page Reconciliation
 
-Filter to platform, then group by `(name, pageType)`, merge true
-duplicates.
+Filter to platform, then group by `(platform, name, pageType)`, merge
+true duplicates.
 
 ### 4c. Component Reconciliation
 
-Filter to platform, then group by `name`, merge true duplicates.
+Filter to platform, then group by `(platform, name)`, merge true duplicates.
 
 ### 4d. Record Results
 

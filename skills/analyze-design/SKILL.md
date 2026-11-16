@@ -38,9 +38,13 @@ When `APP_SUFFIX` is set:
 - Append it to every design node name before upserting
 - Filter `Get_Design_Nodes_By_Label` / `Design_Graph_Search` results to only
   nodes ending with `APP_SUFFIX`
-- Set `platform` on UserJourney to `PLATFORM_ID` (children inherit)
+- Set `platform` on UserJourney to the target Outcome platform,
+  `platformKey(functionalGraph.platform ?? designGraph.platform.id)`
+  (children inherit; a journey linked to a scenario is placed on its
+  Outcome's platform by the backend anyway)
 
-When absent, omit `platform` (backend defaults to `"default"`).
+When neither is set, omit `platform` (the backend uses the Outcome's, or
+`"default"` for a journey without a scenario).
 
 ### Resolve UI repo (optional but strongly preferred)
 

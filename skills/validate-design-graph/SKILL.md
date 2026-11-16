@@ -28,6 +28,10 @@ Read `designGraph.platform` from `.breeze.json`:
 When `APP_SUFFIX` is set, filter collected design nodes to only those
 whose name ends with `APP_SUFFIX`. Nodes from other platforms are
 excluded from validation — they belong to another platform's graph.
+**Also keep the unfiltered UserJourney list** (Step 2): a scenario is
+allowed one journey on any platform, so the duplicate-scenarioId and
+journey-platform checks need every platform's journeys to see a
+cross-platform duplicate.
 
 ---
 
@@ -119,8 +123,12 @@ Persona filter applied:
   Components: {kept} / {total}
 ```
 
-Combine all (filtered) nodes into a single JSON file and save to
-`design-graph-export.json` in the project root.
+Combine all (filtered) nodes into a single JSON file keyed by label
+(`UserJourney`, `Flow`, `Page`, `Component`) and add **`AllUserJourneys`**:
+every UserJourney of the project, before the suffix/persona filters. Save
+to `design-graph-export.json` in the project root. Only the
+duplicate-scenarioId and journey-platform checks read `AllUserJourneys`;
+every other check uses the filtered `UserJourney` list.
 
 ---
 
@@ -164,7 +172,9 @@ The script performs these checks automatically:
 | **Structural — P0** | | |
 | Empty hierarchy | P0 | UserJourneys with no Flows, Flows with no Pages, Pages with no Components |
 | Missing scenarioId | P0 | UserJourneys without a linked functional Scenario |
-| Duplicate scenarioId | P0 | More than one UserJourney for the same `(scenarioId, platform)` — legacy data from before the backend enforced it |
+| Duplicate scenarioId (`duplicate_scenario_ids`) | P0 | More than one UserJourney for the same `scenarioId` (on any platform, from `AllUserJourneys`) — legacy data |
+| Child platform (`child_platform_mismatch`) | P0 | A Flow/Page/Component not on its parent's platform |
+| Journey platform (`journey_platform_mismatch`) | P0 | A UserJourney not on its Scenario's Outcome's platform, or a scenario under Outcomes on two platforms. Needs `--functional` (skipped, with a note, when the functional graph has no Outcome `platform`) |
 | Invalid enums | P0 | Invalid `modality`, `pageType`, `type`, `layoutType` values |
 | Template compliance | P0 | Pages missing a TEMPLATE component |
 | Dangling parent refs | P0 | Flow's `userJourneyIds` references a UserJourney that doesn't exist, Page's `flowIds` references a missing Flow, Component's `pageIds` references a missing Page |
@@ -242,6 +252,17 @@ Present the validation report in this format:
 
 **Broken Hierarchy Chains**
 {Table of components whose full chain to UserJourney is broken}
+
+**Duplicate scenarioIds** (`duplicate_scenario_ids`)
+{Table: scenarioId, journeys (name, id, platform)}
+
+**Platform mismatches** (`child_platform_mismatch`, `journey_platform_mismatch`)
+{Table: node, platform, expected platform (parent's or Outcome's)}
+
+> Duplicates and platform mismatches are fixed by a system admin with
+> `POST /design-ontology-graph/{uuid}/user-journeys/repair-scenario-links`
+> (merges duplicate journeys, moves nodes to the Outcome's platform,
+> recomputes `isDesignGenerated`); re-run this validation afterwards.
 
 #### Linkage Quality (P1)
 
@@ -429,11 +450,14 @@ UserJourney (1:1 with functional Scenario, scenarioId required)
 - No duplicate IDs in parent/link arrays
 
 **UJ identity:**
-- A UserJourney is keyed by `(projectUuid, scenarioId, platform)`, not by
-  name. UJ names may repeat — two personas may each own a scenario of the
-  same name, and each gets its own UJ. No persona qualifier is needed.
-- More than one UJ for a `(scenarioId, platform)` is legacy data from
-  before the backend enforced this key — keep one, merge or delete the rest.
+- A UserJourney is unique by `(projectUuid, scenarioId)`, not by name, and
+  sits — with its Flows, Pages and Components — on its Scenario's Outcome's
+  platform. UJ names may repeat — two personas may each own a scenario of
+  the same name, and each gets its own UJ. No persona qualifier is needed.
+- More than one UJ for a `scenarioId`, or nodes on the wrong platform, is
+  legacy data — a system admin fixes it with
+  `POST /design-ontology-graph/{uuid}/user-journeys/repair-scenario-links`
+  (merges duplicates, realigns platforms, recomputes flags).
 - Scenario coverage matches human scenarios to UJs by `scenarioId`.
   Uncovered scenarios have no design yet — re-run
   `/breeze:generate-design-from-ui continue`. Scenarios unlinked by the
